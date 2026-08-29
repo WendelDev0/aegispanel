@@ -92,6 +92,7 @@ export interface AppRecord {
   env: Record<string, string>;
   domain?: string;
   webhookSecret?: string;
+  githubToken?: string;
   autoDeploy?: boolean;
   deployBranch?: string;
   status: 'running' | 'stopped' | 'building' | 'error';

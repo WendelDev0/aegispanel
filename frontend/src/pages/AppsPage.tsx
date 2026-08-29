@@ -57,7 +57,10 @@ export const AppsPage: React.FC = () => {
   const [editPort, setEditPort] = useState('');
   const [editInternalPort, setEditInternalPort] = useState('');
   const [editImageName, setEditImageName] = useState('');
+  const [editGitUrl, setEditGitUrl] = useState('');
   const [editBranch, setEditBranch] = useState('');
+  const [editGithubToken, setEditGithubToken] = useState('');
+  const [showTokenEdit, setShowTokenEdit] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
 
   // Env Editor modal
@@ -82,10 +85,12 @@ export const AppsPage: React.FC = () => {
   const [imageName, setImageName] = useState('nginx:alpine');
   const [gitUrl, setGitUrl] = useState('https://github.com/usuario/meu-app.git');
   const [branch, setBranch] = useState('main');
+  const [githubToken, setGithubToken] = useState('');
+  const [showTokenCreate, setShowTokenCreate] = useState(false);
   const [port, setPort] = useState('5000');
-  const [internalPort, setInternalPort] = useState('80');
+  const [internalPort, setInternalPort] = useState('3000');
   const [createDomain, setCreateDomain] = useState('');
-  const [createEnvString, setCreateEnvString] = useState('NODE_ENV=production\nPORT=5000');
+  const [createEnvString, setCreateEnvString] = useState('NODE_ENV=production\nPORT=3000');
   const [submitting, setSubmitting] = useState(false);
 
   const fetchApps = async () => {
@@ -126,6 +131,7 @@ export const AppsPage: React.FC = () => {
         imageName: sourceType === 'image' ? imageName : undefined,
         gitUrl: sourceType === 'git' ? gitUrl : undefined,
         branch: sourceType === 'git' ? branch : undefined,
+        githubToken: sourceType === 'git' && githubToken ? githubToken : undefined,
         port: parseInt(port),
         internalPort: parseInt(internalPort),
         domain: createDomain.trim() || undefined,
@@ -134,6 +140,7 @@ export const AppsPage: React.FC = () => {
 
       setShowCreateModal(false);
       setAppName('');
+      setGithubToken('');
       setCreateDomain('');
       fetchApps();
     } catch (err: any) {
@@ -149,7 +156,9 @@ export const AppsPage: React.FC = () => {
     setEditPort(app.port.toString());
     setEditInternalPort(app.internalPort.toString());
     setEditImageName(app.imageName || '');
+    setEditGitUrl(app.gitUrl || '');
     setEditBranch(app.branch || 'main');
+    setEditGithubToken(app.githubToken || '');
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
@@ -163,7 +172,9 @@ export const AppsPage: React.FC = () => {
         port: parseInt(editPort),
         internalPort: parseInt(editInternalPort || '3000'),
         imageName: editImageName || undefined,
+        gitUrl: editGitUrl || undefined,
         branch: editBranch || undefined,
+        githubToken: editGithubToken || undefined,
       });
 
       setSelectedEditApp(null);
@@ -344,13 +355,13 @@ export const AppsPage: React.FC = () => {
             Aplicações & CI/CD Pipeline (PaaS Dashboard)
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            Controle de ponta a ponta dos seus projetos: deploys automáticos no Git Push, domínios personalizados, SSL e variáveis .env.
+            Controle de ponta a ponta dos seus projetos: repositórios públicos e privados do GitHub, URLs localhost e domínios com SSL.
           </p>
         </div>
 
         <button
           onClick={() => setShowCreateModal(true)}
-          title="Fazer deploy de um novo projeto do GitHub ou Imagem Docker"
+          title="Fazer deploy de um novo projeto do GitHub (Público ou Privado) ou Imagem Docker"
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all active:scale-95 shrink-0"
         >
           <Plus className="w-4 h-4" />
@@ -426,6 +437,11 @@ export const AppsPage: React.FC = () => {
                         {app.sourceType === 'git' ? (
                           <span className="text-[10px] font-mono text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded-md flex items-center gap-1 border border-indigo-500/30">
                             <GitBranch className="w-3 h-3" /> {app.branch || 'main'}
+                            {app.githubToken && (
+                              <span title="Repositório Privado com Token">
+                                <Lock className="w-2.5 h-2.5 text-amber-400" />
+                              </span>
+                            )}
                           </span>
                         ) : (
                           <span className="text-[10px] font-mono text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
@@ -455,12 +471,31 @@ export const AppsPage: React.FC = () => {
                   </span>
                 </div>
 
+                {/* Direct Localhost Open Banner */}
+                <div className="mb-4">
+                  <a
+                    href={`http://localhost:${app.port}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl bg-emerald-950/40 hover:bg-emerald-950/60 text-emerald-300 border border-emerald-500/30 transition-all group"
+                  >
+                    <div className="flex items-center gap-2 text-xs font-mono font-bold">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <span>URL Localhost:</span>
+                      <span className="text-white underline underline-offset-2">http://localhost:{app.port}</span>
+                    </div>
+                    <span className="text-xs flex items-center gap-1 font-sans font-semibold text-emerald-400 group-hover:translate-x-0.5 transition-transform">
+                      Abrir Site &rarr;
+                    </span>
+                  </a>
+                </div>
+
                 {/* Domain & Network Section */}
                 <div className="bg-slate-950/80 rounded-2xl p-4 border border-slate-800/80 space-y-2.5 text-xs font-mono mb-4">
                   {/* Assigned Domain */}
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400 flex items-center gap-1.5">
-                      <Globe className="w-3.5 h-3.5 text-indigo-400" /> Domínio & SSL:
+                      <Globe className="w-3.5 h-3.5 text-indigo-400" /> Domínio Hostinger / SSL:
                     </span>
                     {app.domain ? (
                       <div className="flex items-center gap-2">
@@ -494,7 +529,7 @@ export const AppsPage: React.FC = () => {
 
                   {/* Port Mapping with Edit shortcut */}
                   <div className="flex items-center justify-between text-slate-400">
-                    <span>Porta no Servidor:</span>
+                    <span>Mapeamento de Portas:</span>
                     <div className="flex items-center gap-2">
                       <span className="text-slate-200 font-semibold select-all">
                         Host <strong className="text-emerald-400">:{app.port}</strong> &rarr; Container :{app.internalPort}
@@ -576,7 +611,7 @@ export const AppsPage: React.FC = () => {
                   {/* Edit Config / Port */}
                   <button
                     onClick={() => openEditModal(app)}
-                    title="Editar configurações (Porta, Nome, Imagem)"
+                    title="Editar configurações (Porta, Nome, Imagem, Token GitHub)"
                     className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
                   >
                     <Settings2 className="w-4 h-4" />
@@ -638,11 +673,11 @@ export const AppsPage: React.FC = () => {
       {/* Modal: Editar Configurações & Porta da Aplicação */}
       {selectedEditApp && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-md overflow-hidden shadow-2xl p-6 space-y-4">
+          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-lg overflow-hidden shadow-2xl p-6 space-y-4 max-h-[85vh] overflow-y-auto custom-scrollbar">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Settings2 className="w-5 h-5 text-indigo-400" />
-                <h3 className="font-bold text-white text-base">Editar Configurações: {selectedEditApp.name}</h3>
+                <h3 className="font-bold text-white text-base">Configurações: {selectedEditApp.name}</h3>
               </div>
               <button onClick={() => setSelectedEditApp(null)} className="text-slate-400 hover:text-white">
                 <X className="w-5 h-5" />
@@ -676,7 +711,7 @@ export const AppsPage: React.FC = () => {
                     onChange={(e) => setEditPort(e.target.value)}
                     className="w-full bg-slate-950 border border-emerald-500/40 rounded-xl px-3.5 py-2.5 text-emerald-300 font-mono text-sm focus:outline-none focus:border-emerald-500"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">Use 5000, 5050 ou 8080 para evitar conflito com a porta 3000 do painel.</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Use 5000, 5050 ou 8080.</p>
                 </div>
 
                 <div>
@@ -693,7 +728,62 @@ export const AppsPage: React.FC = () => {
                 </div>
               </div>
 
-              {selectedEditApp.sourceType === 'image' ? (
+              {selectedEditApp.sourceType === 'git' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                      URL do Repositório GitHub
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editGitUrl}
+                      onChange={(e) => setEditGitUrl(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5" /> GitHub Token (PAT para Repositórios Privados)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowTokenEdit(!showTokenEdit)}
+                        className="text-[10px] text-slate-400 hover:text-white"
+                      >
+                        {showTokenEdit ? 'Ocultar' : 'Mostrar'}
+                      </button>
+                    </label>
+                    <input
+                      type={showTokenEdit ? 'text' : 'password'}
+                      placeholder="ghp_seu_token_aqui (necessário para repos privados)"
+                      value={editGithubToken}
+                      onChange={(e) => setEditGithubToken(e.target.value)}
+                      className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-3.5 py-2.5 text-amber-300 font-mono text-xs focus:outline-none focus:border-amber-500"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      💡 Para repositórios privados, crie um token em GitHub &rarr; Settings &rarr; Developer Settings &rarr; Personal Access Tokens (classic) com permissão <code>repo</code>.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                      Branch de Deploy
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editBranch}
+                      onChange={(e) => setEditBranch(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </>
+              )}
+
+              {selectedEditApp.sourceType === 'image' && (
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
                     Imagem Docker *
@@ -703,19 +793,6 @@ export const AppsPage: React.FC = () => {
                     required
                     value={editImageName}
                     onChange={(e) => setEditImageName(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Branch de Deploy
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editBranch}
-                    onChange={(e) => setEditBranch(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
                   />
                 </div>
@@ -1054,8 +1131,8 @@ export const AppsPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Porta no Servidor *
+                  <label className="block text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1.5">
+                    Porta no Host *
                   </label>
                   <input
                     type="number"
@@ -1063,7 +1140,7 @@ export const AppsPage: React.FC = () => {
                     placeholder="5000"
                     value={port}
                     onChange={(e) => setPort(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
+                    className="w-full bg-slate-950 border border-emerald-500/40 rounded-xl px-3.5 py-2.5 text-emerald-300 text-sm focus:outline-none focus:border-emerald-500 font-mono"
                   />
                   <p className="text-[10px] text-slate-500 mt-1">Recomendado: 5000, 5050 ou 8080</p>
                 </div>
@@ -1084,6 +1161,32 @@ export const AppsPage: React.FC = () => {
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
                     />
                   </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5" /> GitHub Token (Para Repositórios Privados)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowTokenCreate(!showTokenCreate)}
+                        className="text-[10px] text-slate-400 hover:text-white"
+                      >
+                        {showTokenCreate ? 'Ocultar' : 'Mostrar'}
+                      </button>
+                    </label>
+                    <input
+                      type={showTokenCreate ? 'text' : 'password'}
+                      placeholder="ghp_seu_token_aqui (apenas se o repositório for PRIVADO)"
+                      value={githubToken}
+                      onChange={(e) => setGithubToken(e.target.value)}
+                      className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-3.5 py-2.5 text-amber-300 font-mono text-xs focus:outline-none focus:border-amber-500"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      💡 Se seu repositório for privado no GitHub, cole aqui o Personal Access Token (PAT).
+                    </p>
+                  </div>
+
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
                       Branch de Deploy
@@ -1132,7 +1235,7 @@ export const AppsPage: React.FC = () => {
                 </label>
                 <textarea
                   rows={3}
-                  placeholder="CHAVE=VALOR&#10;PORT=5000"
+                  placeholder="CHAVE=VALOR&#10;PORT=3000"
                   value={createEnvString}
                   onChange={(e) => setCreateEnvString(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-xs font-mono focus:outline-none focus:border-indigo-500"

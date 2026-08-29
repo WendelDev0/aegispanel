@@ -17,7 +17,7 @@ appRouter.get('/', (req: Request, res: Response) => {
 
 appRouter.post('/', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { name, sourceType, gitUrl, branch, imageName, port, internalPort, env, domain } = req.body;
+    const { name, sourceType, gitUrl, branch, imageName, port, internalPort, env, domain, githubToken } = req.body;
     if (!name || !port) {
       res.status(400).json({ error: 'Nome e porta são obrigatórios' });
       return;
@@ -35,6 +35,11 @@ appRouter.post('/', async (req: Request, res: Response): Promise<void> => {
       domain,
     });
 
+    if (githubToken) {
+      created.githubToken = githubToken;
+      dbStorage.saveApp(created);
+    }
+
     // Create initial deployment record and attempt container spawn
     await CicdService.executeDeploy(created, {
       commitMessage: 'Initial Deployment Setup',
@@ -47,7 +52,7 @@ appRouter.post('/', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-// Update Full App Settings (Port, Name, Image, Branch, etc.)
+// Update Full App Settings (Port, Name, Image, Branch, GitHub Token, etc.)
 appRouter.put('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     const app = dbStorage.getAppById(req.params.id);
@@ -56,19 +61,20 @@ appRouter.put('/:id', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const { name, port, internalPort, imageName, gitUrl, branch, domain } = req.body;
+    const { name, port, internalPort, imageName, gitUrl, branch, domain, githubToken } = req.body;
     if (name) app.name = name;
     if (port) app.port = parseInt(port);
     if (internalPort) app.internalPort = parseInt(internalPort);
     if (imageName) app.imageName = imageName;
     if (gitUrl) app.gitUrl = gitUrl;
     if (branch) app.branch = branch;
+    if (githubToken !== undefined) app.githubToken = githubToken;
     if (domain !== undefined) app.domain = domain ? domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '') : undefined;
 
     app.updatedAt = new Date().toISOString();
     dbStorage.saveApp(app);
 
-    // Redeploy with new port/image
+    // Redeploy with new port/image/token
     try {
       await CicdService.executeDeploy(app, {
         commitMessage: `Configurações atualizadas (Porta :${app.port})`,
