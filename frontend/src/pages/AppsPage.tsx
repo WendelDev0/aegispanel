@@ -33,7 +33,13 @@ import {
   FolderTree,
   Settings2,
   GitCommit,
-  User
+  User,
+  Folder,
+  FolderOpen,
+  File,
+  Save,
+  ChevronRight,
+  ArrowLeft
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { AppRecord, DeploymentRecord } from '../types/index.js';
@@ -74,6 +80,17 @@ export const AppsPage: React.FC = () => {
   const [selectedDomainApp, setSelectedDomainApp] = useState<AppRecord | null>(null);
   const [domainInput, setDomainInput] = useState('');
   const [savingDomain, setSavingDomain] = useState(false);
+
+  // File Explorer Modal State
+  const [selectedFileApp, setSelectedFileApp] = useState<AppRecord | null>(null);
+  const [currentSubPath, setCurrentSubPath] = useState('');
+  const [appFiles, setAppFiles] = useState<Array<{ name: string; path: string; isDirectory: boolean; sizeBytes: number; modifiedAt: string; extension?: string }>>([]);
+  const [selectedFileContent, setSelectedFileContent] = useState<{ filename: string; path: string; content: string; sizeBytes: number } | null>(null);
+  const [fileContentDraft, setFileContentDraft] = useState('');
+  const [savingFile, setSavingFile] = useState(false);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [fileFilterSearch, setFileFilterSearch] = useState('');
+  const [copiedFileCode, setCopiedFileCode] = useState(false);
 
   const [logsText, setLogsText] = useState('');
   const [logsLoading, setLogsLoading] = useState(false);
@@ -265,10 +282,63 @@ export const AppsPage: React.FC = () => {
     }
   };
 
+  const openFilesModal = async (app: AppRecord, subPath = '') => {
+    setSelectedFileApp(app);
+    setCurrentSubPath(subPath);
+    setSelectedFileContent(null);
+    setFileFilterSearch('');
+    try {
+      setLoadingFiles(true);
+      const res = await api.get(`/apps/${app.id}/files`, { params: { subPath } });
+      setAppFiles(res.data.items || []);
+    } catch (err: any) {
+      alert('Erro ao listar arquivos da aplicação: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  const handleOpenFileContent = async (app: AppRecord, filePath: string) => {
+    try {
+      setLoadingFiles(true);
+      const res = await api.get(`/apps/${app.id}/files/content`, { params: { filePath } });
+      setSelectedFileContent(res.data);
+      setFileContentDraft(res.data.content);
+    } catch (err: any) {
+      alert('Erro ao ler arquivo: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  const handleSaveFileContent = async () => {
+    if (!selectedFileApp || !selectedFileContent) return;
+    try {
+      setSavingFile(true);
+      await api.put(`/apps/${selectedFileApp.id}/files/content`, {
+        filePath: selectedFileContent.path,
+        content: fileContentDraft,
+      });
+      alert('✅ Arquivo salvo com sucesso!');
+      setSelectedFileContent(prev => prev ? { ...prev, content: fileContentDraft } : null);
+    } catch (err: any) {
+      alert('Erro ao salvar arquivo: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setSavingFile(false);
+    }
+  };
+
+  const handleCopyFileCode = () => {
+    if (!fileContentDraft) return;
+    navigator.clipboard.writeText(fileContentDraft);
+    setCopiedFileCode(true);
+    setTimeout(() => setCopiedFileCode(false), 2000);
+  };
+
   const openWorkflowModal = async (app: AppRecord) => {
     setSelectedWorkflowApp(app);
     try {
-      const res = await api.get(`/apps/${app.id}/github-workflow`);
+      const res = await api.get(`/apps/${app.id}/workflow`);
       setWorkflowYaml(res.data.yaml);
     } catch (err: any) {
       alert('Erro ao gerar workflow: ' + err.message);
@@ -639,6 +709,16 @@ export const AppsPage: React.FC = () => {
                     className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
                   >
                     <Settings2 className="w-4 h-4" />
+                  </button>
+
+                  {/* View Files Explorer Button */}
+                  <button
+                    onClick={() => openFilesModal(app)}
+                    title="Explorar e editar arquivos do código-fonte da aplicação"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors"
+                  >
+                    <FolderTree className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Arquivos</span>
                   </button>
 
                   {/* Start / Stop */}
@@ -1315,6 +1395,211 @@ export const AppsPage: React.FC = () => {
 
             <div className="p-5 flex-1 overflow-auto font-mono text-xs text-emerald-300 bg-black/90 whitespace-pre-wrap leading-relaxed custom-scrollbar">
               {logsLoading ? 'Carregando logs...' : logsText}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Application File Explorer & Code Editor */}
+      {selectedFileApp && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#0b0f19] rounded-3xl border border-slate-800 w-full max-w-5xl h-[85vh] overflow-hidden shadow-2xl flex flex-col">
+            {/* Header */}
+            <div className="p-4 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400">
+                  <FolderTree className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base flex items-center gap-2">
+                    <span>Arquivos da Aplicação: {selectedFileApp.name}</span>
+                    <span className="text-[10px] font-mono text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded border border-indigo-500/30">
+                      {selectedFileApp.branch || 'main'}
+                    </span>
+                  </h3>
+                  {/* Breadcrumbs */}
+                  <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono mt-0.5">
+                    <button
+                      onClick={() => openFilesModal(selectedFileApp, '')}
+                      className="hover:text-white underline"
+                    >
+                      raiz
+                    </button>
+                    {currentSubPath &&
+                      currentSubPath.split('/').map((seg, idx, arr) => {
+                        const sub = arr.slice(0, idx + 1).join('/');
+                        return (
+                          <React.Fragment key={sub}>
+                            <ChevronRight className="w-3 h-3 text-slate-600" />
+                            <button
+                              onClick={() => openFilesModal(selectedFileApp, sub)}
+                              className="hover:text-white underline"
+                            >
+                              {seg}
+                            </button>
+                          </React.Fragment>
+                        );
+                      })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => openFilesModal(selectedFileApp, currentSubPath)}
+                  title="Atualizar lista de arquivos"
+                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loadingFiles ? 'animate-spin text-amber-400' : ''}`} />
+                </button>
+                <button
+                  onClick={() => setSelectedFileApp(null)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Split Pane: Sidebar File Tree & Main Code Editor */}
+            <div className="flex-1 flex overflow-hidden">
+              {/* Left Column: Files & Directories */}
+              <div className="w-72 bg-slate-950/90 border-r border-slate-800 flex flex-col">
+                {/* Search in files */}
+                <div className="p-3 border-b border-slate-800/80">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Buscar arquivo..."
+                      value={fileFilterSearch}
+                      onChange={(e) => setFileFilterSearch(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500 font-mono"
+                    />
+                  </div>
+                </div>
+
+                {/* Back button if inside subfolder */}
+                {currentSubPath && (
+                  <button
+                    onClick={() => {
+                      const parent = currentSubPath.split('/').slice(0, -1).join('/');
+                      openFilesModal(selectedFileApp, parent);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2.5 text-xs font-mono text-amber-400 hover:bg-slate-900 border-b border-slate-800/60 transition-colors text-left"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" /> .. (Voltar pasta)
+                  </button>
+                )}
+
+                {/* File list */}
+                <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
+                  {loadingFiles && appFiles.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-500">
+                      <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-2 text-amber-400" />
+                      Carregando arquivos...
+                    </div>
+                  ) : appFiles.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-500">
+                      Nenhum arquivo encontrado após o deploy.
+                    </div>
+                  ) : (
+                    appFiles
+                      .filter((f) => f.name.toLowerCase().includes(fileFilterSearch.toLowerCase()))
+                      .map((f) => {
+                        const isSelected = selectedFileContent?.path === f.path;
+                        return (
+                          <div
+                            key={f.path}
+                            onClick={() => {
+                              if (f.isDirectory) {
+                                openFilesModal(selectedFileApp, f.path);
+                              } else {
+                                handleOpenFileContent(selectedFileApp, f.path);
+                              }
+                            }}
+                            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-mono cursor-pointer transition-all ${
+                              isSelected
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold'
+                                : f.isDirectory
+                                ? 'text-slate-200 hover:bg-slate-900 hover:text-white'
+                                : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 truncate">
+                              {f.isDirectory ? (
+                                <Folder className="w-4 h-4 text-amber-400 shrink-0" />
+                              ) : (
+                                <File className="w-4 h-4 text-indigo-400 shrink-0" />
+                              )}
+                              <span className="truncate">{f.name}</span>
+                            </div>
+                            {!f.isDirectory && f.sizeBytes > 0 && (
+                              <span className="text-[10px] text-slate-600 shrink-0 ml-1">
+                                {(f.sizeBytes / 1024).toFixed(1)}k
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: Code Viewer / Editor */}
+              <div className="flex-1 bg-[#090d16] flex flex-col overflow-hidden">
+                {selectedFileContent ? (
+                  <>
+                    {/* Toolbar */}
+                    <div className="p-3 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-mono text-slate-300 truncate">
+                        <File className="w-4 h-4 text-indigo-400 shrink-0" />
+                        <span className="font-bold text-white">{selectedFileContent.path}</span>
+                        <span className="text-[11px] text-slate-500">
+                          ({(selectedFileContent.sizeBytes / 1024).toFixed(2)} KB)
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={handleCopyFileCode}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono transition-colors"
+                        >
+                          {copiedFileCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedFileCode ? 'Copiado!' : 'Copiar'}</span>
+                        </button>
+
+                        <button
+                          onClick={handleSaveFileContent}
+                          disabled={savingFile}
+                          className="flex items-center gap-1 px-4 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 transition-all disabled:opacity-50"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          <span>{savingFile ? 'Salvando...' : 'Salvar Alterações'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Code Editor */}
+                    <div className="flex-1 p-4 overflow-auto">
+                      <textarea
+                        value={fileContentDraft}
+                        onChange={(e) => setFileContentDraft(e.target.value)}
+                        spellCheck={false}
+                        className="w-full h-full bg-transparent text-emerald-300 font-mono text-xs leading-relaxed focus:outline-none resize-none selection:bg-indigo-500/40 custom-scrollbar"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-500">
+                    <FolderTree className="w-12 h-12 text-slate-700 mb-3" />
+                    <h4 className="font-bold text-white text-sm mb-1">Nenhum arquivo selecionado</h4>
+                    <p className="text-xs text-slate-400 max-w-sm">
+                      Navegue pelas pastas à esquerda e clique em qualquer arquivo de código-fonte (HTML, JS, TS, JSON, .env) para visualizar e editar.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

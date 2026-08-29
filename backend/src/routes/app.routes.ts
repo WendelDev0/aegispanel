@@ -1,9 +1,12 @@
 import { Router, Request, Response } from 'express';
+import fs from 'fs';
+import path from 'path';
 import { AppService } from '../services/app.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { CicdService } from '../services/cicd.service.js';
 import { CaddyService } from '../services/caddy.service.js';
 import { dbStorage } from '../db/storage.js';
+import { CONFIG } from '../config.js';
 import { authMiddleware } from './auth.routes.js';
 
 export const appRouter = Router();
@@ -80,18 +83,26 @@ appRouter.put('/:id', async (req: Request, res: Response): Promise<void> => {
         commitMessage: `Configurações atualizadas (Porta :${app.port})`,
         triggeredBy: 'manual',
       });
-    } catch (deployErr: any) {
-      console.warn('Redeploy warning after update:', deployErr.message);
+    } catch {
+      // ignore
     }
 
-    await CaddyService.syncCaddyfile();
-    res.json({ success: true, app });
+    res.json(app);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Update App Environment Variables (.env)
+// Manage .env Variables
+appRouter.get('/:id/env', (req: Request, res: Response): void => {
+  const app = dbStorage.getAppById(req.params.id);
+  if (!app) {
+    res.status(404).json({ error: 'App não encontrado' });
+    return;
+  }
+  res.json({ env: app.env || {} });
+});
+
 appRouter.put('/:id/env', async (req: Request, res: Response): Promise<void> => {
   try {
     const app = dbStorage.getAppById(req.params.id);
@@ -101,16 +112,23 @@ appRouter.put('/:id/env', async (req: Request, res: Response): Promise<void> => 
     }
 
     const { env } = req.body;
-    app.env = env || {};
+    if (typeof env !== 'object' || env === null) {
+      res.status(400).json({ error: 'O campo env deve ser um objeto chave-valor' });
+      return;
+    }
+
+    app.env = env;
     app.updatedAt = new Date().toISOString();
     dbStorage.saveApp(app);
 
-    // If restart requested
-    if (req.query.redeploy === 'true') {
+    // Trigger auto-redeploy to apply updated env vars into container
+    try {
       await CicdService.executeDeploy(app, {
-        commitMessage: 'Atualização de Variáveis de Ambiente (.env)',
+        commitMessage: 'Variáveis de ambiente (.env) atualizadas via AegisPanel',
         triggeredBy: 'manual',
       });
+    } catch (deployErr: any) {
+      console.warn('Auto-redeploy notice after env change:', deployErr.message);
     }
 
     res.json({ success: true, app });
@@ -119,7 +137,7 @@ appRouter.put('/:id/env', async (req: Request, res: Response): Promise<void> => 
   }
 });
 
-// Update or add Domain / Subdomain to App
+// Update Domain for specific App
 appRouter.put('/:id/domain', async (req: Request, res: Response): Promise<void> => {
   try {
     const app = dbStorage.getAppById(req.params.id);
@@ -129,10 +147,13 @@ appRouter.put('/:id/domain', async (req: Request, res: Response): Promise<void> 
     }
 
     const { domain } = req.body;
-    app.domain = domain ? domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '') : undefined;
+    const cleanDomain = domain ? domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '') : undefined;
+
+    app.domain = cleanDomain;
     app.updatedAt = new Date().toISOString();
     dbStorage.saveApp(app);
 
+    // Sync domains in Caddy
     await CaddyService.syncCaddyfile();
 
     res.json({ success: true, app });
@@ -141,7 +162,13 @@ appRouter.put('/:id/domain', async (req: Request, res: Response): Promise<void> 
   }
 });
 
-// Manual Trigger Deploy (CI/CD)
+// List Deployments History
+appRouter.get('/:id/deployments', (req: Request, res: Response): void => {
+  const deployments = dbStorage.getDeployments(req.params.id);
+  res.json(deployments);
+});
+
+// Trigger Manual Deploy
 appRouter.post('/:id/deploy', async (req: Request, res: Response): Promise<void> => {
   try {
     const app = dbStorage.getAppById(req.params.id);
@@ -151,33 +178,27 @@ appRouter.post('/:id/deploy', async (req: Request, res: Response): Promise<void>
     }
 
     const deployment = await CicdService.executeDeploy(app, {
-      commitMessage: req.body.message || 'Deploy manual disparado pelo painel',
+      commitMessage: req.body.commitMessage || 'Deploy manual disparado pelo painel',
       triggeredBy: 'manual',
     });
 
-    res.json({ success: true, deployment });
+    res.json(deployment);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Get Deployments History
-appRouter.get('/:id/deployments', (req: Request, res: Response) => {
-  const deployments = dbStorage.getDeployments(req.params.id);
-  res.json(deployments);
-});
-
-// Generate GitHub Actions Workflow YAML
-appRouter.get('/:id/github-workflow', (req: Request, res: Response): void => {
+// Generate GitHub Actions Workflow
+appRouter.get('/:id/workflow', (req: Request, res: Response): void => {
   const app = dbStorage.getAppById(req.params.id);
   if (!app) {
     res.status(404).json({ error: 'App não encontrado' });
     return;
   }
 
-  const hostUrl = req.protocol + '://' + req.get('host');
+  const hostUrl = req.protocol + '://' + (req.get('host') || 'localhost:4000');
   const yaml = CicdService.generateGitHubWorkflow(app, hostUrl);
-  res.json({ yaml, branch: app.branch || 'main' });
+  res.json({ yaml });
 });
 
 appRouter.post('/:id/start', async (req: Request, res: Response) => {
@@ -202,6 +223,140 @@ appRouter.post('/:id/restart', async (req: Request, res: Response) => {
   try {
     const updated = await AppService.restartApp(req.params.id);
     res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Application File Explorer: List files
+appRouter.get('/:id/files', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const app = dbStorage.getAppById(req.params.id);
+    if (!app) {
+      res.status(404).json({ error: 'App não encontrado' });
+      return;
+    }
+
+    const subPath = (req.query.subPath as string) || '';
+    const buildsDir = path.join(CONFIG.DATA_DIR, 'builds', app.id);
+    const targetDir = path.resolve(buildsDir, subPath);
+
+    // Security check: path traversal prevention
+    if (!targetDir.startsWith(path.resolve(buildsDir))) {
+      res.status(403).json({ error: 'Acesso negado fora do diretório da aplicação' });
+      return;
+    }
+
+    if (!fs.existsSync(targetDir)) {
+      res.json({ currentPath: subPath, items: [] });
+      return;
+    }
+
+    const entries = fs.readdirSync(targetDir, { withFileTypes: true });
+    const items = entries
+      .filter(e => e.name !== '.git') // skip internal .git
+      .map(entry => {
+        const itemPath = path.join(targetDir, entry.name);
+        const relativePath = path.relative(buildsDir, itemPath).replace(/\\/g, '/');
+        let size = 0;
+        let modifiedAt = new Date().toISOString();
+
+        try {
+          const stat = fs.statSync(itemPath);
+          size = stat.size;
+          modifiedAt = stat.mtime.toISOString();
+        } catch {
+          // ignore
+        }
+
+        return {
+          name: entry.name,
+          path: relativePath,
+          isDirectory: entry.isDirectory(),
+          sizeBytes: size,
+          modifiedAt,
+          extension: entry.name.includes('.') ? entry.name.split('.').pop()?.toLowerCase() : '',
+        };
+      })
+      .sort((a, b) => {
+        if (a.isDirectory && !b.isDirectory) return -1;
+        if (!a.isDirectory && b.isDirectory) return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+    res.json({ currentPath: subPath.replace(/\\/g, '/'), items });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Application File Explorer: Read file content
+appRouter.get('/:id/files/content', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const app = dbStorage.getAppById(req.params.id);
+    if (!app) {
+      res.status(404).json({ error: 'App não encontrado' });
+      return;
+    }
+
+    const filePath = req.query.filePath as string;
+    if (!filePath) {
+      res.status(400).json({ error: 'Parâmetro filePath é obrigatório' });
+      return;
+    }
+
+    const buildsDir = path.join(CONFIG.DATA_DIR, 'builds', app.id);
+    const targetFile = path.resolve(buildsDir, filePath);
+
+    if (!targetFile.startsWith(path.resolve(buildsDir))) {
+      res.status(403).json({ error: 'Acesso negado fora do diretório da aplicação' });
+      return;
+    }
+
+    if (!fs.existsSync(targetFile) || fs.statSync(targetFile).isDirectory()) {
+      res.status(404).json({ error: 'Arquivo não encontrado' });
+      return;
+    }
+
+    const content = fs.readFileSync(targetFile, 'utf-8');
+    const stat = fs.statSync(targetFile);
+
+    res.json({
+      filename: path.basename(targetFile),
+      path: filePath.replace(/\\/g, '/'),
+      content,
+      sizeBytes: stat.size,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Application File Explorer: Edit / Save file content
+appRouter.put('/:id/files/content', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const app = dbStorage.getAppById(req.params.id);
+    if (!app) {
+      res.status(404).json({ error: 'App não encontrado' });
+      return;
+    }
+
+    const { filePath, content } = req.body;
+    if (!filePath || content === undefined) {
+      res.status(400).json({ error: 'Parâmetros filePath e content são obrigatórios' });
+      return;
+    }
+
+    const buildsDir = path.join(CONFIG.DATA_DIR, 'builds', app.id);
+    const targetFile = path.resolve(buildsDir, filePath);
+
+    if (!targetFile.startsWith(path.resolve(buildsDir))) {
+      res.status(403).json({ error: 'Acesso negado fora do diretório da aplicação' });
+      return;
+    }
+
+    fs.writeFileSync(targetFile, content, 'utf-8');
+    res.json({ success: true, message: 'Arquivo salvo com sucesso!' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
