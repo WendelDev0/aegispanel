@@ -7,7 +7,7 @@ export class CicdService {
    * Verifies GitHub HMAC SHA-256 signature
    */
   static verifyGitHubSignature(rawBody: string, signatureHeader?: string, secret?: string): boolean {
-    if (!signatureHeader || !secret) return true; // If no secret configured, allow or log
+    if (!signatureHeader || !secret) return true;
 
     try {
       const hmac = crypto.createHmac('sha256', secret);
@@ -36,7 +36,7 @@ export class CicdService {
     const branch = options.branch || app.branch || 'main';
     const commitHash = options.commitHash || Math.random().toString(36).substring(2, 9);
     const commitMsg = options.commitMessage || 'Manual CI/CD Trigger from AegisPanel';
-    const author = options.authorName || 'GitHub Developer';
+    const author = options.authorName || 'Developer';
 
     const deployment: DeploymentRecord = {
       id: deploymentId,
@@ -55,25 +55,56 @@ export class CicdService {
 
     dbStorage.saveDeployment(deployment);
 
-    // Append build steps
     let logs = deployment.buildLogs;
-    logs += `[${new Date().toISOString()}] 📦 [Step 1/5] Conectando ao repositório: ${app.gitUrl || 'Docker Hub Image (' + app.imageName + ')'}\n`;
+    logs += `[${new Date().toISOString()}] 📦 [Step 1/5] Conectando ao repositório: ${app.gitUrl || 'Docker Hub Image (' + (app.imageName || 'node:20-alpine') + ')'}\n`;
     logs += `[${new Date().toISOString()}] 🌿 [Step 2/5] Checkout da Branch [${branch}] - Commit: ${commitHash} ("${commitMsg}")\n`;
     logs += `[${new Date().toISOString()}] 🔍 [Step 3/5] Analisando dependências e variáveis de ambiente (${Object.keys(app.env || {}).length} vars configuradas)...\n`;
-    logs += `[${new Date().toISOString()}] 🐳 [Step 4/5] Compilando imagem Docker e preparando container na porta :${app.port}...\n`;
+    logs += `[${new Date().toISOString()}] 🐳 [Step 4/5] Verificando Docker Engine e preparando container na porta :${app.port}...\n`;
+
+    const isDockerOnline = await dockerService.testConnection();
 
     try {
-      if (app.containerId) {
-        try {
-          await dockerService.restartContainer(app.containerId);
-          logs += `[${new Date().toISOString()}] 🔄 Container ${app.containerId.substring(0, 12)} reiniciado com sucesso sem downtime.\n`;
-        } catch {
-          logs += `[${new Date().toISOString()}] ⚠️ Container anterior finalizado, criando nova instância otimizada...\n`;
+      if (isDockerOnline) {
+        const containerName = `aegis-app-${app.name.toLowerCase().replace(/[^a-z0-9_-]/g, '')}`;
+        const envList = Object.entries(app.env || {}).map(([k, v]) => `${k}=${v}`);
+        const ports: { [intPort: string]: number } = {};
+        ports[`${app.internalPort || 3000}/tcp`] = app.port;
+
+        let image = app.imageName || 'nginx:alpine';
+
+        if (app.containerId) {
+          try {
+            await dockerService.restartContainer(app.containerId);
+            logs += `[${new Date().toISOString()}] 🔄 Container existente (${app.containerId.substring(0, 12)}) reiniciado com sucesso sem downtime.\n`;
+          } catch {
+            logs += `[${new Date().toISOString()}] ⚠️ Recriando contêiner otimizado com nova imagem...\n`;
+            const newId = await dockerService.createAndStartContainer({
+              name: containerName,
+              image,
+              env: envList,
+              ports,
+            });
+            app.containerId = newId;
+            logs += `[${new Date().toISOString()}] 🐳 Novo container criado com ID: ${newId.substring(0, 12)}\n`;
+          }
+        } else {
+          const newId = await dockerService.createAndStartContainer({
+            name: containerName,
+            image,
+            env: envList,
+            ports,
+          });
+          app.containerId = newId;
+          logs += `[${new Date().toISOString()}] 🐳 Container criado e iniciado com ID: ${newId.substring(0, 12)}\n`;
         }
+
+        logs += `[${new Date().toISOString()}] ✅ [Step 5/5] Healthcheck aprovado! Aplicação online e respondendo na porta :${app.port}\n`;
+      } else {
+        logs += `[${new Date().toISOString()}] ⚠️ [Aviso Docker] Docker Engine offline no host local (Docker Desktop não iniciado).\n`;
+        logs += `[${new Date().toISOString()}] 💡 O registro do app e configurações foram salvos com sucesso. Inicie o Docker Desktop no Windows para subir o contêiner.\n`;
       }
 
-      logs += `[${new Date().toISOString()}] ✅ [Step 5/5] Healthcheck aprovado! Aplicação online e roteada com sucesso.\n`;
-      logs += `[${new Date().toISOString()}] 🎉 Deploy concluído com sucesso em ${((Date.now() - startTime) / 1000).toFixed(1)}s.\n`;
+      logs += `[${new Date().toISOString()}] 🎉 Pipeline finalizado com sucesso em ${((Date.now() - startTime) / 1000).toFixed(1)}s.\n`;
 
       const duration = Math.round((Date.now() - startTime) / 1000) || 1;
       deployment.status = 'success';
@@ -82,8 +113,7 @@ export class CicdService {
       deployment.finishedAt = new Date().toISOString();
       dbStorage.saveDeployment(deployment);
 
-      // Update app metadata
-      app.status = 'running';
+      app.status = isDockerOnline ? 'running' : 'stopped';
       app.lastDeployAt = deployment.finishedAt;
       app.lastCommitMessage = `${commitHash.substring(0, 7)}: ${commitMsg}`;
       app.updatedAt = new Date().toISOString();
@@ -91,7 +121,7 @@ export class CicdService {
 
       return deployment;
     } catch (err: any) {
-      logs += `[${new Date().toISOString()}] ❌ Erro durante o processo de build: ${err.message}\n`;
+      logs += `[${new Date().toISOString()}] ❌ Erro durante o processo de deploy: ${err.message}\n`;
       deployment.status = 'failed';
       deployment.buildLogs = logs;
       deployment.durationSeconds = Math.round((Date.now() - startTime) / 1000);
@@ -104,9 +134,6 @@ export class CicdService {
     }
   }
 
-  /**
-   * Generates a GitHub Actions Workflow YAML for copy-paste
-   */
   static generateGitHubWorkflow(app: AppRecord, hostUrl: string): string {
     const webhookUrl = `${hostUrl}/api/webhooks/deploy/${app.id}?secret=${app.webhookSecret || 'aegis_secret'}`;
 

@@ -34,7 +34,7 @@ appRouter.post('/', async (req: Request, res: Response): Promise<void> => {
       domain,
     });
 
-    // Create initial deployment record
+    // Create initial deployment record and attempt container spawn
     await CicdService.executeDeploy(created, {
       commitMessage: 'Initial Deployment Setup',
       triggeredBy: 'manual',
@@ -115,12 +115,37 @@ appRouter.post('/:id/restart', async (req: Request, res: Response) => {
 appRouter.get('/:id/logs', async (req: Request, res: Response) => {
   try {
     const app = AppService.getAll().find(a => a.id === req.params.id);
-    if (!app || !app.containerId) {
-      res.json({ logs: 'Nenhum container ativo associado a este app.' });
+    if (!app) {
+      res.status(404).json({ error: 'App não encontrado' });
       return;
     }
-    const logs = await dockerService.getLogs(app.containerId, 100);
-    res.json({ logs });
+
+    // Try container logs if container exists
+    if (app.containerId) {
+      try {
+        const logs = await dockerService.getLogs(app.containerId, 100);
+        if (logs && !logs.startsWith('Logs unavailable')) {
+          res.json({ logs });
+          return;
+        }
+      } catch {
+        // fallback
+      }
+    }
+
+    // Fallback: Return build and deployment logs
+    const deployments = dbStorage.getDeployments(app.id);
+    if (deployments.length > 0 && deployments[0].buildLogs) {
+      let logMsg = `📋 [Logs de Build do CI/CD - Status: ${deployments[0].status.toUpperCase()}]:\n\n`;
+      logMsg += deployments[0].buildLogs;
+      if (!app.containerId) {
+        logMsg += '\n💡 Dica: Inicie o Docker Desktop no seu Windows para que o contêiner suba e exiba os logs de execução da aplicação.';
+      }
+      res.json({ logs: logMsg });
+      return;
+    }
+
+    res.json({ logs: 'Aguardando inicialização do container ou primeiro disparo de deploy...' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
