@@ -21,7 +21,10 @@ systemRouter.get('/stats', async (req: Request, res: Response) => {
 });
 
 systemRouter.get('/history', (req: Request, res: Response) => {
-  res.json(SystemService.getMetricsHistory());
+  const range = (req.query.range as string) || 'realtime';
+  const startDate = req.query.startDate as string;
+  const endDate = req.query.endDate as string;
+  res.json(SystemService.getHistoricalMetrics(range, startDate, endDate));
 });
 
 // Run Network Speedtest on Server
