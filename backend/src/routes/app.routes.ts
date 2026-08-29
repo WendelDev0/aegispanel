@@ -64,13 +64,16 @@ appRouter.post('/', async (req: Request, res: Response): Promise<void> => {
       dbStorage.saveApp(created);
     }
 
-    // Create initial deployment record and attempt container spawn
-    await CicdService.executeDeploy(created, {
+    // Return created app immediately so frontend can open live streaming modal instantly
+    res.status(201).json(created);
+
+    // Trigger deploy in background asynchronously
+    CicdService.executeDeploy(created, {
       commitMessage: 'Initial Deployment Setup',
       triggeredBy: 'manual',
-    }).catch(() => {});
-
-    res.status(201).json(created);
+    }).catch((err) => {
+      console.error(`Initial deploy error for app ${created.name}:`, err.message);
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

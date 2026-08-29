@@ -229,7 +229,7 @@ export const AppsPage: React.FC = () => {
         }
       });
 
-      await api.post('/apps', {
+      const res = await api.post('/apps', {
         name: appName,
         sourceType,
         imageName: sourceType === 'image' ? imageName : undefined,
@@ -242,11 +242,23 @@ export const AppsPage: React.FC = () => {
         env: envObj,
       });
 
+      const createdApp = res.data;
       setShowCreateModal(false);
       setAppName('');
       setGithubToken('');
       setCreateDomain('');
+      setInspectionResult(null);
       fetchApps();
+
+      // Instantly open Live Streaming Build Progress Modal
+      setLiveDeployModal({
+        app: createdApp,
+        step: 1,
+        stepName: 'Inicializando Pipeline',
+        logs: `[${new Date().toLocaleTimeString('pt-BR')}] 🚀 Disparando build inicial para "${createdApp.name}"...\n`,
+        percentage: 10,
+        status: 'running',
+      });
     } catch (err: any) {
       alert('Erro ao criar aplicação: ' + (err.response?.data?.error || err.message));
     } finally {
