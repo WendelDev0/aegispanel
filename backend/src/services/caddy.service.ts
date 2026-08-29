@@ -14,7 +14,8 @@ export class CaddyService {
     }
 
     const domains = dbStorage.getDomains();
-    const apps = dbStorage.getApps().filter(a => a.domain && a.status === 'running');
+    // Include ALL apps with domain so SSL certificate is NEVER dropped during rebuilds or restarts
+    const apps = dbStorage.getApps().filter(a => a.domain);
     const adminUser = dbStorage.getUsers()[0];
     const email = (adminUser && adminUser.email && !adminUser.email.endsWith('.internal'))
       ? adminUser.email
@@ -30,32 +31,32 @@ export class CaddyService {
 
     // Direct domain mappings
     for (const d of domains) {
-      if (d.status === 'active') {
-        const cleanDom = d.domain.toLowerCase().trim();
-        if (isLocalDomain(cleanDom)) {
-          content += `${cleanDom} {\n`;
-          content += `  tls internal\n`;
-          content += `  reverse_proxy host.docker.internal:${d.targetPort}\n`;
-          content += `  encode gzip zstd\n`;
-          content += `}\n\n`;
-        } else {
-          content += `${cleanDom} {\n`;
-          content += `  reverse_proxy host.docker.internal:${d.targetPort} 172.17.0.1:${d.targetPort} {\n`;
-          content += `    lb_policy first\n`;
-          content += `    header_up Host {host}\n`;
-          content += `    header_up X-Real-IP {remote_host}\n`;
-          content += `    header_up X-Forwarded-For {remote_host}\n`;
-          content += `    header_up X-Forwarded-Proto {scheme}\n`;
-          content += `  }\n`;
-          content += `  encode gzip zstd\n`;
-          content += `}\n\n`;
-        }
+      const cleanDom = d.domain.toLowerCase().trim();
+      if (!cleanDom) continue;
+
+      if (isLocalDomain(cleanDom)) {
+        content += `${cleanDom} {\n`;
+        content += `  tls internal\n`;
+        content += `  reverse_proxy host.docker.internal:${d.targetPort}\n`;
+        content += `  encode gzip zstd\n`;
+        content += `}\n\n`;
+      } else {
+        content += `${cleanDom} {\n`;
+        content += `  reverse_proxy host.docker.internal:${d.targetPort} 172.17.0.1:${d.targetPort} {\n`;
+        content += `    lb_policy first\n`;
+        content += `    header_up Host {host}\n`;
+        content += `    header_up X-Real-IP {remote_host}\n`;
+        content += `    header_up X-Forwarded-For {remote_host}\n`;
+        content += `    header_up X-Forwarded-Proto {scheme}\n`;
+        content += `  }\n`;
+        content += `  encode gzip zstd\n`;
+        content += `}\n\n`;
       }
     }
 
     // App domain mappings (if not already in domains list)
     for (const app of apps) {
-      if (app.domain && !domains.some(d => d.domain === app.domain)) {
+      if (app.domain && !domains.some(d => d.domain.toLowerCase().trim() === app.domain?.toLowerCase().trim())) {
         const cleanDom = app.domain.toLowerCase().trim();
         if (isLocalDomain(cleanDom)) {
           content += `${cleanDom} {\n`;
