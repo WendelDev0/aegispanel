@@ -10,9 +10,9 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./data/caddy/Caddyfile:/etc/caddy/Caddyfile
-      - ./data/caddy/data:/data
-      - ./data/caddy/config:/config
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile
+      - ./caddy/data:/data
+      - ./caddy/config:/config
     networks:
       - aegis-net
 
@@ -28,11 +28,13 @@ services:
     environment:
       - PORT=4000
       - DATA_DIR=/app/data
+      - CADDY_CONFIG_PATH=/app/caddy/Caddyfile
       - DOCKER_SOCKET=/var/run/docker.sock
       - JWT_SECRET=aegis-secret-key-change-this-in-production
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data:/app/data
+      - ./caddy:/app/caddy
     networks:
       - aegis-net
 

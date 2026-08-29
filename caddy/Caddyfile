@@ -1,0 +1,3 @@
+:80 {
+    respond "AegisPanel Reverse Proxy Active" 200
+}
