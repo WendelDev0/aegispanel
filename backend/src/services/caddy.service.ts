@@ -15,16 +15,18 @@ export class CaddyService {
 
     const domains = dbStorage.getDomains();
     const apps = dbStorage.getApps().filter(a => a.domain && a.status === 'running');
+    const adminUser = dbStorage.getUsers()[0];
+    const email = (adminUser && adminUser.email) ? adminUser.email : 'contato@selvamarketing.com';
 
     let content = `# Aegis Auto-Generated Caddyfile\n`;
-    content += `{\n  # Automatic Let's Encrypt HTTPS\n  auto_https disable_redirects\n}\n\n`;
+    content += `{\n  email ${email}\n}\n\n`;
 
     const isLocalDomain = (dom: string) => {
       const clean = dom.toLowerCase();
       return clean === 'localhost' || clean.endsWith('.localhost') || clean.endsWith('.local') || clean === '127.0.0.1';
     };
 
-    // Direct domain mappings (Handles both HTTP and HTTPS smoothly)
+    // Direct domain mappings
     for (const d of domains) {
       if (d.status === 'active') {
         const cleanDom = d.domain.toLowerCase().trim();
@@ -35,7 +37,7 @@ export class CaddyService {
           content += `  encode gzip zstd\n`;
           content += `}\n\n`;
         } else {
-          content += `http://${cleanDom}, https://${cleanDom} {\n`;
+          content += `${cleanDom} {\n`;
           content += `  reverse_proxy host.docker.internal:${d.targetPort} {\n`;
           content += `    header_up Host {host}\n`;
           content += `    header_up X-Real-IP {remote_host}\n`;
@@ -59,7 +61,7 @@ export class CaddyService {
           content += `  encode gzip zstd\n`;
           content += `}\n\n`;
         } else {
-          content += `http://${cleanDom}, https://${cleanDom} {\n`;
+          content += `${cleanDom} {\n`;
           content += `  reverse_proxy host.docker.internal:${app.port} {\n`;
           content += `    header_up Host {host}\n`;
           content += `    header_up X-Real-IP {remote_host}\n`;

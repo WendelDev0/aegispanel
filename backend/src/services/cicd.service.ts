@@ -151,9 +151,10 @@ COPY package*.json ./
 RUN npm install --legacy-peer-deps || npm install
 COPY . .
 RUN npm run build --if-present
+RUN npm install -g serve
 ENV PORT=${app.internalPort || 3000}
 EXPOSE ${app.internalPort || 3000}
-CMD ["npm", "start"]
+CMD ["sh", "-c", "if [ -d dist ]; then serve -s dist -l ${app.internalPort || 3000}; elif [ -d build ]; then serve -s build -l ${app.internalPort || 3000}; elif grep -q '\"start\"' package.json; then npm start; elif [ -f server.js ]; then node server.js; else node index.js; fi"]
 `;
             fs.writeFileSync(dockerfilePath, autoDockerfile, 'utf-8');
           } else {
