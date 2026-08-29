@@ -6,7 +6,7 @@ import { promisify } from 'util';
 import { dbStorage, DeploymentRecord, AppRecord } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
 import { CaddyService } from './caddy.service.js';
-import { ProjectDetector } from './project-detector.service.js';
+import { ProjectDetector, ProjectInspectionResult } from './project-detector.service.js';
 import { AlertService } from './alert.service.js';
 import { io } from '../server.js';
 import { CONFIG } from '../config.js';
@@ -39,10 +39,66 @@ export class CicdService {
   }
 
   /**
+   * Pre-Deploy Inspector (Vercel Style Auto-Discovery)
+   * Clones a shallow snapshot of the repo to inspect package.json, framework, build commands & commits
+   */
+  static async inspectRepository(options: {
+    gitUrl: string;
+    branch?: string;
+    githubToken?: string;
+  }): Promise<{
+    success: boolean;
+    inspection: ProjectInspectionResult;
+    commit?: { hash: string; message: string; author: string; date: string };
+  }> {
+    const tempDir = path.join(CONFIG.DATA_DIR, 'temp', `inspect-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`);
+    try {
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+
+      let cloneUrl = options.gitUrl.trim();
+      if (options.githubToken && cloneUrl.startsWith('https://github.com/')) {
+        const repoPath = cloneUrl.replace('https://github.com/', '');
+        cloneUrl = `https://${options.githubToken}@github.com/${repoPath}`;
+      }
+
+      const branch = options.branch || 'main';
+      try {
+        await execAsync(`git clone --depth 1 -b ${branch} --single-branch "${cloneUrl}" "${tempDir}"`);
+      } catch {
+        // Fallback: clone default branch
+        await execAsync(`git clone --depth 1 "${cloneUrl}" "${tempDir}"`);
+      }
+
+      let commit: { hash: string; message: string; author: string; date: string } | undefined;
+      try {
+        const { stdout: logOut } = await execAsync('git log -1 --format="%H|%h|%s|%an|%cI"', { cwd: tempDir });
+        if (logOut && logOut.includes('|')) {
+          const [fullHash, shortHash, subject, authName, commitIso] = logOut.trim().split('|');
+          commit = {
+            hash: shortHash || fullHash.substring(0, 7),
+            message: subject,
+            author: authName,
+            date: commitIso,
+          };
+        }
+      } catch {}
+
+      const inspection = ProjectDetector.inspect(tempDir);
+      return { success: true, inspection, commit };
+    } finally {
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch {}
+    }
+  }
+
+  /**
    * Executes a Real CI/CD Build and Deployment pipeline:
    * 1. Clones repository (with PAT support if private)
    * 2. Extracts real Git commit hash, message, author & timestamp
-   * 3. Detects project type and generates optimized Dockerfile
+   * 3. Detects project type and generates optimized multi-stage Dockerfile
    * 4. Builds real Docker image and tags with deployment ID for rollback
    * 5. Spawns and maps container on the requested host port with auto-heal
    */
@@ -164,15 +220,32 @@ export class CicdService {
           // ignore
         }
 
-        // Step 3: Smart Project Detector
+        // Step 3: Smart Project Detector & Dockerfile Validation
         const dockerfilePath = path.join(buildsDir, 'Dockerfile');
         const internalPort = app.internalPort || 3000;
 
-        if (!fs.existsSync(dockerfilePath)) {
-          const detection = ProjectDetector.detect(buildsDir, internalPort);
-          const line = `[${new Date().toISOString()}] ${detection.log}\n[${new Date().toISOString()}] 📦 [Step 3/5] Framework: ${detection.type.toUpperCase()} | Porta Interna: :${internalPort}\n`;
+        let hasGitCommittedDockerfile = false;
+        if (fs.existsSync(dockerfilePath)) {
+          try {
+            const { stdout } = await execAsync('git ls-files Dockerfile', { cwd: buildsDir });
+            hasGitCommittedDockerfile = stdout.trim().length > 0;
+          } catch {
+            hasGitCommittedDockerfile = false;
+          }
+        }
+
+        if (!hasGitCommittedDockerfile) {
+          // If an auto-generated Dockerfile existed from a previous build, delete it to ensure fresh detection
+          if (fs.existsSync(dockerfilePath)) {
+            try {
+              fs.rmSync(dockerfilePath, { force: true });
+            } catch {}
+          }
+
+          const detection = ProjectDetector.inspect(buildsDir, internalPort);
+          const line = `[${new Date().toISOString()}] ${detection.log}\n[${new Date().toISOString()}] 📦 [Step 3/5] Framework: ${detection.frameworkName} | Gerenciador: ${detection.packageManager.toUpperCase()} | Porta Interna: :${internalPort}\n`;
           logs += line;
-          this.emitProgress(app.id, { step: 3, stepName: `Detectado: ${detection.type.toUpperCase()}`, line, status: 'running', percentage: 50 });
+          this.emitProgress(app.id, { step: 3, stepName: `Detectado: ${detection.frameworkName}`, line, status: 'running', percentage: 50 });
 
           if (detection.type === 'static-html') {
             ports[`80/tcp`] = app.port;
@@ -181,9 +254,9 @@ export class CicdService {
 
           fs.writeFileSync(dockerfilePath, detection.dockerfile, 'utf-8');
         } else {
-          const line = `[${new Date().toISOString()}] 🔍 [Step 3/5] Dockerfile nativo do projeto encontrado. Iniciando compilação...\n`;
+          const line = `[${new Date().toISOString()}] 🔍 [Step 3/5] Dockerfile nativo do repositório Git encontrado. Compilando com Dockerfile do desenvolvedor...\n`;
           logs += line;
-          this.emitProgress(app.id, { step: 3, stepName: 'Dockerfile Nativo', line, status: 'running', percentage: 50 });
+          this.emitProgress(app.id, { step: 3, stepName: 'Dockerfile Nativo Git', line, status: 'running', percentage: 50 });
         }
 
         // Step 4: Build Docker Image and tag with version
@@ -194,7 +267,7 @@ export class CicdService {
         try {
           const { stdout: buildOut } = await execAsync(`docker build -t "${buildImageTag}" -t "${versionedTag}" .`, { cwd: buildsDir });
           if (buildOut) {
-            logs += `[Docker Build]\n${buildOut.slice(-1000)}\n`;
+            logs += `[Docker Build]\n${buildOut.slice(-1200)}\n`;
           }
         } catch (dockerBuildErr: any) {
           throw new Error(`Erro ao compilar imagem Docker: ${dockerBuildErr.message}`);

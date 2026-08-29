@@ -39,7 +39,8 @@ import {
   File,
   Save,
   ChevronRight,
-  ArrowLeft
+  ArrowLeft,
+  Sparkles
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { socket } from '../services/socket.js';
@@ -124,6 +125,58 @@ export const AppsPage: React.FC = () => {
   const [createDomain, setCreateDomain] = useState('');
   const [createEnvString, setCreateEnvString] = useState('NODE_ENV=production\nPORT=3000');
   const [submitting, setSubmitting] = useState(false);
+
+  // Pre-Deploy Inspector State (Vercel Style)
+  const [inspectingRepo, setInspectingRepo] = useState(false);
+  const [inspectionResult, setInspectionResult] = useState<{
+    inspection: {
+      type: string;
+      frameworkName: string;
+      packageManager: string;
+      hasDockerfile: boolean;
+      buildCommand: string;
+      outputDir: string;
+      startCommand: string;
+      recommendedPort: number;
+      recommendedInternalPort: number;
+    };
+    commit?: {
+      hash: string;
+      message: string;
+      author: string;
+      date: string;
+    };
+  } | null>(null);
+
+  const handleInspectRepo = async (urlToInspect?: string) => {
+    const targetUrl = urlToInspect || gitUrl;
+    if (!targetUrl || targetUrl.includes('usuario/meu-app')) return;
+
+    try {
+      setInspectingRepo(true);
+      setInspectionResult(null);
+      const res = await api.post('/apps/inspect-repo', {
+        gitUrl: targetUrl.trim(),
+        branch: branch || 'main',
+        githubToken: githubToken || undefined,
+      });
+
+      if (res.data?.success && res.data.inspection) {
+        setInspectionResult(res.data);
+        if (res.data.inspection.recommendedInternalPort) {
+          setInternalPort(res.data.inspection.recommendedInternalPort.toString());
+        }
+        if (!appName || appName.includes('meu-app')) {
+          const cleanName = targetUrl.split('/').pop()?.replace('.git', '') || '';
+          if (cleanName) setAppName(cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, '-'));
+        }
+      }
+    } catch (err: any) {
+      console.warn('Repo inspection notice:', err.message);
+    } finally {
+      setInspectingRepo(false);
+    }
+  };
 
   const fetchApps = async () => {
     try {
@@ -1431,18 +1484,71 @@ export const AppsPage: React.FC = () => {
               {sourceType === 'git' ? (
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                      URL do Repositório GitHub *
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                        URL do Repositório GitHub *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handleInspectRepo()}
+                        disabled={inspectingRepo || !gitUrl || gitUrl.includes('usuario/meu-app')}
+                        className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 transition-colors disabled:opacity-40"
+                      >
+                        <Search className={`w-3.5 h-3.5 ${inspectingRepo ? 'animate-spin' : ''}`} />
+                        <span>{inspectingRepo ? 'Inspecionando...' : 'Auto-Detectar Stack ✨'}</span>
+                      </button>
+                    </div>
                     <input
                       type="text"
                       required
                       placeholder="https://github.com/usuario/meu-projeto.git"
                       value={gitUrl}
                       onChange={(e) => setGitUrl(e.target.value)}
+                      onBlur={() => handleInspectRepo()}
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
                     />
                   </div>
+
+                  {/* Framework Auto-Detection Preview Card (Aegis Style) */}
+                  {inspectingRepo ? (
+                    <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center gap-3 animate-pulse text-xs text-indigo-300">
+                      <RefreshCw className="w-4 h-4 animate-spin text-indigo-400 shrink-0" />
+                      <span>Inspecionando arquivos do repositório e identificando framework...</span>
+                    </div>
+                  ) : inspectionResult ? (
+                    <div className="p-4 rounded-2xl bg-slate-950 border border-indigo-500/40 shadow-inner space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="w-4 h-4 text-amber-400" />
+                          <span className="text-xs font-bold text-white uppercase tracking-wider">Framework Detectado</span>
+                        </div>
+                        <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-[11px] font-bold font-mono">
+                          {inspectionResult.inspection.frameworkName}
+                        </span>
+                      </div>
+
+                      {inspectionResult.commit && (
+                        <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-[11px] font-mono text-slate-300 space-y-1">
+                          <div className="text-slate-400 flex items-center justify-between">
+                            <span>Último commit ({inspectionResult.commit.hash}):</span>
+                            <span>{inspectionResult.commit.author}</span>
+                          </div>
+                          <div className="text-emerald-400 font-semibold truncate">"{inspectionResult.commit.message}"</div>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-400">
+                        <div className="p-2 rounded-xl bg-slate-900/50 border border-slate-800/80">
+                          <span className="text-slate-500 block text-[10px] uppercase">Package Manager</span>
+                          <span className="text-white font-bold">{inspectionResult.inspection.packageManager.toUpperCase()}</span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-slate-900/50 border border-slate-800/80">
+                          <span className="text-slate-500 block text-[10px] uppercase">Comando de Build</span>
+                          <span className="text-white font-bold truncate">{inspectionResult.inspection.buildCommand || 'N/A'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div>
                     <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">

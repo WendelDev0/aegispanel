@@ -18,6 +18,27 @@ appRouter.get('/', (req: Request, res: Response) => {
   res.json(apps);
 });
 
+// Pre-Deploy Repo Inspector (Vercel Style Auto-Discovery)
+appRouter.post('/inspect-repo', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { gitUrl, branch, githubToken } = req.body;
+    if (!gitUrl) {
+      res.status(400).json({ error: 'URL do repositório Git é obrigatória' });
+      return;
+    }
+
+    const result = await CicdService.inspectRepository({
+      gitUrl,
+      branch,
+      githubToken,
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Falha ao inspecionar repositório: ' + err.message });
+  }
+});
+
 appRouter.post('/', async (req: Request, res: Response): Promise<void> => {
   try {
     const { name, sourceType, gitUrl, branch, imageName, port, internalPort, env, domain, githubToken } = req.body;
