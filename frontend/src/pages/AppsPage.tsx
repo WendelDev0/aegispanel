@@ -543,23 +543,29 @@ export const AppsPage: React.FC = () => {
                   </span>
                 </div>
 
-                {/* Direct Localhost Open Banner */}
+                {/* Direct VPS IP + Port Access Banner */}
                 <div className="mb-4">
-                  <a
-                    href={`http://localhost:${app.port}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl bg-emerald-950/40 hover:bg-emerald-950/60 text-emerald-300 border border-emerald-500/30 transition-all group"
-                  >
-                    <div className="flex items-center gap-2 text-xs font-mono font-bold">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                      <span>URL Localhost:</span>
-                      <span className="text-white underline underline-offset-2">http://localhost:{app.port}</span>
-                    </div>
-                    <span className="text-xs flex items-center gap-1 font-sans font-semibold text-emerald-400 group-hover:translate-x-0.5 transition-transform">
-                      Abrir Site &rarr;
-                    </span>
-                  </a>
+                  {(() => {
+                    const currentHost = window.location.hostname || '13.140.41.82';
+                    const directUrl = `http://${currentHost}:${app.port}`;
+                    return (
+                      <a
+                        href={directUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl bg-emerald-950/40 hover:bg-emerald-950/60 text-emerald-300 border border-emerald-500/30 transition-all group shadow-lg"
+                      >
+                        <div className="flex items-center gap-2 text-xs font-mono font-bold">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                          <span className="text-emerald-400">🌐 Acesso Direto (IP:Porta):</span>
+                          <span className="text-white underline underline-offset-2">{directUrl}</span>
+                        </div>
+                        <span className="text-xs flex items-center gap-1 font-sans font-semibold text-emerald-400 group-hover:translate-x-0.5 transition-transform">
+                          Abrir Site &rarr;
+                        </span>
+                      </a>
+                    );
+                  })()}
                 </div>
 
                 {/* Domain & Network Section */}
@@ -1322,15 +1328,18 @@ export const AppsPage: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Domínio / Subdomínio (Hostinger Opcional)
+                  Domínio ou Subdomínio (Opcional)
                 </label>
                 <input
                   type="text"
-                  placeholder="ex: api.meusite.com.br"
+                  placeholder="ex: app.meusite.com.br (pode deixar vazio e vincular depois)"
                   value={createDomain}
                   onChange={(e) => setCreateDomain(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
                 />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  💡 Dica: Você pode fazer o deploy sem domínio, testar pelo link direto <strong>http://IP:Porta</strong> e vincular o domínio da Hostinger depois!
+                </p>
               </div>
 
               <div>
