@@ -200,12 +200,14 @@ export class ProjectDetector {
         ? `RUN yarn install --network-timeout 100000 || yarn install`
         : `RUN npm install --include=dev --legacy-peer-deps || npm install`;
 
-    const buildStep =
+    const rawBuildCmd =
       packageManager === 'pnpm'
-        ? `RUN pnpm run build`
+        ? `pnpm run build`
         : packageManager === 'yarn'
-        ? `RUN yarn build`
-        : `RUN npm run build`;
+        ? `yarn build`
+        : `npm run build`;
+
+    const buildStep = `RUN ${rawBuildCmd}`;
 
     if (type === 'vite' || type === 'astro') {
       dockerfile = `FROM node:20-alpine AS builder
@@ -271,7 +273,7 @@ ENV NODE_ENV=development
 ${installSteps}
 COPY . .
 ENV PATH="/app/node_modules/.bin:$PATH"
-RUN if grep -q '"build"' package.json; then ${buildStep}; fi
+RUN if grep -q '"build"' package.json; then ${rawBuildCmd}; fi
 ENV NODE_ENV=production
 ENV PORT=${internalPort}
 HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://localhost:${internalPort}/ || exit 1
@@ -286,7 +288,7 @@ ENV NODE_ENV=development
 ${installSteps}
 COPY . .
 ENV PATH="/app/node_modules/.bin:$PATH"
-RUN if grep -q '"build"' package.json; then ${buildStep}; fi
+RUN if grep -q '"build"' package.json; then ${rawBuildCmd}; fi
 RUN npm install -g serve
 ENV PORT=${internalPort}
 EXPOSE ${internalPort}
