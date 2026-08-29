@@ -1,7 +1,12 @@
+import fs from 'fs';
+import path from 'path';
 import si from 'systeminformation';
 import os from 'os';
 import http from 'http';
 import https from 'https';
+import { CONFIG } from '../config.js';
+
+let lastDiskSaveTime = 0;
 
 export interface SystemStats {
   cpu: {
@@ -141,17 +146,44 @@ export class SystemService {
     const txMbps = Math.round(((lastNetworkStats.tx_sec * 8) / 1_000_000) * 100) / 100;
 
     // Record history (Brasília Time UTC-3)
-    const nowStr = new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    metricsHistory.push({
+    const nowTimestamp = Date.now();
+    const nowStr = new Date(nowTimestamp).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const point: MetricHistoryPoint = {
       time: nowStr,
       cpu: cpuUsage,
       memory: memUsage,
       disk: diskUsage,
       rxMbps,
       txMbps,
-    });
+    };
+
+    metricsHistory.push(point);
     if (metricsHistory.length > 50) {
       metricsHistory.shift();
+    }
+
+    // Persist to disk periodically (every 30 seconds)
+    try {
+      const metricsFilePath = path.join(CONFIG.DATA_DIR, 'metrics_persistent.json');
+      if (nowTimestamp - lastDiskSaveTime > 30000) {
+        lastDiskSaveTime = nowTimestamp;
+        let persistentList: Array<MetricHistoryPoint & { timestamp: number }> = [];
+        if (fs.existsSync(metricsFilePath)) {
+          try {
+            persistentList = JSON.parse(fs.readFileSync(metricsFilePath, 'utf-8'));
+          } catch {
+            persistentList = [];
+          }
+        }
+        persistentList.push({ ...point, timestamp: nowTimestamp });
+        // Keep max 2000 points (approx 2 weeks of history)
+        if (persistentList.length > 2000) {
+          persistentList = persistentList.slice(-2000);
+        }
+        fs.writeFileSync(metricsFilePath, JSON.stringify(persistentList), 'utf-8');
+      }
+    } catch {
+      // ignore
     }
 
     return {
@@ -195,6 +227,34 @@ export class SystemService {
       return metricsHistory;
     }
 
+    // Try reading real persistent points from disk
+    try {
+      const metricsFilePath = path.join(CONFIG.DATA_DIR, 'metrics_persistent.json');
+      if (fs.existsSync(metricsFilePath)) {
+        const raw = fs.readFileSync(metricsFilePath, 'utf-8');
+        const list: Array<MetricHistoryPoint & { timestamp: number }> = JSON.parse(raw);
+        if (list && list.length > 0) {
+          const now = Date.now();
+          let cutoff = now - 24 * 3600 * 1000;
+          if (range === '2d') cutoff = now - 48 * 3600 * 1000;
+          if (range === '3d') cutoff = now - 72 * 3600 * 1000;
+          if (range === '7d') cutoff = now - 7 * 24 * 3600 * 1000;
+          if (range === 'custom' && startDate && endDate) {
+            const startMs = new Date(startDate).getTime();
+            const endMs = new Date(endDate).getTime();
+            return list.filter(p => p.timestamp >= startMs && p.timestamp <= endMs);
+          }
+
+          const filtered = list.filter(p => p.timestamp >= cutoff);
+          if (filtered.length >= 5) {
+            return filtered;
+          }
+        }
+      }
+    } catch {
+      // fallback
+    }
+
     const current = metricsHistory[metricsHistory.length - 1] || {
       cpu: 15,
       memory: 38,
@@ -232,13 +292,13 @@ export class SystemService {
         ? `${timePoint.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' })} ${timePoint.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}`
         : timePoint.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
 
-      // Natural deterministic sinusoidal variation around current values
-      const sinOffset = Math.sin((i * 13) % 360) * 8;
-      const cosOffset = Math.cos((i * 7) % 360) * 5;
+      // Natural deterministic variation around current values
+      const sinOffset = Math.sin((i * 13) % 360) * 6;
+      const cosOffset = Math.cos((i * 7) % 360) * 4;
 
       const cpu = Math.min(95, Math.max(3, Math.round((current.cpu + sinOffset) * 10) / 10));
       const memory = Math.min(95, Math.max(15, Math.round((current.memory + cosOffset * 0.5) * 10) / 10));
-      const disk = Math.min(100, Math.max(5, Math.round((current.disk + (i * 0.05)) * 10) / 10));
+      const disk = Math.min(100, Math.max(5, Math.round((current.disk) * 10) / 10));
       const rxMbps = Math.max(0.1, Math.round((current.rxMbps + Math.abs(sinOffset * 0.3)) * 100) / 100);
       const txMbps = Math.max(0.1, Math.round((current.txMbps + Math.abs(cosOffset * 0.2)) * 100) / 100);
 

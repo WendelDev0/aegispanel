@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { SystemService } from '../services/system.service.js';
+import { CaddyService } from '../services/caddy.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { dbStorage } from '../db/storage.js';
 import { CONFIG } from '../config.js';
@@ -117,6 +118,36 @@ systemRouter.post('/import-state', (req: Request, res: Response): void => {
     res.json({
       success: true,
       message: 'Estado completo importado com sucesso! Seus bancos, apps e configurações estão prontos.',
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Force Reset Caddy SSL & Proxy (Clears ACME cache and regenerates Caddyfile)
+systemRouter.post('/caddy-reset', async (req: Request, res: Response): Promise<void> => {
+  try {
+    // 1. Regenerate Caddyfile with correct email and all domains
+    const caddyContent = await CaddyService.syncCaddyfile();
+
+    // 2. Clear ACME cache via Docker exec
+    try {
+      const client = dockerService.getDockerClient();
+      const caddyContainer = client.getContainer('aegis-caddy');
+      const exec = await caddyContainer.exec({
+        Cmd: ['sh', '-c', 'rm -rf /data/caddy/acme && caddy reload --config /etc/caddy/Caddyfile'],
+        AttachStdout: true,
+        AttachStderr: true,
+      });
+      await exec.start({});
+    } catch (dockerErr: any) {
+      console.warn('Caddy Docker reset notice:', dockerErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Cache ACME limpo e Caddyfile regenerado! O Let\'s Encrypt emitirá novos certificados SSL.',
+      caddyfile: caddyContent,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

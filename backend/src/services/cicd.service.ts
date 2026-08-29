@@ -5,6 +5,8 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { dbStorage, DeploymentRecord, AppRecord } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
+import { CaddyService } from './caddy.service.js';
+import { ProjectDetector } from './project-detector.service.js';
 import { CONFIG } from '../config.js';
 
 const execAsync = promisify(exec);
@@ -138,33 +140,22 @@ export class CicdService {
           // ignore
         }
 
-        // Check for Dockerfile or generate one
+        // Check for Dockerfile or auto-detect project type and generate optimized Dockerfile
         const dockerfilePath = path.join(buildsDir, 'Dockerfile');
-        const packageJsonPath = path.join(buildsDir, 'package.json');
+        const internalPort = app.internalPort || 3000;
 
         if (!fs.existsSync(dockerfilePath)) {
-          if (fs.existsSync(packageJsonPath)) {
-            logs += `[${new Date().toISOString()}] 🔍 [Step 3/5] Projeto Node.js detectado! Gerando Dockerfile de alta performance...\n`;
-            const autoDockerfile = `FROM node:20-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm install --legacy-peer-deps || npm install
-COPY . .
-RUN npm run build --if-present
-RUN npm install -g serve
-ENV PORT=${app.internalPort || 3000}
-EXPOSE ${app.internalPort || 3000}
-CMD ["sh", "-c", "if [ -d dist ]; then serve -s dist -l ${app.internalPort || 3000}; elif [ -d build ]; then serve -s build -l ${app.internalPort || 3000}; elif grep -q '\"start\"' package.json; then npm start; elif [ -f server.js ]; then node server.js; else node index.js; fi"]
-`;
-            fs.writeFileSync(dockerfilePath, autoDockerfile, 'utf-8');
-          } else {
-            logs += `[${new Date().toISOString()}] 🔍 [Step 3/5] Arquivo estático detectado! Gerando servidor web Nginx...\n`;
-            const staticDockerfile = `FROM nginx:alpine
-COPY . /usr/share/nginx/html
-EXPOSE 80
-`;
-            fs.writeFileSync(dockerfilePath, staticDockerfile, 'utf-8');
+          const detection = ProjectDetector.detect(buildsDir, internalPort);
+          logs += `[${new Date().toISOString()}] ${detection.log}\n`;
+          logs += `[${new Date().toISOString()}] 📦 [Step 3/5] Tipo detectado: ${detection.type.toUpperCase()} | Runtime: ${detection.runtimeCmd}\n`;
+
+          if (detection.type === 'static-html') {
+            // Static HTML uses nginx on port 80 internally
+            ports[`80/tcp`] = app.port;
+            delete ports[`${internalPort}/tcp`];
           }
+
+          fs.writeFileSync(dockerfilePath, detection.dockerfile, 'utf-8');
         } else {
           logs += `[${new Date().toISOString()}] 🔍 [Step 3/5] Dockerfile nativo do projeto encontrado. Iniciando compilação...\n`;
         }
@@ -223,6 +214,14 @@ EXPOSE 80
       app.lastCommitAt = commitDate;
       app.updatedAt = new Date().toISOString();
       dbStorage.saveApp(app);
+
+      // Auto-sync Caddy reverse proxy after successful deploy
+      try {
+        await CaddyService.syncCaddyfile();
+        logs += `[${new Date().toISOString()}] 🔒 Caddy Proxy sincronizado com sucesso.\n`;
+      } catch {
+        // ignore
+      }
 
       return deployment;
     } catch (err: any) {

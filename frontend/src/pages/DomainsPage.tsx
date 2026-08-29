@@ -143,6 +143,22 @@ export const DomainsPage: React.FC = () => {
     }
   };
 
+  const [resettingCaddy, setResettingCaddy] = useState(false);
+
+  const handleForceResetCaddy = async () => {
+    if (!confirm('Deseja forçar a limpeza do cache SSL e regeneração do Caddyfile? Isso resolverá qualquer erro de handshake ACME.')) return;
+    try {
+      setResettingCaddy(true);
+      const res = await api.post('/system/caddy-reset');
+      alert('✅ ' + res.data.message);
+      fetchDomains();
+    } catch (err: any) {
+      alert('Erro ao resetar Caddy: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setResettingCaddy(false);
+    }
+  };
+
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
@@ -163,14 +179,26 @@ export const DomainsPage: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => setShowAddModal(true)}
-          title="Mapear um novo domínio ou subdomínio para uma porta do servidor"
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all active:scale-95 shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          Adicionar Domínio
-        </button>
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={handleForceResetCaddy}
+            disabled={resettingCaddy}
+            title="Limpar cache do Let's Encrypt e regenerar configurações do proxy Caddy"
+            className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 font-semibold text-xs border border-amber-500/30 shadow-lg transition-all active:scale-95 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${resettingCaddy ? 'animate-spin text-amber-400' : ''}`} />
+            <span>{resettingCaddy ? 'Resetando...' : 'Auto-Heal SSL'}</span>
+          </button>
+
+          <button
+            onClick={() => setShowAddModal(true)}
+            title="Mapear um novo domínio ou subdomínio para uma porta do servidor"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all active:scale-95 shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            Adicionar Domínio
+          </button>
+        </div>
       </div>
 
       {/* Hostinger DNS Setup Guide Box */}

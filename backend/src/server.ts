@@ -6,6 +6,7 @@ import { CONFIG } from './config.js';
 import { SystemService } from './services/system.service.js';
 import { TerminalService } from './services/terminal.service.js';
 import { AlertService } from './services/alert.service.js';
+import { CaddyService } from './services/caddy.service.js';
 
 // Routers
 import { authRouter } from './routes/auth.routes.js';
@@ -25,7 +26,7 @@ import { cronRouter } from './routes/cron.routes.js';
 
 const app = express();
 const server = http.createServer(app);
-const io = new SocketIOServer(server, {
+export const io = new SocketIOServer(server, {
   cors: {
     origin: '*',
     methods: ['GET', 'POST'],
@@ -94,4 +95,15 @@ server.listen(CONFIG.PORT, () => {
   console.log(`🚀 Mode: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📂 Data directory: ${CONFIG.DATA_DIR}`);
   console.log(`========================================================`);
+
+  // Auto-heal: Sync Caddyfile with correct email and domains on every startup
+  setTimeout(async () => {
+    try {
+      await CaddyService.syncCaddyfile();
+      console.log('🔒 Caddy SSL auto-heal: Caddyfile sincronizado com sucesso na inicialização.');
+    } catch (err: any) {
+      console.warn('⚠️ Caddy auto-heal notice:', err.message);
+    }
+  }, 3000);
 });
+
