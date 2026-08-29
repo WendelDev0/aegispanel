@@ -9,6 +9,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      - TZ=America/Sao_Paulo
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -35,6 +37,7 @@ services:
       - CADDY_CONFIG_PATH=/app/caddy/Caddyfile
       - DOCKER_SOCKET=/var/run/docker.sock
       - JWT_SECRET=aegis-secret-key-change-this-in-production
+      - TZ=America/Sao_Paulo
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data:/app/data
@@ -51,6 +54,8 @@ services:
     restart: unless-stopped
     ports:
       - "3000:80"
+    environment:
+      - TZ=America/Sao_Paulo
     depends_on:
       - backend
     networks:

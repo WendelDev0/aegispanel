@@ -140,8 +140,8 @@ export class SystemService {
     const rxMbps = Math.round(((lastNetworkStats.rx_sec * 8) / 1_000_000) * 100) / 100;
     const txMbps = Math.round(((lastNetworkStats.tx_sec * 8) / 1_000_000) * 100) / 100;
 
-    // Record history
-    const nowStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    // Record history (Brasília Time UTC-3)
+    const nowStr = new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit' });
     metricsHistory.push({
       time: nowStr,
       cpu: cpuUsage,
@@ -229,8 +229,8 @@ export class SystemService {
     for (let i = totalPoints - 1; i >= 0; i--) {
       const timePoint = new Date(now - i * stepHours * 3600 * 1000);
       const label = range === '7d' || range === 'custom' || range === '3d'
-        ? `${timePoint.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${timePoint.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
-        : timePoint.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        ? `${timePoint.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' })} ${timePoint.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}`
+        : timePoint.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
 
       // Natural deterministic sinusoidal variation around current values
       const sinOffset = Math.sin((i * 13) % 360) * 8;
