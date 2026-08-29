@@ -10,6 +10,7 @@ import { DomainsPage } from './pages/DomainsPage.js';
 import { TerminalPage } from './pages/TerminalPage.js';
 import { SystemMonitorPage } from './pages/SystemMonitorPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
+import { HelpPage } from './pages/HelpPage.js';
 import { FileManagerPage } from './pages/FileManagerPage.js';
 import { QueryStudioPage } from './pages/QueryStudioPage.js';
 import { FirewallPage } from './pages/FirewallPage.js';
@@ -111,6 +112,8 @@ export function App() {
         return <SystemMonitorPage realtimeStats={realtimeStats} />;
       case 'settings':
         return <SettingsPage />;
+      case 'help':
+        return <HelpPage />;
       default:
         return <DashboardPage overview={overview} realtimeStats={realtimeStats} setActiveTab={setActiveTab} />;
     }

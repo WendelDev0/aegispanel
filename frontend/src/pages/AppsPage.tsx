@@ -148,6 +148,10 @@ export const AppsPage: React.FC = () => {
     };
   } | null>(null);
 
+  // AI Prompt Help Modal
+  const [showAiHelpModal, setShowAiHelpModal] = useState(false);
+  const [copiedAiPrompt, setCopiedAiPrompt] = useState(false);
+
   const handleInspectRepo = async (urlToInspect?: string) => {
     const targetUrl = urlToInspect || gitUrl;
     if (!targetUrl || targetUrl.includes('usuario/meu-app')) return;
@@ -553,14 +557,25 @@ export const AppsPage: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => setShowCreateModal(true)}
-          title="Fazer deploy de um novo projeto do GitHub (Público ou Privado) ou Imagem Docker"
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all active:scale-95 shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          Novo Deploy / Projeto
-        </button>
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => setShowAiHelpModal(true)}
+            title="Copie o prompt para a sua IA (ChatGPT, Claude, Cursor, v0) preparar o projeto para o AegisPanel"
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 font-semibold text-xs border border-purple-500/40 shadow-lg shadow-purple-600/10 transition-all active:scale-95 shrink-0"
+          >
+            <Sparkles className="w-4 h-4 text-purple-400" />
+            <span>Prompt para IA ✨</span>
+          </button>
+
+          <button
+            onClick={() => setShowCreateModal(true)}
+            title="Fazer deploy de um novo projeto do GitHub (Público ou Privado) ou Imagem Docker"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all active:scale-95 shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            Novo Deploy / Projeto
+          </button>
+        </div>
       </div>
 
       {/* Search & Stats Bar */}
@@ -1278,6 +1293,90 @@ export const AppsPage: React.FC = () => {
 
             <div className="p-5 flex-1 overflow-auto font-mono text-xs text-emerald-300 bg-black/90 whitespace-pre-wrap leading-relaxed">
               {selectedBuildLogs.buildLogs || 'Nenhum log gravado para este build.'}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: AI Prompt Generator (Vercel to AegisPanel) */}
+      {showAiHelpModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0f172a] rounded-3xl border border-purple-500/40 w-full max-w-2xl overflow-hidden shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-purple-500/20 text-purple-400">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base">Prompt Mágico para IAs (Vercel ➔ AegisPanel)</h3>
+                  <p className="text-xs text-slate-400">Envie este prompt para sua IA (ChatGPT, Claude, Cursor, v0) preparar seu código.</p>
+                </div>
+              </div>
+              <button onClick={() => setShowAiHelpModal(false)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <textarea
+              readOnly
+              rows={10}
+              className="w-full bg-slate-950/90 border border-slate-800 rounded-2xl p-4 text-xs font-mono text-slate-200 focus:outline-none select-all custom-scrollbar leading-relaxed"
+              value={`Estou hospedando meu projeto no painel AegisPanel (uma plataforma Cloud PaaS que roda em VPS Linux com Docker e Caddy).
+A maioria dos meus projetos foi inicialmente desenvolvida para a Vercel, mas agora preciso que você adapte e prepare todo o código para rodar no AegisPanel sem nenhum erro de build ou deploy:
+
+1. SCRIPTS NO PACKAGE.JSON:
+   - Certifique-se de que os scripts "build" e "start" existem e funcionam corretamente.
+   - O script "start" deve iniciar o servidor de produção (ex: "next start", "node dist/index.js", etc.).
+   - Se for uma SPA (Vite/React), certifique-se de que "build" gera a pasta "dist".
+
+2. HOST E PORTA (BINDING):
+   - O servidor DEVE escutar no host '0.0.0.0' (e NÃO apenas em 'localhost').
+   - Use a porta fornecida pela variável de ambiente: process.env.PORT || 3000.
+
+3. DEPENDÊNCIAS:
+   - Mova ferramentas de build essenciais para "dependencies" ou garanta que rodem no build.
+   - Substitua quaisquer dependências exclusivas da Vercel Edge por equivalentes universais Node.js.
+
+Revise meus arquivos de configuração e me entregue o código pronto para deploy!`}
+            />
+
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-[11px] text-slate-400">💡 Compatível com ChatGPT, Claude 3.5, Cursor e v0.</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowAiHelpModal(false)}
+                  className="px-4 py-2 text-slate-400 hover:text-white text-xs font-semibold"
+                >
+                  Fechar
+                </button>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(`Estou hospedando meu projeto no painel AegisPanel (uma plataforma Cloud PaaS que roda em VPS Linux com Docker e Caddy).
+A maioria dos meus projetos foi inicialmente desenvolvida para a Vercel, mas agora preciso que você adapte e prepare todo o código para rodar no AegisPanel sem nenhum erro de build ou deploy:
+
+1. SCRIPTS NO PACKAGE.JSON:
+   - Certifique-se de que os scripts "build" e "start" existem e funcionam corretamente.
+   - O script "start" deve iniciar o servidor de produção (ex: "next start", "node dist/index.js", etc.).
+   - Se for uma SPA (Vite/React), certifique-se de que "build" gera a pasta "dist".
+
+2. HOST E PORTA (BINDING):
+   - O servidor DEVE escutar no host '0.0.0.0' (e NÃO apenas em 'localhost').
+   - Use a porta fornecida pela variável de ambiente: process.env.PORT || 3000.
+
+3. DEPENDÊNCIAS:
+   - Mova ferramentas de build essenciais para "dependencies" ou garanta que rodem no build.
+   - Substitua quaisquer dependências exclusivas da Vercel Edge por equivalentes universais Node.js.
+
+Revise meus arquivos de configuração e me entregue o código pronto para deploy!`);
+                    setCopiedAiPrompt(true);
+                    setTimeout(() => setCopiedAiPrompt(false), 2000);
+                  }}
+                  className="flex items-center gap-1.5 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-purple-600/30 transition-all active:scale-95"
+                >
+                  {copiedAiPrompt ? <Check className="w-4 h-4 text-emerald-300" /> : <Copy className="w-4 h-4" />}
+                  <span>{copiedAiPrompt ? 'Copiado com Sucesso!' : 'Copiar Prompt para Minha IA'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
