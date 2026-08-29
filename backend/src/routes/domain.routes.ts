@@ -9,8 +9,40 @@ export const domainRouter = Router();
 domainRouter.use(authMiddleware);
 
 domainRouter.get('/', (req: Request, res: Response) => {
+  // Auto-sync domains from Apps into the unified Domains list
+  const apps = dbStorage.getApps();
   const domains = dbStorage.getDomains();
-  res.json(domains);
+  let changed = false;
+
+  for (const app of apps) {
+    if (app.domain) {
+      const clean = app.domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+      const exists = domains.find(d => d.domain === clean);
+      if (!exists) {
+        const newDom: DomainRecord = {
+          id: `dom-app-${app.id}`,
+          domain: clean,
+          targetPort: app.port,
+          targetContainer: app.name,
+          sslEnabled: true,
+          status: 'active',
+          createdAt: app.createdAt || new Date().toISOString(),
+        };
+        dbStorage.saveDomain(newDom);
+        changed = true;
+      } else if (exists.targetPort !== app.port) {
+        exists.targetPort = app.port;
+        dbStorage.saveDomain(exists);
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) {
+    CaddyService.syncCaddyfile().catch(() => {});
+  }
+
+  res.json(dbStorage.getDomains());
 });
 
 // Check DNS propagation for any domain
@@ -86,7 +118,20 @@ domainRouter.post('/', async (req: Request, res: Response): Promise<void> => {
 
 domainRouter.delete('/:id', async (req: Request, res: Response) => {
   try {
+    const domainToRemove = dbStorage.getDomains().find(d => d.id === req.params.id);
     const success = dbStorage.removeDomain(req.params.id);
+
+    // If linked to an app, remove from app record as well
+    if (domainToRemove) {
+      const apps = dbStorage.getApps();
+      for (const app of apps) {
+        if (app.domain === domainToRemove.domain) {
+          app.domain = undefined;
+          dbStorage.saveApp(app);
+        }
+      }
+    }
+
     await CaddyService.syncCaddyfile();
     res.json({ success });
   } catch (err: any) {

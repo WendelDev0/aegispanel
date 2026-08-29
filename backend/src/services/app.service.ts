@@ -1,4 +1,4 @@
-import { dbStorage, AppRecord } from '../db/storage.js';
+import { dbStorage, AppRecord, DomainRecord } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
 import { CaddyService } from './caddy.service.js';
 
@@ -33,6 +33,8 @@ export class AppService {
     const ports: { [intPort: string]: number } = {};
     ports[`${internalPort}/tcp`] = dto.port;
 
+    const cleanDomain = dto.domain ? dto.domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '') : undefined;
+
     try {
       containerId = await dockerService.createAndStartContainer({
         name: containerName,
@@ -42,7 +44,7 @@ export class AppService {
         labels: {
           'aegis.type': 'app',
           'aegis.app.name': dto.name,
-          'aegis.app.domain': dto.domain || '',
+          'aegis.app.domain': cleanDomain || '',
         },
       });
       status = 'running';
@@ -62,16 +64,35 @@ export class AppService {
       port: dto.port,
       internalPort,
       env: envRecord,
-      domain: dto.domain,
+      domain: cleanDomain,
       status,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
     const saved = dbStorage.saveApp(record);
-    if (dto.domain) {
+
+    // Save and sync domain immediately
+    if (cleanDomain) {
+      const existingDomain = dbStorage.getDomains().find(d => d.domain === cleanDomain);
+      if (!existingDomain) {
+        const domRecord: DomainRecord = {
+          id: `dom-app-${id}`,
+          domain: cleanDomain,
+          targetPort: dto.port,
+          targetContainer: dto.name,
+          sslEnabled: true,
+          status: 'active',
+          createdAt: new Date().toISOString(),
+        };
+        dbStorage.saveDomain(domRecord);
+      } else {
+        existingDomain.targetPort = dto.port;
+        dbStorage.saveDomain(existingDomain);
+      }
       await CaddyService.syncCaddyfile();
     }
+
     return saved;
   }
 
@@ -127,6 +148,13 @@ export class AppService {
         await dockerService.removeContainer(app.containerId, true);
       } catch (err) {
         console.error('Error removing app container:', err);
+      }
+    }
+
+    if (app.domain) {
+      const existingDom = dbStorage.getDomains().find(d => d.domain === app.domain);
+      if (existingDom) {
+        dbStorage.removeDomain(existingDom.id);
       }
     }
 
