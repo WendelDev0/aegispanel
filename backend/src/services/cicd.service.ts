@@ -1,6 +1,13 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { dbStorage, DeploymentRecord, AppRecord } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
+import { CONFIG } from '../config.js';
+
+const execAsync = promisify(exec);
 
 export class CicdService {
   /**
@@ -19,7 +26,11 @@ export class CicdService {
   }
 
   /**
-   * Executes a CI/CD Build and Deployment pipeline
+   * Executes a Real CI/CD Build and Deployment pipeline:
+   * 1. Clones repository (with PAT support if private)
+   * 2. Detects Dockerfile or auto-generates Node/Python Dockerfile
+   * 3. Builds real Docker image
+   * 4. Spawns and maps container on the requested host port
    */
   static async executeDeploy(
     app: AppRecord,
@@ -56,55 +67,125 @@ export class CicdService {
     dbStorage.saveDeployment(deployment);
 
     let logs = deployment.buildLogs;
-    logs += `[${new Date().toISOString()}] 📦 [Step 1/5] Conectando ao repositório: ${app.gitUrl || 'Docker Hub Image (' + (app.imageName || 'node:20-alpine') + ')'}\n`;
-    logs += `[${new Date().toISOString()}] 🌿 [Step 2/5] Checkout da Branch [${branch}] - Commit: ${commitHash} ("${commitMsg}")\n`;
-    logs += `[${new Date().toISOString()}] 🔍 [Step 3/5] Analisando dependências e variáveis de ambiente (${Object.keys(app.env || {}).length} vars configuradas)...\n`;
-    logs += `[${new Date().toISOString()}] 🐳 [Step 4/5] Verificando Docker Engine e preparando container na porta :${app.port}...\n`;
-
     const isDockerOnline = await dockerService.testConnection();
 
+    if (!isDockerOnline) {
+      logs += `[${new Date().toISOString()}] ❌ Erro: Docker Engine não está disponível no servidor.\n`;
+      deployment.status = 'failed';
+      deployment.buildLogs = logs;
+      dbStorage.saveDeployment(deployment);
+      throw new Error('Docker Engine offline no servidor.');
+    }
+
+    const containerName = `aegis-app-${app.name.toLowerCase().replace(/[^a-z0-9_-]/g, '')}`;
+    const buildImageTag = `aegis-app-${app.name.toLowerCase().replace(/[^a-z0-9_-]/g, '')}:latest`;
+    const envList = Object.entries(app.env || {}).map(([k, v]) => `${k}=${v}`);
+    const ports: { [intPort: string]: number } = {};
+    ports[`${app.internalPort || 3000}/tcp`] = app.port;
+
     try {
-      if (isDockerOnline) {
-        const containerName = `aegis-app-${app.name.toLowerCase().replace(/[^a-z0-9_-]/g, '')}`;
-        const envList = Object.entries(app.env || {}).map(([k, v]) => `${k}=${v}`);
-        const ports: { [intPort: string]: number } = {};
-        ports[`${app.internalPort || 3000}/tcp`] = app.port;
-
-        let image = app.imageName || 'nginx:alpine';
-
-        if (app.containerId) {
-          try {
-            await dockerService.restartContainer(app.containerId);
-            logs += `[${new Date().toISOString()}] 🔄 Container existente (${app.containerId.substring(0, 12)}) reiniciado com sucesso sem downtime.\n`;
-          } catch {
-            logs += `[${new Date().toISOString()}] ⚠️ Recriando contêiner otimizado com nova imagem...\n`;
-            const newId = await dockerService.createAndStartContainer({
-              name: containerName,
-              image,
-              env: envList,
-              ports,
-            });
-            app.containerId = newId;
-            logs += `[${new Date().toISOString()}] 🐳 Novo container criado com ID: ${newId.substring(0, 12)}\n`;
-          }
-        } else {
-          const newId = await dockerService.createAndStartContainer({
-            name: containerName,
-            image,
-            env: envList,
-            ports,
-          });
-          app.containerId = newId;
-          logs += `[${new Date().toISOString()}] 🐳 Container criado e iniciado com ID: ${newId.substring(0, 12)}\n`;
+      if (app.sourceType === 'git' && app.gitUrl) {
+        const buildsDir = path.join(CONFIG.DATA_DIR, 'builds', app.id);
+        if (!fs.existsSync(buildsDir)) {
+          fs.mkdirSync(buildsDir, { recursive: true });
         }
 
-        logs += `[${new Date().toISOString()}] ✅ [Step 5/5] Healthcheck aprovado! Aplicação online e respondendo na porta :${app.port}\n`;
+        // Format authenticated Git URL if token is provided
+        let cloneUrl = app.gitUrl.trim();
+        if (app.githubToken && cloneUrl.startsWith('https://github.com/')) {
+          const repoPath = cloneUrl.replace('https://github.com/', '');
+          cloneUrl = `https://${app.githubToken}@github.com/${repoPath}`;
+          logs += `[${new Date().toISOString()}] 🔑 [Step 1/5] Autenticando com GitHub Personal Access Token (PAT)...\n`;
+        } else {
+          logs += `[${new Date().toISOString()}] 📦 [Step 1/5] Conectando ao repositório: ${app.gitUrl}\n`;
+        }
+
+        // Clone or Pull
+        const gitDir = path.join(buildsDir, '.git');
+        if (fs.existsSync(gitDir)) {
+          logs += `[${new Date().toISOString()}] 🌿 [Step 2/5] Atualizando código existente (git pull origin ${branch})...\n`;
+          try {
+            const { stdout: pullOut } = await execAsync(`git pull origin ${branch}`, { cwd: buildsDir });
+            logs += pullOut ? `[Git] ${pullOut}\n` : '';
+          } catch (gitErr: any) {
+            logs += `[Git Warning] Pull falhou, re-clonando: ${gitErr.message}\n`;
+            fs.rmSync(buildsDir, { recursive: true, force: true });
+            await execAsync(`git clone -b ${branch} --single-branch "${cloneUrl}" "${buildsDir}"`);
+          }
+        } else {
+          logs += `[${new Date().toISOString()}] 🌿 [Step 2/5] Clonando branch [${branch}]...\n`;
+          try {
+            await execAsync(`git clone -b ${branch} --single-branch "${cloneUrl}" "${buildsDir}"`);
+          } catch (cloneErr: any) {
+            throw new Error(`Falha ao clonar repositório: ${cloneErr.message.replace(/https:\/\/[^@]+@/, 'https://***@')}`);
+          }
+        }
+
+        // Check for Dockerfile or generate one
+        const dockerfilePath = path.join(buildsDir, 'Dockerfile');
+        const packageJsonPath = path.join(buildsDir, 'package.json');
+
+        if (!fs.existsSync(dockerfilePath)) {
+          if (fs.existsSync(packageJsonPath)) {
+            logs += `[${new Date().toISOString()}] 🔍 [Step 3/5] Projeto Node.js detectado! Gerando Dockerfile de alta performance...\n`;
+            const autoDockerfile = `FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install --legacy-peer-deps || npm install
+COPY . .
+RUN npm run build --if-present
+ENV PORT=${app.internalPort || 3000}
+EXPOSE ${app.internalPort || 3000}
+CMD ["npm", "start"]
+`;
+            fs.writeFileSync(dockerfilePath, autoDockerfile, 'utf-8');
+          } else {
+            logs += `[${new Date().toISOString()}] 🔍 [Step 3/5] Arquivo estático detectado! Gerando servidor web Nginx...\n`;
+            const staticDockerfile = `FROM nginx:alpine
+COPY . /usr/share/nginx/html
+EXPOSE 80
+`;
+            fs.writeFileSync(dockerfilePath, staticDockerfile, 'utf-8');
+          }
+        } else {
+          logs += `[${new Date().toISOString()}] 🔍 [Step 3/5] Dockerfile nativo do projeto encontrado. Iniciando compilação...\n`;
+        }
+
+        // Build Docker Image
+        logs += `[${new Date().toISOString()}] 🐳 [Step 4/5] Executando docker build -t ${buildImageTag}...\n`;
+        try {
+          const { stdout: buildOut, stderr: buildErr } = await execAsync(`docker build -t "${buildImageTag}" .`, { cwd: buildsDir });
+          if (buildOut) logs += `[Docker Build]\n${buildOut.slice(-1000)}\n`;
+        } catch (dockerBuildErr: any) {
+          throw new Error(`Erro ao compilar imagem Docker: ${dockerBuildErr.message}`);
+        }
+
+        // Create/Restart Container with the newly built image
+        const newContainerId = await dockerService.createAndStartContainer({
+          name: containerName,
+          image: buildImageTag,
+          env: envList,
+          ports,
+        });
+
+        app.containerId = newContainerId;
+        logs += `[${new Date().toISOString()}] 🚀 Container criado e iniciado na porta Host :${app.port} (ID: ${newContainerId.substring(0, 12)})\n`;
       } else {
-        logs += `[${new Date().toISOString()}] ⚠️ [Aviso Docker] Docker Engine offline no host local (Docker Desktop não iniciado).\n`;
-        logs += `[${new Date().toISOString()}] 💡 O registro do app e configurações foram salvos com sucesso. Inicie o Docker Desktop no Windows para subir o contêiner.\n`;
+        // Image based deploy
+        let image = app.imageName || 'nginx:alpine';
+        logs += `[${new Date().toISOString()}] 🐳 [Step 4/5] Baixando imagem Docker Hub (${image}) e preparando contêiner...\n`;
+        const newId = await dockerService.createAndStartContainer({
+          name: containerName,
+          image,
+          env: envList,
+          ports,
+        });
+        app.containerId = newId;
+        logs += `[${new Date().toISOString()}] 🚀 Container criado com sucesso com ID: ${newId.substring(0, 12)}\n`;
       }
 
-      logs += `[${new Date().toISOString()}] 🎉 Pipeline finalizado com sucesso em ${((Date.now() - startTime) / 1000).toFixed(1)}s.\n`;
+      logs += `[${new Date().toISOString()}] ✅ [Step 5/5] Deploy concluído com sucesso! Servidor ativo na porta :${app.port}\n`;
+      logs += `[${new Date().toISOString()}] 🎉 Aplicação online em ${((Date.now() - startTime) / 1000).toFixed(1)}s.\n`;
 
       const duration = Math.round((Date.now() - startTime) / 1000) || 1;
       deployment.status = 'success';
@@ -113,7 +194,7 @@ export class CicdService {
       deployment.finishedAt = new Date().toISOString();
       dbStorage.saveDeployment(deployment);
 
-      app.status = isDockerOnline ? 'running' : 'stopped';
+      app.status = 'running';
       app.lastDeployAt = deployment.finishedAt;
       app.lastCommitMessage = `${commitHash.substring(0, 7)}: ${commitMsg}`;
       app.updatedAt = new Date().toISOString();
@@ -121,7 +202,7 @@ export class CicdService {
 
       return deployment;
     } catch (err: any) {
-      logs += `[${new Date().toISOString()}] ❌ Erro durante o processo de deploy: ${err.message}\n`;
+      logs += `[${new Date().toISOString()}] ❌ ERRO NO DEPLOY: ${err.message}\n`;
       deployment.status = 'failed';
       deployment.buildLogs = logs;
       deployment.durationSeconds = Math.round((Date.now() - startTime) / 1000);
