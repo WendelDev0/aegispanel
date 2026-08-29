@@ -481,10 +481,10 @@ export const AppsPage: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-2">
             <Layers className="w-6 h-6 text-indigo-400" />
-            Aplicações & CI/CD Pipeline (PaaS Dashboard)
+            Aplicações & CI/CD — Experiência Cloud Profissional (Aegis Style)
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            Controle de ponta a ponta dos seus projetos: repositórios públicos e privados do GitHub, URLs localhost e domínios com SSL.
+            Controle de ponta a ponta dos seus projetos com deploy em tempo real, rollback instantâneo, repositórios públicos e privados do GitHub e domínios com SSL.
           </p>
         </div>
 
@@ -1264,7 +1264,7 @@ export const AppsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: Live Deploy Streaming Progress Tracker (Vercel Style) */}
+      {/* Modal: Live Deploy Streaming Progress Tracker (Aegis Style) */}
       {liveDeployModal && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-[#090d16] rounded-3xl border border-indigo-500/40 w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
