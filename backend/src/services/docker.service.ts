@@ -290,6 +290,19 @@ class DockerManager {
       });
 
       await container.start();
+
+      // Connect to aegis-net network so Caddy can reach it directly by container name
+      try {
+        const nets = await this.docker.listNetworks();
+        const aegisNet = nets.find(n => n.Name.includes('aegis-net'));
+        if (aegisNet) {
+          const net = this.docker.getNetwork(aegisNet.Id);
+          await net.connect({ Container: container.id }).catch(() => {});
+        }
+      } catch {
+        // ignore
+      }
+
       return container.id;
     } catch (err: any) {
       if (err.message && (err.message.includes('port is already allocated') || err.message.includes('address already in use') || err.message.includes('Ports are not available'))) {

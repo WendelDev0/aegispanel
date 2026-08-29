@@ -11,6 +11,9 @@ echo "======================================================================"
 echo "🛡️  Instalando AegisPanel - Cloud & Server Management Platform"
 echo "======================================================================"
 
+# 0. Configurar fuso horário de Brasília
+sudo timedatectl set-timezone America/Sao_Paulo || true
+
 # 1. Atualizar pacotes do sistema
 echo "📦 [1/5] Atualizando repositórios do sistema..."
 sudo apt update && sudo apt upgrade -y
@@ -26,13 +29,12 @@ else
     echo "✅ Docker já está instalado."
 fi
 
-# 3. Configurar Firewall básico
+# 3. Configurar Firewall (Liberando portas de aplicações de 3000 até 9999)
 echo "🔒 [3/5] Configurando Firewall UFW..."
 sudo ufw allow 22/tcp || true
 sudo ufw allow 80/tcp || true
 sudo ufw allow 443/tcp || true
-sudo ufw allow 3000/tcp || true
-sudo ufw allow 4000/tcp || true
+sudo ufw allow 3000:9999/tcp || true
 sudo ufw --force enable || true
 
 # 4. Baixar repositório do AegisPanel
@@ -49,12 +51,13 @@ else
     cd $INSTALL_DIR
 fi
 
-sudo mkdir -p $INSTALL_DIR/data/caddy
+sudo mkdir -p $INSTALL_DIR/caddy
+sudo mkdir -p $INSTALL_DIR/data
 sudo chown -R $USER:$USER $INSTALL_DIR
 
 # Criar Caddyfile inicial se não existir
-if [ ! -f "$INSTALL_DIR/data/caddy/Caddyfile" ]; then
-    echo "# AegisPanel Default Caddyfile" > "$INSTALL_DIR/data/caddy/Caddyfile"
+if [ ! -f "$INSTALL_DIR/caddy/Caddyfile" ]; then
+    echo "# AegisPanel Default Caddyfile" > "$INSTALL_DIR/caddy/Caddyfile"
 fi
 
 # 5. Iniciar serviços via Docker Compose
