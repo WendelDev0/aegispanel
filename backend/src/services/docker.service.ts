@@ -236,6 +236,14 @@ class DockerManager {
       );
     }
 
+    // 1. Remove existing container with same name if already present (Prevents 409 Conflict)
+    try {
+      const existing = this.docker.getContainer(options.name);
+      await existing.remove({ force: true });
+    } catch {
+      // ignore if not existing
+    }
+
     try {
       // Ensure image exists
       try {
@@ -283,7 +291,54 @@ class DockerManager {
 
       await container.start();
       return container.id;
-    } catch (err) {
+    } catch (err: any) {
+      // Secondary fallback if 409 conflict still triggered
+      if (err.statusCode === 409 || (err.message && err.message.includes('Conflict'))) {
+        try {
+          const existing = this.docker.getContainer(options.name);
+          await existing.remove({ force: true });
+          const PortBindings: { [key: string]: Array<{ HostPort: string }> } = {};
+          const ExposedPorts: { [key: string]: object } = {};
+
+          if (options.ports) {
+            for (const [intPort, hostPort] of Object.entries(options.ports)) {
+              const portKey = intPort.includes('/') ? intPort : `${intPort}/tcp`;
+              ExposedPorts[portKey] = {};
+              PortBindings[portKey] = [{ HostPort: hostPort.toString() }];
+            }
+          }
+
+          const Binds: string[] = [];
+          if (options.volumes) {
+            for (const [host, container] of Object.entries(options.volumes)) {
+              Binds.push(`${host}:${container}`);
+            }
+          }
+
+          const retryContainer = await this.docker.createContainer({
+            name: options.name,
+            Image: options.image,
+            Env: options.env || [],
+            ExposedPorts,
+            Labels: {
+              'aegis.managed': 'true',
+              ...(options.labels || {}),
+            },
+            HostConfig: {
+              PortBindings,
+              Binds,
+              RestartPolicy: {
+                Name: options.restartPolicy || 'unless-stopped',
+              },
+            },
+          });
+          await retryContainer.start();
+          return retryContainer.id;
+        } catch (retryErr) {
+          throw retryErr;
+        }
+      }
+
       console.error('Failed to create and start container:', err);
       throw err;
     }
