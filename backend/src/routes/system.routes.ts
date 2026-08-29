@@ -1,7 +1,10 @@
 import { Router, Request, Response } from 'express';
+import fs from 'fs';
+import path from 'path';
 import { SystemService } from '../services/system.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { dbStorage } from '../db/storage.js';
+import { CONFIG } from '../config.js';
 import { authMiddleware } from './auth.routes.js';
 
 export const systemRouter = Router();
@@ -67,4 +70,42 @@ systemRouter.get('/settings', (req: Request, res: Response) => {
 systemRouter.put('/settings', (req: Request, res: Response) => {
   const updated = dbStorage.updateSettings(req.body);
   res.json(updated);
+});
+
+// Export Full Panel State (Migration Bundle: Local ➔ Contabo VPS)
+systemRouter.get('/export-state', (req: Request, res: Response): void => {
+  try {
+    const dbPath = path.join(CONFIG.DATA_DIR, 'panel_db.json');
+    if (fs.existsSync(dbPath)) {
+      const data = fs.readFileSync(dbPath, 'utf-8');
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename=aegispanel-migration-${Date.now()}.json`);
+      res.send(data);
+      return;
+    }
+    res.status(404).json({ error: 'Nenhum dado encontrado para exportação' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Import Full Panel State (Restore on Contabo VPS)
+systemRouter.post('/import-state', (req: Request, res: Response): void => {
+  try {
+    const stateData = req.body;
+    if (!stateData || typeof stateData !== 'object') {
+      res.status(400).json({ error: 'Formato de dados inválido' });
+      return;
+    }
+
+    const dbPath = path.join(CONFIG.DATA_DIR, 'panel_db.json');
+    fs.writeFileSync(dbPath, JSON.stringify(stateData, null, 2), 'utf-8');
+
+    res.json({
+      success: true,
+      message: 'Estado completo importado com sucesso! Seus bancos, apps e configurações estão prontos.',
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });

@@ -1,8 +1,9 @@
 {
-  "name": "painiel-vps",
-  "version": "1.0.0",
-  "description": "Painel de Controle de VPS e Servidor Local (Self-Hosted PaaS)",
+  "name": "aegispanel",
+  "version": "2.0.0",
+  "description": "Painel de Controle de VPS e Servidor Local (Self-Hosted PaaS & Cloud Manager)",
   "scripts": {
+    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"blue,magenta\" \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
     "build": "npm --prefix backend run build && npm --prefix frontend run build",
@@ -15,8 +16,12 @@
     "docker",
     "cpanel-alternative",
     "vercel-alternative",
-    "supabase-alternative"
+    "supabase-alternative",
+    "contabo-vps"
   ],
-  "author": "",
-  "license": "MIT"
+  "author": "Wendel (WendelDev0)",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
 }
