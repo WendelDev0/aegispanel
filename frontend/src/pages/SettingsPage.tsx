@@ -25,7 +25,11 @@ import {
   Mail,
   Shield,
   Eye,
-  Activity
+  Activity,
+  CheckCircle2,
+  AlertTriangle,
+  Database,
+  Cpu
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { ServerNode, User } from '../types/index.js';
@@ -448,7 +452,7 @@ export const SettingsPage: React.FC = () => {
                   className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-semibold transition-all disabled:opacity-40"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>{testingChannel === 'whatsapp' ? 'Enviando...' : '📲 Enviar Mensagem de Teste no WhatsApp'}</span>
+                  <span>{testingChannel === 'whatsapp' ? 'Enviando...' : 'Enviar Teste (WhatsApp)'}</span>
                 </button>
               </div>
             </div>
@@ -540,44 +544,48 @@ export const SettingsPage: React.FC = () => {
           <div className="pt-3 border-t border-slate-800 space-y-3">
             <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Gatilhos de Notificação</h4>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-              <label className="flex items-center gap-2 cursor-pointer bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
+              <label className="flex items-center gap-2 cursor-pointer bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors">
                 <input
                   type="checkbox"
                   checked={notifyOnDeploySuccess}
                   onChange={(e) => setNotifyOnDeploySuccess(e.target.checked)}
-                  className="rounded text-indigo-600"
+                  className="rounded text-indigo-600 focus:ring-0"
                 />
-                <span className="text-slate-300">Deploy Sucesso ✅</span>
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span className="text-slate-300">Deploy Sucesso</span>
               </label>
 
-              <label className="flex items-center gap-2 cursor-pointer bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
+              <label className="flex items-center gap-2 cursor-pointer bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors">
                 <input
                   type="checkbox"
                   checked={notifyOnDeployFail}
                   onChange={(e) => setNotifyOnDeployFail(e.target.checked)}
-                  className="rounded text-indigo-600"
+                  className="rounded text-indigo-600 focus:ring-0"
                 />
-                <span className="text-slate-300">Deploy Falhou ❌</span>
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                <span className="text-slate-300">Deploy Falhou</span>
               </label>
 
-              <label className="flex items-center gap-2 cursor-pointer bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
+              <label className="flex items-center gap-2 cursor-pointer bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors">
                 <input
                   type="checkbox"
                   checked={notifyOnHighResource}
                   onChange={(e) => setNotifyOnHighResource(e.target.checked)}
-                  className="rounded text-indigo-600"
+                  className="rounded text-indigo-600 focus:ring-0"
                 />
-                <span className="text-slate-300">CPU / RAM 90% ⚠️</span>
+                <Activity className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span className="text-slate-300">CPU / RAM &gt; 90%</span>
               </label>
 
-              <label className="flex items-center gap-2 cursor-pointer bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
+              <label className="flex items-center gap-2 cursor-pointer bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors">
                 <input
                   type="checkbox"
                   checked={notifyOnBackup}
                   onChange={(e) => setNotifyOnBackup(e.target.checked)}
-                  className="rounded text-indigo-600"
+                  className="rounded text-indigo-600 focus:ring-0"
                 />
-                <span className="text-slate-300">Backup Banco 🗄️</span>
+                <Database className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span className="text-slate-300">Backup Banco</span>
               </label>
             </div>
           </div>

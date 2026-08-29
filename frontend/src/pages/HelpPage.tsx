@@ -138,10 +138,10 @@ Me forneça as correções necessárias para fazer o commit e deploy!`
       {/* Stack Selector Pills */}
       <div className="flex flex-wrap gap-2.5">
         {[
-          { id: 'universal', label: '🌟 Universal (Vercel ➔ Aegis)', icon: Sparkles },
-          { id: 'nextjs', label: '▲ Next.js', icon: Zap },
-          { id: 'vite', label: '⚡ Vite / React SPA', icon: Code2 },
-          { id: 'nodeapi', label: '🚂 Express / Nest / Node API', icon: Server },
+          { id: 'universal', label: 'Universal (Vercel ➔ Aegis)', icon: Sparkles },
+          { id: 'nextjs', label: 'Next.js', icon: Zap },
+          { id: 'vite', label: 'Vite / React SPA', icon: Code2 },
+          { id: 'nodeapi', label: 'Express / Nest / Node API', icon: Server },
         ].map((tab) => {
           const Icon = tab.icon;
           const isSelected = selectedStack === tab.id;

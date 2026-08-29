@@ -40,7 +40,9 @@ import {
   Save,
   ChevronRight,
   ArrowLeft,
-  Sparkles
+  Sparkles,
+  Cpu,
+  RotateCcw
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { socket } from '../services/socket.js';
@@ -1341,7 +1343,10 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
             />
 
             <div className="flex items-center justify-between pt-1">
-              <span className="text-[11px] text-slate-400">💡 Compatível com ChatGPT, Claude 3.5, Cursor e v0.</span>
+              <span className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Compatível com ChatGPT, Claude 3.5, Cursor e v0.</span>
+              </span>
               <div className="flex gap-2">
                 <button
                   onClick={() => setShowAiHelpModal(false)}
@@ -1513,10 +1518,23 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
 
             {/* Footer */}
             <div className="p-4 bg-slate-900/90 border-t border-slate-800 flex items-center justify-between">
-              <span className="text-xs text-slate-400">
-                {liveDeployModal.status === 'running' ? '⚡ Compilando contêiner isolado...' :
-                 liveDeployModal.status === 'success' ? '🎉 Aplicação online e saudável!' :
-                 '❌ O processo de build encontrou um erro.'}
+              <span className="text-xs text-slate-300 flex items-center gap-2">
+                {liveDeployModal.status === 'running' ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                    <span>Compilando contêiner isolado...</span>
+                  </>
+                ) : liveDeployModal.status === 'success' ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Aplicação compilada e online com sucesso!</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                    <span>O processo de build foi interrompido com erro.</span>
+                  </>
+                )}
               </span>
               <button
                 onClick={() => setLiveDeployModal(null)}
@@ -1603,10 +1621,10 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                         type="button"
                         onClick={() => handleInspectRepo()}
                         disabled={inspectingRepo || !gitUrl || gitUrl.includes('usuario/meu-app')}
-                        className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 transition-colors disabled:opacity-40"
+                        className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-40"
                       >
-                        <Search className={`w-3.5 h-3.5 ${inspectingRepo ? 'animate-spin' : ''}`} />
-                        <span>{inspectingRepo ? 'Inspecionando...' : 'Auto-Detectar Stack ✨'}</span>
+                        <Cpu className={`w-3.5 h-3.5 ${inspectingRepo ? 'animate-spin' : ''}`} />
+                        <span>{inspectingRepo ? 'Inspecionando...' : 'Auto-Detectar Stack'}</span>
                       </button>
                     </div>
                     <input
@@ -1681,8 +1699,9 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                       onChange={(e) => setGithubToken(e.target.value)}
                       className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-3.5 py-2.5 text-amber-300 font-mono text-xs focus:outline-none focus:border-amber-500"
                     />
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      💡 Se seu repositório for privado no GitHub, cole aqui o Personal Access Token (PAT).
+                    <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Para repositórios privados, informe seu Personal Access Token (PAT).</span>
                     </p>
                   </div>
 
@@ -1726,8 +1745,9 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                   onChange={(e) => setCreateDomain(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
                 />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  💡 Dica: Você pode fazer o deploy sem domínio, testar pelo link direto <strong>http://IP:Porta</strong> e vincular o domínio da Hostinger depois!
+                <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
+                  <Globe className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span>O domínio é opcional. Você pode testar pelo IP:Porta e vincular o domínio Hostinger depois.</span>
                 </p>
               </div>
 

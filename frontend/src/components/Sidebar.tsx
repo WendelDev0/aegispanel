@@ -71,7 +71,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serve
         { id: 'terminal' as NavTab, label: 'Terminal Web (SSH)', icon: Terminal, tooltip: 'Terminal interativo no navegador conectado ao host ou containers' },
         { id: 'monitor' as NavTab, label: 'Monitor de Recursos', icon: Activity, tooltip: 'Processos com maior consumo de CPU/RAM e telemetria profunda' },
         { id: 'settings' as NavTab, label: 'Configurações & Equipe', icon: Settings, tooltip: 'Alertas WhatsApp/Telegram, equipe, domínio próprio e migração' },
-        { id: 'help' as NavTab, label: 'Ajuda & Prompt IA', icon: HelpCircle, badge: 'IA ✨', tooltip: 'Prompts prontos para IAs prepararem seu projeto Vercel para o AegisPanel' },
+        { id: 'help' as NavTab, label: 'Ajuda & Prompt IA', icon: HelpCircle, badge: 'AI', tooltip: 'Prompts prontos para IAs prepararem seu projeto Vercel para o AegisPanel' },
       ],
     },
   ];
