@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { CONFIG } from '../config.js';
 import { dbStorage } from '../db/storage.js';
+import { dockerService } from './docker.service.js';
 
 export class CaddyService {
   private static caddyfilePath = CONFIG.CADDY_CONFIG_PATH;
@@ -30,7 +31,7 @@ export class CaddyService {
         if (isLocalDomain(d.domain)) {
           content += `  tls internal\n`;
         }
-        content += `  reverse_proxy localhost:${d.targetPort}\n`;
+        content += `  reverse_proxy host.docker.internal:${d.targetPort}\n`;
         content += `  encode gzip zstd\n`;
         content += `}\n\n`;
       }
@@ -43,13 +44,29 @@ export class CaddyService {
         if (isLocalDomain(app.domain)) {
           content += `  tls internal\n`;
         }
-        content += `  reverse_proxy localhost:${app.port}\n`;
+        content += `  reverse_proxy host.docker.internal:${app.port}\n`;
         content += `  encode gzip zstd\n`;
         content += `}\n\n`;
       }
     }
 
     fs.writeFileSync(this.caddyfilePath, content, 'utf-8');
+
+    // Reload Caddy container if running
+    try {
+      const client = dockerService.getDockerClient();
+      const caddyContainer = client.getContainer('aegis-caddy');
+      const exec = await caddyContainer.exec({
+        Cmd: ['caddy', 'reload', '--config', '/etc/caddy/Caddyfile'],
+        AttachStdout: true,
+        AttachStderr: true,
+      });
+      await exec.start({});
+      console.log('🔄 Caddy reloaded successfully with updated domains.');
+    } catch (err: any) {
+      console.warn('Caddy reload notice:', err.message);
+    }
+
     return content;
   }
 }

@@ -16,7 +16,8 @@ import {
   HelpCircle,
   ShieldAlert,
   Server,
-  Zap
+  Zap,
+  ArrowRight
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { DomainRecord } from '../types/index.js';
@@ -39,7 +40,7 @@ export const DomainsPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
 
   // Hostinger DNS guide state
-  const [serverIp, setServerIp] = useState('IP_DA_VPS');
+  const [serverIp, setServerIp] = useState('13.140.41.82');
   const [selectedSslModal, setSelectedSslModal] = useState<SslModalInfo | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [checkingDnsMap, setCheckingDnsMap] = useState<Record<string, boolean>>({});
@@ -54,8 +55,11 @@ export const DomainsPage: React.FC = () => {
         api.get('/system/overview'),
       ]);
       setDomains(resDomains.data);
-      if (resSystem.data?.system?.osInfo?.hostname) {
-        setServerIp(resSystem.data.system.osInfo.hostname);
+      const publicIp = resSystem.data?.system?.osInfo?.publicIp;
+      if (publicIp) {
+        setServerIp(publicIp);
+      } else if (window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        setServerIp(window.location.hostname);
       }
     } catch (err) {
       console.error('Failed to fetch domains:', err);
@@ -75,7 +79,7 @@ export const DomainsPage: React.FC = () => {
     try {
       setSubmitting(true);
       await api.post('/domains', {
-        domain: domainInput.trim().toLowerCase(),
+        domain: domainInput.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''),
         targetPort: parseInt(targetPort),
       });
 
@@ -196,7 +200,7 @@ export const DomainsPage: React.FC = () => {
               <tr>
                 <th className="py-2.5 px-4">Tipo</th>
                 <th className="py-2.5 px-4">Nome / Host</th>
-                <th className="py-2.5 px-4">Aponta para (Valor)</th>
+                <th className="py-2.5 px-4">Aponta para (Valor / IP da VPS)</th>
                 <th className="py-2.5 px-4">TTL</th>
                 <th className="py-2.5 px-4 text-right">Ação</th>
               </tr>
@@ -205,13 +209,13 @@ export const DomainsPage: React.FC = () => {
               <tr>
                 <td className="py-2.5 px-4 font-bold text-emerald-400">A</td>
                 <td className="py-2.5 px-4 text-slate-200">@ (ou seu subdomínio)</td>
-                <td className="py-2.5 px-4 text-indigo-300 font-bold select-all">{serverIp}</td>
+                <td className="py-2.5 px-4 text-emerald-400 font-bold select-all">{serverIp}</td>
                 <td className="py-2.5 px-4 text-slate-400">300 (ou Padrão)</td>
                 <td className="py-2.5 px-4 text-right">
                   <button
                     onClick={() => copyToClipboard(serverIp, 'ip')}
-                    title="Copiar IP para colar na Hostinger"
-                    className="p-1 rounded text-indigo-400 hover:text-white"
+                    title="Copiar IP da VPS para colar na Hostinger"
+                    className="p-1 rounded text-emerald-400 hover:text-white"
                   >
                     {copiedKey === 'ip' ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
                   </button>
@@ -292,8 +296,11 @@ export const DomainsPage: React.FC = () => {
                             <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
                           </a>
                         </div>
-                        <p className="text-xs font-mono text-slate-400 mt-0.5">
-                          Destino Local: <span className="text-slate-200 font-semibold">localhost:{dom.targetPort}</span>
+                        <p className="text-xs font-mono text-slate-400 mt-1 flex items-center gap-1.5">
+                          <span>Redireciona para:</span>
+                          <span className="text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                            Porta :{dom.targetPort} no Servidor
+                          </span>
                         </p>
                       </div>
                     </div>
@@ -456,7 +463,7 @@ export const DomainsPage: React.FC = () => {
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
                 />
                 <p className="text-[11px] text-slate-500 mt-1">
-                  O tráfego seguro HTTPS na porta 443 será roteado para esta porta local.
+                  O tráfego seguro HTTPS na porta 443 será roteado para esta porta local no servidor.
                 </p>
               </div>
 

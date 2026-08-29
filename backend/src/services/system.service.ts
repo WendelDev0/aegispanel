@@ -1,5 +1,7 @@
 import si from 'systeminformation';
 import os from 'os';
+import http from 'http';
+import https from 'https';
 
 export interface SystemStats {
   cpu: {
@@ -34,6 +36,7 @@ export interface SystemStats {
     distro: string;
     release: string;
     hostname: string;
+    publicIp?: string;
     uptimeSeconds: number;
     arch: string;
   };
@@ -48,6 +51,32 @@ export interface MetricHistoryPoint {
 
 let lastNetworkStats: { rx_sec: number; tx_sec: number } = { rx_sec: 0, tx_sec: 0 };
 const metricsHistory: MetricHistoryPoint[] = [];
+let cachedPublicIp: string = '';
+
+// Resolve Public IP in background
+async function fetchPublicIp(): Promise<string> {
+  return new Promise((resolve) => {
+    https.get('https://api.ipify.org?format=json', { timeout: 3000 }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          resolve(parsed.ip || '');
+        } catch {
+          resolve('');
+        }
+      });
+    }).on('error', () => {
+      resolve('');
+    });
+  });
+}
+
+// Initial fetch
+fetchPublicIp().then(ip => {
+  if (ip) cachedPublicIp = ip;
+});
 
 export class SystemService {
   static async getRealtimeStats(): Promise<SystemStats> {
@@ -70,6 +99,12 @@ export class SystemService {
       si.time(),
       si.cpuTemperature().catch(() => ({ main: 0 }))
     ]);
+
+    if (!cachedPublicIp) {
+      fetchPublicIp().then(ip => {
+        if (ip) cachedPublicIp = ip;
+      });
+    }
 
     const net = networkStats[0] || { rx_sec: 0, tx_sec: 0 };
     if (net.rx_sec !== undefined && net.tx_sec !== undefined) {
@@ -128,6 +163,7 @@ export class SystemService {
         distro: osInformation.distro || os.type(),
         release: osInformation.release || os.release(),
         hostname: osInformation.hostname || os.hostname(),
+        publicIp: cachedPublicIp || undefined,
         uptimeSeconds: Math.floor(time.uptime || os.uptime()),
         arch: osInformation.arch || os.arch(),
       }

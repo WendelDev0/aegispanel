@@ -31,6 +31,7 @@ export interface SystemStats {
     distro: string;
     release: string;
     hostname: string;
+    publicIp?: string;
     uptimeSeconds: number;
     arch: string;
   };
