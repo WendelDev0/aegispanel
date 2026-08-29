@@ -1,0 +1,22 @@
+{
+  "name": "painiel-vps",
+  "version": "1.0.0",
+  "description": "Painel de Controle de VPS e Servidor Local (Self-Hosted PaaS)",
+  "scripts": {
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build",
+    "start": "docker compose up -d"
+  },
+  "keywords": [
+    "vps",
+    "paas",
+    "self-hosted",
+    "docker",
+    "cpanel-alternative",
+    "vercel-alternative",
+    "supabase-alternative"
+  ],
+  "author": "",
+  "license": "MIT"
+}

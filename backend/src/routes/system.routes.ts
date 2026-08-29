@@ -1,0 +1,66 @@
+import { Router, Request, Response } from 'express';
+import { SystemService } from '../services/system.service.js';
+import { dockerService } from '../services/docker.service.js';
+import { dbStorage } from '../db/storage.js';
+import { authMiddleware } from './auth.routes.js';
+
+export const systemRouter = Router();
+
+systemRouter.use(authMiddleware);
+
+systemRouter.get('/stats', async (req: Request, res: Response) => {
+  try {
+    const stats = await SystemService.getRealtimeStats();
+    res.json(stats);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+systemRouter.get('/processes', async (req: Request, res: Response) => {
+  try {
+    const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+    const processes = await SystemService.getTopProcesses(limit);
+    res.json(processes);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+systemRouter.get('/overview', async (req: Request, res: Response) => {
+  try {
+    const stats = await SystemService.getRealtimeStats();
+    const dockerAvailable = await dockerService.testConnection();
+    const containers = await dockerService.listContainers(true);
+    const databases = dbStorage.getDatabases();
+    const apps = dbStorage.getApps();
+    const settings = dbStorage.getSettings();
+
+    res.json({
+      system: stats,
+      docker: {
+        isAvailable: dockerAvailable,
+        totalContainers: containers.length,
+        runningContainers: containers.filter(c => c.state === 'running').length,
+      },
+      counts: {
+        apps: apps.length,
+        runningApps: apps.filter(a => a.status === 'running').length,
+        databases: databases.length,
+        runningDatabases: databases.filter(d => d.status === 'running').length,
+      },
+      settings,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+systemRouter.get('/settings', (req: Request, res: Response) => {
+  res.json(dbStorage.getSettings());
+});
+
+systemRouter.put('/settings', (req: Request, res: Response) => {
+  const updated = dbStorage.updateSettings(req.body);
+  res.json(updated);
+});

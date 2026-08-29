@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  # Caddy Reverse Proxy with Automatic SSL (HTTPS Let's Encrypt)
+  caddy:
+    image: caddy:2-alpine
+    container_name: aegis-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./data/caddy/Caddyfile:/etc/caddy/Caddyfile
+      - ./data/caddy/data:/data
+      - ./data/caddy/config:/config
+    networks:
+      - aegis-net
+
+  # Backend & Server Daemon
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aegis-backend
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      - PORT=4000
+      - DATA_DIR=/app/data
+      - DOCKER_SOCKET=/var/run/docker.sock
+      - JWT_SECRET=aegis-secret-key-change-this-in-production
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/app/data
+    networks:
+      - aegis-net
+
+  # Frontend Web Dashboard
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: aegis-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - aegis-net
+
+networks:
+  aegis-net:
+    driver: bridge
