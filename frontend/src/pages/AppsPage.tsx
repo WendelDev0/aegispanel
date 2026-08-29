@@ -21,7 +21,16 @@ import {
   AlertCircle,
   FileCode2,
   Terminal,
-  ArrowRight
+  ArrowRight,
+  Sliders,
+  Lock,
+  Eye,
+  EyeOff,
+  Search,
+  Key,
+  ShieldCheck,
+  HelpCircle,
+  FolderTree
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { AppRecord, DeploymentRecord } from '../types/index.js';
@@ -29,7 +38,10 @@ import { AppRecord, DeploymentRecord } from '../types/index.js';
 export const AppsPage: React.FC = () => {
   const [apps, setApps] = useState<AppRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
+
+  // Modals state
   const [selectedLogsApp, setSelectedLogsApp] = useState<AppRecord | null>(null);
   const [selectedWebhookApp, setSelectedWebhookApp] = useState<AppRecord | null>(null);
   const [selectedDeploymentsApp, setSelectedDeploymentsApp] = useState<AppRecord | null>(null);
@@ -37,6 +49,17 @@ export const AppsPage: React.FC = () => {
   const [selectedWorkflowApp, setSelectedWorkflowApp] = useState<AppRecord | null>(null);
   const [workflowYaml, setWorkflowYaml] = useState('');
   const [selectedBuildLogs, setSelectedBuildLogs] = useState<DeploymentRecord | null>(null);
+
+  // Env Editor modal
+  const [selectedEnvApp, setSelectedEnvApp] = useState<AppRecord | null>(null);
+  const [envString, setEnvString] = useState('');
+  const [savingEnv, setSavingEnv] = useState(false);
+  const [showEnvSecrets, setShowEnvSecrets] = useState(false);
+
+  // Domain Editor modal
+  const [selectedDomainApp, setSelectedDomainApp] = useState<AppRecord | null>(null);
+  const [domainInput, setDomainInput] = useState('');
+  const [savingDomain, setSavingDomain] = useState(false);
 
   const [logsText, setLogsText] = useState('');
   const [logsLoading, setLogsLoading] = useState(false);
@@ -47,13 +70,13 @@ export const AppsPage: React.FC = () => {
   // Form state
   const [appName, setAppName] = useState('');
   const [sourceType, setSourceType] = useState<'image' | 'git'>('git');
-  const [imageName, setImageName] = useState('node:20-alpine');
+  const [imageName, setImageName] = useState('nginx:alpine');
   const [gitUrl, setGitUrl] = useState('https://github.com/usuario/meu-app.git');
   const [branch, setBranch] = useState('main');
   const [port, setPort] = useState('3000');
   const [internalPort, setInternalPort] = useState('3000');
-  const [domain, setDomain] = useState('');
-  const [envString, setEnvString] = useState('NODE_ENV=production\nPORT=3000');
+  const [createDomain, setCreateDomain] = useState('');
+  const [createEnvString, setCreateEnvString] = useState('NODE_ENV=production\nPORT=3000');
   const [submitting, setSubmitting] = useState(false);
 
   const fetchApps = async () => {
@@ -79,7 +102,7 @@ export const AppsPage: React.FC = () => {
     try {
       setSubmitting(true);
       const envObj: Record<string, string> = {};
-      envString.split('\n').forEach(line => {
+      createEnvString.split('\n').forEach(line => {
         const parts = line.split('=');
         if (parts.length >= 2) {
           const key = parts[0].trim();
@@ -96,13 +119,13 @@ export const AppsPage: React.FC = () => {
         branch: sourceType === 'git' ? branch : undefined,
         port: parseInt(port),
         internalPort: parseInt(internalPort),
-        domain: domain.trim() || undefined,
+        domain: createDomain.trim() || undefined,
         env: envObj,
       });
 
       setShowCreateModal(false);
       setAppName('');
-      setDomain('');
+      setCreateDomain('');
       fetchApps();
     } catch (err: any) {
       alert(err.response?.data?.error || 'Erro ao criar aplicação');
@@ -122,6 +145,58 @@ export const AppsPage: React.FC = () => {
       alert('Erro ao disparar deploy: ' + (err.response?.data?.error || err.message));
     } finally {
       setTimeout(() => setDeployingId(null), 1000);
+    }
+  };
+
+  const openEnvModal = (app: AppRecord) => {
+    setSelectedEnvApp(app);
+    const envLines = Object.entries(app.env || {}).map(([k, v]) => `${k}=${v}`).join('\n');
+    setEnvString(envLines);
+  };
+
+  const handleSaveEnv = async (redeploy: boolean = true) => {
+    if (!selectedEnvApp) return;
+
+    const envObj: Record<string, string> = {};
+    envString.split('\n').forEach(line => {
+      const parts = line.split('=');
+      if (parts.length >= 2) {
+        const key = parts[0].trim();
+        const val = parts.slice(1).join('=').trim();
+        if (key) envObj[key] = val;
+      }
+    });
+
+    try {
+      setSavingEnv(true);
+      await api.put(`/apps/${selectedEnvApp.id}/env?redeploy=${redeploy}`, { env: envObj });
+      setSelectedEnvApp(null);
+      fetchApps();
+      alert('✅ Variáveis de ambiente atualizadas com sucesso!');
+    } catch (err: any) {
+      alert('Erro ao salvar .env: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setSavingEnv(false);
+    }
+  };
+
+  const openDomainModal = (app: AppRecord) => {
+    setSelectedDomainApp(app);
+    setDomainInput(app.domain || '');
+  };
+
+  const handleSaveDomain = async () => {
+    if (!selectedDomainApp) return;
+    try {
+      setSavingDomain(true);
+      await api.put(`/apps/${selectedDomainApp.id}/domain`, { domain: domainInput });
+      setSelectedDomainApp(null);
+      fetchApps();
+      alert('✅ Domínio e certificado SSL configurados com sucesso!');
+    } catch (err: any) {
+      alert('Erro ao salvar domínio: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setSavingDomain(false);
     }
   };
 
@@ -210,6 +285,13 @@ export const AppsPage: React.FC = () => {
     setTimeout(() => setCopiedWorkflow(false), 2000);
   };
 
+  const filteredApps = apps.filter(a =>
+    a.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (a.domain && a.domain.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (a.gitUrl && a.gitUrl.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    a.port.toString().includes(searchTerm)
+  );
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -217,10 +299,10 @@ export const AppsPage: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-2">
             <Layers className="w-6 h-6 text-indigo-400" />
-            Aplicações & CI/CD Pipeline (GitHub Integration)
+            Aplicações & CI/CD Pipeline (PaaS Dashboard)
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            Faça deploy contínuo das suas aplicações direto do GitHub com suporte a Webhooks e GitHub Actions.
+            Controle de ponta a ponta dos seus projetos: deploys automáticos no Git Push, domínios personalizados, SSL e variáveis .env.
           </p>
         </div>
 
@@ -234,66 +316,96 @@ export const AppsPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Apps List */}
+      {/* Search & Stats Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="relative flex-1 max-w-md">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            placeholder="Buscar por nome do app, domínio, branch ou porta..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full bg-[#0f172a] border border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+          />
+        </div>
+
+        <div className="flex items-center gap-3 text-xs font-mono text-slate-400">
+          <span className="bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            Online: <strong className="text-white">{apps.filter(a => a.status === 'running').length}</strong>
+          </span>
+          <span className="bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl">
+            Total Apps: <strong className="text-white">{apps.length}</strong>
+          </span>
+        </div>
+      </div>
+
+      {/* Apps Grid */}
       {loading ? (
-        <div className="flex items-center justify-center p-12 text-slate-400">
+        <div className="flex items-center justify-center p-16 text-slate-400">
           <RefreshCw className="w-6 h-6 animate-spin text-indigo-400" />
         </div>
-      ) : apps.length === 0 ? (
-        <div className="bg-[#0f172a]/60 rounded-2xl p-12 border border-slate-800 text-center">
+      ) : filteredApps.length === 0 ? (
+        <div className="bg-[#0f172a]/60 rounded-3xl p-12 border border-slate-800 text-center">
           <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mx-auto mb-4">
             <Layers className="w-6 h-6" />
           </div>
-          <h3 className="text-lg font-bold text-white mb-1">Nenhuma aplicação criada</h3>
+          <h3 className="text-lg font-bold text-white mb-1">Nenhuma aplicação encontrada</h3>
           <p className="text-sm text-slate-400 max-w-md mx-auto mb-6">
-            Conecte seu repositório GitHub e ative o pipeline de CI/CD em segundos.
+            Conecte seu repositório do GitHub ou escolha uma imagem Docker para fazer seu primeiro deploy.
           </p>
           <button
             onClick={() => setShowCreateModal(true)}
             className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm inline-flex items-center gap-2 shadow-lg shadow-indigo-600/30"
           >
             <Plus className="w-4 h-4" />
-            Criar Primeiro Deploy com GitHub
+            Criar Primeiro Deploy
           </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {apps.map((app) => (
+          {filteredApps.map((app) => (
             <div
               key={app.id}
-              className="bg-[#0f172a]/80 rounded-2xl p-5 border border-slate-800 hover:border-slate-700/80 transition-all flex flex-col justify-between"
+              className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 hover:border-indigo-500/50 transition-all flex flex-col justify-between shadow-xl space-y-4"
             >
               <div>
-                {/* Header row */}
-                <div className="flex items-start justify-between gap-3 mb-3">
+                {/* Header: Title + Status + Branch */}
+                <div className="flex items-start justify-between gap-3 mb-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center font-bold">
-                      <Code className="w-5 h-5" />
+                    <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center font-bold shadow-inner">
+                      <Code className="w-6 h-6" />
                     </div>
                     <div>
-                      <h3 className="font-bold text-white text-base flex items-center gap-2">
-                        {app.name}
-                        {app.sourceType === 'git' && (
-                          <span className="text-[10px] font-mono text-indigo-300 bg-indigo-500/20 px-1.5 py-0.5 rounded flex items-center gap-1">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-white text-lg">
+                          {app.name}
+                        </h3>
+                        {app.sourceType === 'git' ? (
+                          <span className="text-[10px] font-mono text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded-md flex items-center gap-1 border border-indigo-500/30">
                             <GitBranch className="w-3 h-3" /> {app.branch || 'main'}
                           </span>
+                        ) : (
+                          <span className="text-[10px] font-mono text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
+                            Docker Image
+                          </span>
                         )}
-                      </h3>
-                      <p className="text-xs font-mono text-slate-400 truncate max-w-xs">
-                        {app.gitUrl || app.imageName || 'Node.js App'}
+                      </div>
+                      <p className="text-xs font-mono text-slate-400 truncate max-w-xs mt-0.5">
+                        {app.gitUrl || app.imageName}
                       </p>
                     </div>
                   </div>
 
                   <span
-                    className={`text-xs px-2.5 py-1 rounded-full font-semibold flex items-center gap-1.5 ${
+                    className={`text-xs px-3 py-1 rounded-full font-semibold flex items-center gap-1.5 shrink-0 ${
                       app.status === 'running'
                         ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                         : 'bg-slate-800 text-slate-400 border border-slate-700'
                     }`}
                   >
                     <span
-                      className={`w-1.5 h-1.5 rounded-full ${
+                      className={`w-2 h-2 rounded-full ${
                         app.status === 'running' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
                       }`}
                     ></span>
@@ -301,111 +413,159 @@ export const AppsPage: React.FC = () => {
                   </span>
                 </div>
 
-                {/* Details & CI/CD Status */}
-                <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-800/80 space-y-2 text-xs font-mono mb-4">
-                  <div className="flex justify-between text-slate-400">
-                    <span>Porta no Servidor:</span>
-                    <span className="text-slate-200 font-semibold">:{app.port} &rarr; :{app.internalPort}</span>
-                  </div>
-                  {app.domain && (
-                    <div className="flex justify-between text-slate-400 items-center">
-                      <span>Domínio com SSL:</span>
-                      <a
-                        href={`https://${app.domain}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-indigo-400 hover:underline flex items-center gap-1"
+                {/* Domain & Network Section */}
+                <div className="bg-slate-950/80 rounded-2xl p-4 border border-slate-800/80 space-y-2.5 text-xs font-mono mb-4">
+                  {/* Assigned Domain */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 flex items-center gap-1.5">
+                      <Globe className="w-3.5 h-3.5 text-indigo-400" /> Domínio & SSL:
+                    </span>
+                    {app.domain ? (
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={`https://${app.domain}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-emerald-400 hover:underline flex items-center gap-1 font-bold"
+                        >
+                          <Lock className="w-3 h-3 text-emerald-400" />
+                          {app.domain}
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                        <button
+                          onClick={() => openDomainModal(app)}
+                          title="Alterar domínio ou subdomínio"
+                          className="text-[10px] text-slate-500 hover:text-white"
+                        >
+                          (Editar)
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => openDomainModal(app)}
+                        className="text-indigo-400 hover:text-indigo-300 hover:underline font-sans text-xs flex items-center gap-1"
                       >
-                        {app.domain}
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                  )}
+                        + Vincular Domínio Hostinger
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Port Mapping */}
+                  <div className="flex items-center justify-between text-slate-400">
+                    <span>Porta no Servidor:</span>
+                    <span className="text-slate-200 font-semibold select-all">
+                      Host :{app.port} &rarr; Container :{app.internalPort}
+                    </span>
+                  </div>
 
                   {/* Last Commit Info */}
-                  {app.lastCommitMessage && (
-                    <div className="flex justify-between text-slate-400 items-center">
-                      <span>Último Deploy:</span>
-                      <span className="text-slate-300 truncate max-w-[200px]" title={app.lastCommitMessage}>
-                        {app.lastCommitMessage}
-                      </span>
-                    </div>
-                  )}
+                  <div className="flex items-center justify-between text-slate-400">
+                    <span>Último Deploy:</span>
+                    <span className="text-slate-300 truncate max-w-[200px]" title={app.lastCommitMessage}>
+                      {app.lastCommitMessage || 'Deploy inicial'}
+                    </span>
+                  </div>
 
-                  {/* CI/CD Quick Shortcuts */}
-                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between font-sans text-[11px]">
+                  {/* Environment Variables Count */}
+                  <div className="flex items-center justify-between text-slate-400 pt-1 border-t border-slate-800/60">
+                    <span className="flex items-center gap-1">
+                      <Sliders className="w-3.5 h-3.5 text-amber-400" /> Variáveis de Ambiente:
+                    </span>
                     <button
-                      onClick={() => openWorkflowModal(app)}
-                      title="Ver arquivo de configuração do GitHub Actions"
-                      className="text-indigo-400 hover:underline flex items-center gap-1"
+                      onClick={() => openEnvModal(app)}
+                      className="text-amber-400 hover:underline font-sans text-xs font-semibold flex items-center gap-1"
                     >
-                      <FileCode2 className="w-3.5 h-3.5" /> GitHub Actions YAML
-                    </button>
-
-                    <button
-                      onClick={() => openDeploymentsHistory(app)}
-                      title="Ver histórico de todos os builds e deploys anteriores"
-                      className="text-emerald-400 hover:underline flex items-center gap-1"
-                    >
-                      <Clock className="w-3.5 h-3.5" /> Histórico de Deploys
+                      {Object.keys(app.env || {}).length} variável(is) .env &rarr; Editar
                     </button>
                   </div>
                 </div>
+
+                {/* CI/CD Quick Action Pills */}
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs pt-1">
+                  <button
+                    onClick={() => openDeploymentsHistory(app)}
+                    title="Ver histórico de todos os builds e deploys anteriores"
+                    className="text-emerald-400 hover:underline flex items-center gap-1 font-mono text-[11px]"
+                  >
+                    <Clock className="w-3.5 h-3.5" /> Histórico de Builds
+                  </button>
+
+                  <button
+                    onClick={() => openWorkflowModal(app)}
+                    title="Ver arquivo de configuração do GitHub Actions"
+                    className="text-indigo-400 hover:underline flex items-center gap-1 font-mono text-[11px]"
+                  >
+                    <FileCode2 className="w-3.5 h-3.5" /> GitHub Actions YAML
+                  </button>
+
+                  <button
+                    onClick={() => setSelectedWebhookApp(app)}
+                    title="Copiar URL de Webhook para Auto-Deploy"
+                    className="text-cyan-400 hover:underline flex items-center gap-1 font-mono text-[11px]"
+                  >
+                    <Webhook className="w-3.5 h-3.5" /> Webhook URL
+                  </button>
+                </div>
               </div>
 
-              {/* Actions row with Tooltips */}
-              <div className="flex items-center justify-between pt-3 border-t border-slate-800/80">
-                <div className="flex items-center gap-2">
+              {/* Action Buttons Row */}
+              <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Deploy Button */}
                   <button
                     onClick={() => handleTriggerDeploy(app)}
                     disabled={deployingId === app.id}
-                    title="Disparar novo deploy agora (Git Pull & Docker Rebuild)"
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow transition-all active:scale-95 disabled:opacity-50"
+                    title="Disparar novo deploy agora (Git Pull & Rebuild)"
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 transition-all active:scale-95 disabled:opacity-50"
                   >
                     <Zap className={`w-3.5 h-3.5 ${deployingId === app.id ? 'animate-bounce' : ''}`} />
                     <span>{deployingId === app.id ? 'Buildando...' : 'Deploy'}</span>
                   </button>
 
+                  {/* Start / Stop */}
                   {app.status === 'running' ? (
                     <button
                       onClick={() => handleStop(app.id)}
-                      title="Parar container"
-                      className="p-2 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors"
+                      title="Parar aplicação"
+                      className="p-2 rounded-xl bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors"
                     >
                       <Square className="w-4 h-4" />
                     </button>
                   ) : (
                     <button
                       onClick={() => handleStart(app.id)}
-                      title="Iniciar container"
-                      className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                      title="Iniciar aplicação"
+                      className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
                     >
                       <Play className="w-4 h-4" />
                     </button>
                   )}
 
+                  {/* Restart */}
+                  <button
+                    onClick={() => handleRestart(app.id)}
+                    title="Reiniciar contêiner da aplicação"
+                    className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+
+                  {/* Logs Button */}
                   <button
                     onClick={() => openLogs(app)}
-                    title="Ver logs da aplicação em tempo real"
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+                    title="Visualizar logs em tempo real da aplicação"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium transition-colors"
                   >
                     <FileText className="w-3.5 h-3.5 text-indigo-400" />
                     Logs
                   </button>
-
-                  <button
-                    onClick={() => setSelectedWebhookApp(app)}
-                    title="Configurar Webhook URL no GitHub"
-                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
-                  >
-                    <Webhook className="w-4 h-4 text-emerald-400" />
-                  </button>
                 </div>
 
+                {/* Delete */}
                 <button
                   onClick={() => handleDelete(app.id, app.name)}
-                  title="Deletar aplicação"
-                  className="p-2 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors"
+                  title="Deletar aplicação permanentemente"
+                  className="p-2 rounded-xl text-rose-400 hover:bg-rose-500/10 transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -415,11 +575,112 @@ export const AppsPage: React.FC = () => {
         </div>
       )}
 
+      {/* Modal: Editar Variáveis de Ambiente (.env) */}
+      {selectedEnvApp && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-lg overflow-hidden shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-5 h-5 text-amber-400" />
+                <h3 className="font-bold text-white text-base">Variáveis de Ambiente (.env): {selectedEnvApp.name}</h3>
+              </div>
+              <button onClick={() => setSelectedEnvApp(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300">
+              Edite as chaves e valores no formato <code className="text-amber-300 font-mono">CHAVE=VALOR</code> (uma por linha):
+            </p>
+
+            <textarea
+              rows={8}
+              value={envString}
+              onChange={(e) => setEnvString(e.target.value)}
+              placeholder="DATABASE_URL=postgresql://...&#10;JWT_SECRET=...&#10;NODE_ENV=production"
+              className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs font-mono text-emerald-300 focus:outline-none focus:border-indigo-500 leading-relaxed"
+            />
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setSelectedEnvApp(null)}
+                className="px-4 py-2 text-slate-400 hover:text-white text-xs font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => handleSaveEnv(true)}
+                disabled={savingEnv}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/30 transition-all active:scale-95 disabled:opacity-50"
+              >
+                {savingEnv ? 'Salvando & Reiniciando...' : 'Salvar & Aplicar (.env)'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Vincular Domínio & Subdomínio */}
+      {selectedDomainApp && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-md overflow-hidden shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Globe className="w-5 h-5 text-indigo-400" />
+                <h3 className="font-bold text-white text-base">Domínio / Subdomínio (Hostinger)</h3>
+              </div>
+              <button onClick={() => setSelectedDomainApp(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300">
+              Digite o domínio ou subdomínio que deseja apontar para este app (ex: <code className="text-indigo-300">api.meusite.com.br</code> ou <code className="text-indigo-300">meusite.com</code>):
+            </p>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase mb-1.5">
+                Nome do Domínio *
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="ex: app.meusite.com.br"
+                value={domainInput}
+                onChange={(e) => setDomainInput(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-indigo-500"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                🔒 O Caddy emitirá o certificado SSL (HTTPS com cadeado) automaticamente.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setSelectedDomainApp(null)}
+                className="px-4 py-2 text-slate-400 hover:text-white text-xs font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveDomain}
+                disabled={savingDomain}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/30 transition-all active:scale-95 disabled:opacity-50"
+              >
+                {savingDomain ? 'Configurando SSL...' : 'Salvar Domínio'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal: Histórico de Deploys */}
       {selectedDeploymentsApp && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-2xl border border-slate-800 w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="p-4 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="p-5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Clock className="w-5 h-5 text-emerald-400" />
                 <span className="font-bold text-white text-sm">Histórico de Deploys: {selectedDeploymentsApp.name}</span>
@@ -429,7 +690,7 @@ export const AppsPage: React.FC = () => {
               </button>
             </div>
 
-            <div className="p-4 flex-1 overflow-y-auto space-y-3">
+            <div className="p-4 flex-1 overflow-y-auto space-y-3 custom-scrollbar">
               {deploymentsList.length === 0 ? (
                 <div className="text-center py-8 text-slate-500 text-xs">
                   Nenhum registro de build anterior encontrado.
@@ -438,7 +699,7 @@ export const AppsPage: React.FC = () => {
                 deploymentsList.map((dep) => (
                   <div
                     key={dep.id}
-                    className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between hover:border-slate-700 transition-colors"
+                    className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between hover:border-slate-700 transition-colors"
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
@@ -450,7 +711,7 @@ export const AppsPage: React.FC = () => {
                           <AlertCircle className="w-4 h-4 text-rose-400" />
                         )}
                         <span className="font-bold text-slate-200 text-xs">{dep.commitMessage || 'Deploy'}</span>
-                        <span className="text-[10px] font-mono text-slate-500 bg-slate-800 px-1.5 py-0.2 rounded">
+                        <span className="text-[10px] font-mono text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded">
                           {dep.branch}
                         </span>
                       </div>
@@ -462,7 +723,7 @@ export const AppsPage: React.FC = () => {
                     <button
                       onClick={() => setSelectedBuildLogs(dep)}
                       title="Ver saída de logs deste build"
-                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-semibold transition-colors"
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-semibold transition-colors"
                     >
                       Ver Logs
                     </button>
@@ -476,9 +737,9 @@ export const AppsPage: React.FC = () => {
 
       {/* Modal: GitHub Actions Workflow YAML */}
       {selectedWorkflowApp && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-2xl border border-slate-800 w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="p-4 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="p-5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <FileCode2 className="w-5 h-5 text-indigo-400" />
                 <span className="font-bold text-white text-sm">GitHub Actions CI/CD Workflow</span>
@@ -488,12 +749,12 @@ export const AppsPage: React.FC = () => {
               </button>
             </div>
 
-            <div className="p-4 space-y-3">
+            <div className="p-5 space-y-3">
               <p className="text-xs text-slate-300">
                 Salve este código no seu repositório GitHub dentro de <code className="text-indigo-300 bg-slate-900 px-1.5 py-0.5 rounded font-mono">.github/workflows/deploy.yml</code>:
               </p>
 
-              <div className="relative bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-xs text-emerald-400 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-72">
+              <div className="relative bg-slate-950 p-4 rounded-2xl border border-slate-800 font-mono text-xs text-emerald-400 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-72">
                 {workflowYaml}
               </div>
 
@@ -513,8 +774,8 @@ export const AppsPage: React.FC = () => {
 
       {/* Modal: Build Logs Output */}
       {selectedBuildLogs && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0a0f1c] rounded-2xl border border-slate-800 w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0a0f1c] rounded-3xl border border-slate-800 w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
             <div className="p-4 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Terminal className="w-5 h-5 text-emerald-400" />
@@ -525,7 +786,7 @@ export const AppsPage: React.FC = () => {
               </button>
             </div>
 
-            <div className="p-4 flex-1 overflow-auto font-mono text-xs text-emerald-300 bg-black/90 whitespace-pre-wrap leading-relaxed">
+            <div className="p-5 flex-1 overflow-auto font-mono text-xs text-emerald-300 bg-black/90 whitespace-pre-wrap leading-relaxed">
               {selectedBuildLogs.buildLogs || 'Nenhum log gravado para este build.'}
             </div>
           </div>
@@ -534,8 +795,8 @@ export const AppsPage: React.FC = () => {
 
       {/* Modal: Webhook Info */}
       {selectedWebhookApp && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-2xl border border-slate-800 w-full max-w-lg overflow-hidden shadow-2xl p-6">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-lg overflow-hidden shadow-2xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-white text-base flex items-center gap-2">
                 <Webhook className="w-5 h-5 text-indigo-400" />
@@ -569,7 +830,7 @@ export const AppsPage: React.FC = () => {
             <div className="flex justify-end">
               <button
                 onClick={() => setSelectedWebhookApp(null)}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold"
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold"
               >
                 Concluído
               </button>
@@ -580,12 +841,12 @@ export const AppsPage: React.FC = () => {
 
       {/* Modal: Novo Deploy */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-2xl border border-slate-800 w-full max-w-lg overflow-hidden shadow-2xl">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-lg overflow-hidden shadow-2xl">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
               <h3 className="font-bold text-white text-lg flex items-center gap-2">
                 <Plus className="w-5 h-5 text-indigo-400" />
-                Novo Deploy com CI/CD
+                Novo Deploy de Aplicação
               </h3>
               <button
                 onClick={() => setShowCreateModal(false)}
@@ -595,7 +856,7 @@ export const AppsPage: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleCreateApp} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+            <form onSubmit={handleCreateApp} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
                   Nome da Aplicação *
@@ -603,7 +864,7 @@ export const AppsPage: React.FC = () => {
                 <input
                   type="text"
                   required
-                  placeholder="ex: minha-api-node ou frontend-next"
+                  placeholder="ex: minha-api-node ou frontend-react"
                   value={appName}
                   onChange={(e) => setAppName(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
@@ -676,7 +937,7 @@ export const AppsPage: React.FC = () => {
                   <input
                     type="text"
                     required
-                    placeholder="node:20-alpine ou nginx:alpine"
+                    placeholder="nginx:alpine ou node:20-alpine"
                     value={imageName}
                     onChange={(e) => setImageName(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
@@ -686,26 +947,26 @@ export const AppsPage: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Domínio (Opcional - Ativa HTTPS automático)
+                  Domínio / Subdomínio (Hostinger Opcional)
                 </label>
                 <input
                   type="text"
                   placeholder="ex: api.meusite.com.br"
-                  value={domain}
-                  onChange={(e) => setDomain(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
+                  value={createDomain}
+                  onChange={(e) => setCreateDomain(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Variáveis de Ambiente (.env)
+                  Variáveis de Ambiente Iniciais (.env)
                 </label>
                 <textarea
-                  rows={4}
-                  placeholder="CHAVE=VALOR&#10;DATABASE_URL=..."
-                  value={envString}
-                  onChange={(e) => setEnvString(e.target.value)}
+                  rows={3}
+                  placeholder="CHAVE=VALOR&#10;PORT=3000"
+                  value={createEnvString}
+                  onChange={(e) => setCreateEnvString(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-xs font-mono focus:outline-none focus:border-indigo-500"
                 ></textarea>
               </div>
@@ -733,12 +994,12 @@ export const AppsPage: React.FC = () => {
 
       {/* Modal: Live Logs */}
       {selectedLogsApp && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0a0f1c] rounded-2xl border border-slate-800 w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0a0f1c] rounded-3xl border border-slate-800 w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
             <div className="p-4 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-indigo-400" />
-                <span className="font-bold text-white text-sm">Logs em Execução: {selectedLogsApp.name}</span>
+                <span className="font-bold text-white text-sm">Logs da Aplicação: {selectedLogsApp.name}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -757,7 +1018,7 @@ export const AppsPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="p-4 flex-1 overflow-auto font-mono text-xs text-slate-300 bg-black/90 whitespace-pre-wrap leading-relaxed">
+            <div className="p-5 flex-1 overflow-auto font-mono text-xs text-emerald-300 bg-black/90 whitespace-pre-wrap leading-relaxed custom-scrollbar">
               {logsLoading ? 'Carregando logs...' : logsText}
             </div>
           </div>

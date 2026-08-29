@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { AppService } from '../services/app.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { CicdService } from '../services/cicd.service.js';
+import { CaddyService } from '../services/caddy.service.js';
 import { dbStorage } from '../db/storage.js';
 import { authMiddleware } from './auth.routes.js';
 
@@ -41,6 +42,56 @@ appRouter.post('/', async (req: Request, res: Response): Promise<void> => {
     }).catch(() => {});
 
     res.status(201).json(created);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update App Environment Variables (.env)
+appRouter.put('/:id/env', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const app = dbStorage.getAppById(req.params.id);
+    if (!app) {
+      res.status(404).json({ error: 'App não encontrado' });
+      return;
+    }
+
+    const { env } = req.body;
+    app.env = env || {};
+    app.updatedAt = new Date().toISOString();
+    dbStorage.saveApp(app);
+
+    // If restart requested
+    if (req.query.redeploy === 'true') {
+      await CicdService.executeDeploy(app, {
+        commitMessage: 'Atualização de Variáveis de Ambiente (.env)',
+        triggeredBy: 'manual',
+      });
+    }
+
+    res.json({ success: true, app });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update or add Domain / Subdomain to App
+appRouter.put('/:id/domain', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const app = dbStorage.getAppById(req.params.id);
+    if (!app) {
+      res.status(404).json({ error: 'App não encontrado' });
+      return;
+    }
+
+    const { domain } = req.body;
+    app.domain = domain ? domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '') : undefined;
+    app.updatedAt = new Date().toISOString();
+    dbStorage.saveApp(app);
+
+    await CaddyService.syncCaddyfile();
+
+    res.json({ success: true, app });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
