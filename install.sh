@@ -35,16 +35,22 @@ sudo ufw allow 3000/tcp || true
 sudo ufw allow 4000/tcp || true
 sudo ufw --force enable || true
 
-# 4. Criar diretório de dados
+# 4. Baixar repositório do AegisPanel
 INSTALL_DIR="/opt/aegispanel"
 echo "📁 [4/5] Configurando diretório da aplicação em $INSTALL_DIR..."
+
+if [ -d "$INSTALL_DIR/.git" ]; then
+    echo "🔄 Atualizando repositório existente..."
+    cd $INSTALL_DIR
+    git pull origin main
+else
+    sudo rm -rf $INSTALL_DIR
+    sudo git clone https://github.com/WendelDev0/aegispanel.git $INSTALL_DIR
+    cd $INSTALL_DIR
+fi
+
 sudo mkdir -p $INSTALL_DIR/data/caddy
 sudo chown -R $USER:$USER $INSTALL_DIR
-
-# Clonar o repositório oficial
-if [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
-    git clone https://github.com/WendelDev0/aegispanel.git $INSTALL_DIR || cp -r . $INSTALL_DIR
-fi
 
 # Criar Caddyfile inicial se não existir
 if [ ! -f "$INSTALL_DIR/data/caddy/Caddyfile" ]; then
