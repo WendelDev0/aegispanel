@@ -67,6 +67,20 @@ export interface AppRecord {
   updatedAt: string;
 }
 
+export interface CronJobRecord {
+  id: string;
+  name: string;
+  schedule: string; // e.g. "0 3 * * *"
+  type: 'shell' | 'backup' | 'webhook';
+  command?: string;
+  webhookUrl?: string;
+  enabled: boolean;
+  lastRunAt?: string;
+  lastStatus?: 'success' | 'failed';
+  lastOutput?: string;
+  createdAt: string;
+}
+
 export interface DomainRecord {
   id: string;
   domain: string;
@@ -133,6 +147,7 @@ interface DatabaseSchema {
   databases: DatabaseRecord[];
   apps: AppRecord[];
   deployments: DeploymentRecord[];
+  cronJobs: CronJobRecord[];
   domains: DomainRecord[];
   backups: BackupRecord[];
   firewallRules: FirewallRule[];
@@ -145,6 +160,27 @@ const DEFAULT_DATA: DatabaseSchema = {
   databases: [],
   apps: [],
   deployments: [],
+  cronJobs: [
+    {
+      id: 'cron-daily-backup',
+      name: 'Backup Noturno Automático',
+      schedule: '0 3 * * *',
+      type: 'backup',
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      lastStatus: 'success',
+      lastOutput: 'Rotina de backup automático agendada para as 03:00'
+    },
+    {
+      id: 'cron-docker-prune',
+      name: 'Limpeza de Cache Docker',
+      schedule: '0 0 * * 0',
+      type: 'shell',
+      command: 'docker system prune -f',
+      enabled: false,
+      createdAt: new Date().toISOString()
+    }
+  ],
   domains: [],
   backups: [],
   firewallRules: [
@@ -301,6 +337,34 @@ class JsonStorage {
     }
     this.save();
     return dep;
+  }
+
+  // Cron Jobs
+  getCronJobs(): CronJobRecord[] {
+    return this.data.cronJobs || [];
+  }
+
+  saveCronJob(job: CronJobRecord): CronJobRecord {
+    if (!this.data.cronJobs) this.data.cronJobs = [];
+    const idx = this.data.cronJobs.findIndex(j => j.id === job.id);
+    if (idx >= 0) {
+      this.data.cronJobs[idx] = job;
+    } else {
+      this.data.cronJobs.push(job);
+    }
+    this.save();
+    return job;
+  }
+
+  removeCronJob(id: string): boolean {
+    if (!this.data.cronJobs) return false;
+    const initialLen = this.data.cronJobs.length;
+    this.data.cronJobs = this.data.cronJobs.filter(j => j.id !== id);
+    if (this.data.cronJobs.length !== initialLen) {
+      this.save();
+      return true;
+    }
+    return false;
   }
 
   // Domains

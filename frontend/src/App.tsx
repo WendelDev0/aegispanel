@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Sidebar, NavTab } from './components/Sidebar.js';
 import { Navbar } from './components/Navbar.js';
 import { DashboardPage } from './pages/DashboardPage.js';
+import { TemplatesPage } from './pages/TemplatesPage.js';
 import { AppsPage } from './pages/AppsPage.js';
 import { DatabasesPage } from './pages/DatabasesPage.js';
 import { ContainersPage } from './pages/ContainersPage.js';
@@ -13,6 +14,7 @@ import { FileManagerPage } from './pages/FileManagerPage.js';
 import { QueryStudioPage } from './pages/QueryStudioPage.js';
 import { FirewallPage } from './pages/FirewallPage.js';
 import { BackupsPage } from './pages/BackupsPage.js';
+import { CronPage } from './pages/CronPage.js';
 import { AuthPage } from './pages/AuthPage.js';
 import { api } from './services/api.js';
 import { socket } from './services/socket.js';
@@ -58,15 +60,15 @@ export function App() {
   }, [token]);
 
   useEffect(() => {
-    const handleAuthChange = () => {
-      setToken(localStorage.getItem('aegis_token'));
-      const raw = localStorage.getItem('aegis_user');
-      setUser(raw ? JSON.parse(raw) : null);
-    };
+    if (!token) return;
+    const interval = setInterval(fetchOverview, 10000);
+    return () => clearInterval(interval);
+  }, [token]);
 
-    window.addEventListener('aegis_auth_change', handleAuthChange);
-    return () => window.removeEventListener('aegis_auth_change', handleAuthChange);
-  }, []);
+  const handleLoginSuccess = (newUser: any, newToken: string) => {
+    setToken(newToken);
+    setUser(newUser);
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('aegis_token');
@@ -75,59 +77,64 @@ export function App() {
     setUser(null);
   };
 
-  const handleLoginSuccess = (userData: User, tokenData: string) => {
-    setUser(userData);
-    setToken(tokenData);
-  };
-
-  if (!token || !user) {
+  if (!token) {
     return <AuthPage onLoginSuccess={handleLoginSuccess} />;
   }
 
-  const serverName = overview?.settings.serverName || 'Aegis VPS';
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'dashboard':
+        return <DashboardPage overview={overview} realtimeStats={realtimeStats} setActiveTab={setActiveTab} />;
+      case 'templates':
+        return <TemplatesPage setActiveTab={setActiveTab} />;
+      case 'apps':
+        return <AppsPage />;
+      case 'databases':
+        return <DatabasesPage setActiveTab={setActiveTab} />;
+      case 'querystudio':
+        return <QueryStudioPage />;
+      case 'filemanager':
+        return <FileManagerPage />;
+      case 'cron':
+        return <CronPage />;
+      case 'containers':
+        return <ContainersPage />;
+      case 'domains':
+        return <DomainsPage />;
+      case 'firewall':
+        return <FirewallPage />;
+      case 'backups':
+        return <BackupsPage />;
+      case 'terminal':
+        return <TerminalPage />;
+      case 'monitor':
+        return <SystemMonitorPage realtimeStats={realtimeStats} />;
+      case 'settings':
+        return <SettingsPage />;
+      default:
+        return <DashboardPage overview={overview} realtimeStats={realtimeStats} setActiveTab={setActiveTab} />;
+    }
+  };
 
   return (
-    <div className="flex h-screen bg-[#090d16] text-slate-100 overflow-hidden font-sans">
-      {/* Sidebar */}
+    <div className="flex h-screen bg-[#070a13] text-slate-100 font-sans overflow-hidden">
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        serverName={serverName}
+        serverName={overview?.settings?.serverName || 'Aegis VPS'}
       />
 
-      {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Navbar
           stats={realtimeStats}
-          serverName={serverName}
-          username={user.username}
+          serverName={overview?.settings?.serverName || 'Aegis VPS'}
+          username={user?.username || 'admin'}
           onLogout={handleLogout}
           onRefresh={fetchOverview}
         />
 
-        <main className="flex-1 overflow-y-auto p-6 md:p-8">
-          <div className="max-w-7xl mx-auto">
-            {activeTab === 'dashboard' && (
-              <DashboardPage
-                overview={overview}
-                realtimeStats={realtimeStats}
-                setActiveTab={setActiveTab}
-              />
-            )}
-            {activeTab === 'apps' && <AppsPage />}
-            {activeTab === 'databases' && <DatabasesPage setActiveTab={setActiveTab} />}
-            {activeTab === 'querystudio' && <QueryStudioPage />}
-            {activeTab === 'filemanager' && <FileManagerPage />}
-            {activeTab === 'containers' && <ContainersPage />}
-            {activeTab === 'domains' && <DomainsPage />}
-            {activeTab === 'firewall' && <FirewallPage />}
-            {activeTab === 'backups' && <BackupsPage />}
-            {activeTab === 'terminal' && <TerminalPage />}
-            {activeTab === 'monitor' && (
-              <SystemMonitorPage realtimeStats={realtimeStats} />
-            )}
-            {activeTab === 'settings' && <SettingsPage />}
-          </div>
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 custom-scrollbar">
+          {renderContent()}
         </main>
       </div>
     </div>
