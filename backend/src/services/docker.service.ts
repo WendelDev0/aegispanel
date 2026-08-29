@@ -1,6 +1,5 @@
 import Docker from 'dockerode';
 import { CONFIG } from '../config.js';
-import stream from 'stream';
 
 export interface ContainerInfo {
   id: string;
@@ -16,14 +15,54 @@ export interface ContainerInfo {
 class DockerManager {
   private docker: Docker;
   private isAvailable: boolean = false;
+  private connectionType: string = 'unknown';
 
   constructor() {
+    this.docker = this.createDefaultClient();
+    this.detectAndConnect();
+  }
+
+  private createDefaultClient(): Docker {
     if (CONFIG.IS_WINDOWS) {
-      this.docker = new Docker({ socketPath: '//./pipe/docker_engine' });
-    } else {
-      this.docker = new Docker({ socketPath: '/var/run/docker.sock' });
+      return new Docker({ socketPath: '//./pipe/docker_engine' });
     }
-    this.testConnection();
+    return new Docker({ socketPath: '/var/run/docker.sock' });
+  }
+
+  async detectAndConnect(): Promise<boolean> {
+    const candidates: Array<{ name: string; options: Docker.DockerOptions }> = [];
+
+    if (CONFIG.IS_WINDOWS) {
+      candidates.push(
+        { name: 'Windows Named Pipe (docker_engine)', options: { socketPath: '//./pipe/docker_engine' } },
+        { name: 'Windows Docker Desktop Linux Pipe', options: { socketPath: '//./pipe/dockerDesktopLinuxEngine' } },
+        { name: 'Windows TCP (localhost:2375)', options: { host: 'localhost', port: 2375 } },
+        { name: 'Windows TCP (127.0.0.1:2375)', options: { host: '127.0.0.1', port: 2375 } }
+      );
+    } else {
+      candidates.push(
+        { name: 'Linux Socket (/var/run/docker.sock)', options: { socketPath: '/var/run/docker.sock' } },
+        { name: 'Rootless Socket', options: { socketPath: `${process.env.XDG_RUNTIME_DIR || ''}/docker.sock` } }
+      );
+    }
+
+    for (const cand of candidates) {
+      try {
+        const client = new Docker(cand.options);
+        await client.ping();
+        this.docker = client;
+        this.isAvailable = true;
+        this.connectionType = cand.name;
+        console.log(`🐳 [Docker Engine] Conectado com sucesso via: ${cand.name}`);
+        return true;
+      } catch {
+        // try next
+      }
+    }
+
+    this.isAvailable = false;
+    this.connectionType = 'offline';
+    return false;
   }
 
   async testConnection(): Promise<boolean> {
@@ -31,9 +70,8 @@ class DockerManager {
       await this.docker.ping();
       this.isAvailable = true;
       return true;
-    } catch (err) {
-      this.isAvailable = false;
-      return false;
+    } catch {
+      return this.detectAndConnect();
     }
   }
 
@@ -45,10 +83,14 @@ class DockerManager {
     return this.isAvailable;
   }
 
+  getConnectionType(): string {
+    return this.connectionType;
+  }
+
   async listContainers(all: boolean = true): Promise<ContainerInfo[]> {
     try {
-      await this.testConnection();
-      if (!this.isAvailable) return [];
+      const connected = await this.testConnection();
+      if (!connected) return [];
 
       const containers = await this.docker.listContainers({ all });
       return containers.map(c => {
@@ -72,7 +114,7 @@ class DockerManager {
         };
       });
     } catch (err) {
-      console.error('Error listing containers:', err);
+      console.warn('Docker list warning (daemon offline or starting):', (err as Error).message);
       return [];
     }
   }
@@ -81,11 +123,11 @@ class DockerManager {
     try {
       const container = this.docker.getContainer(containerId);
       const statsStream = await container.stats({ stream: false });
-      
+
       const cpuDelta = statsStream.cpu_stats.cpu_usage.total_usage - (statsStream.precpu_stats.cpu_usage.total_usage || 0);
       const systemDelta = statsStream.cpu_stats.system_cpu_usage - (statsStream.precpu_stats.system_cpu_usage || 0);
       const numCores = statsStream.cpu_stats.online_cpus || 1;
-      
+
       let cpuPercent = 0;
       if (systemDelta > 0 && cpuDelta > 0) {
         cpuPercent = (cpuDelta / systemDelta) * numCores * 100;
@@ -101,7 +143,7 @@ class DockerManager {
         memoryLimitBytes: memLimit,
         memoryPercent: Math.round(memPercent * 10) / 10,
       };
-    } catch (err) {
+    } catch {
       return { cpuPercent: 0, memoryUsedBytes: 0, memoryLimitBytes: 0, memoryPercent: 0 };
     }
   }
@@ -187,6 +229,13 @@ class DockerManager {
     restartPolicy?: string;
     labels?: { [key: string]: string };
   }): Promise<string> {
+    await this.testConnection();
+    if (!this.isAvailable) {
+      throw new Error(
+        'Docker Engine não está ativo. No Windows, inicie o Docker Desktop. Na VPS Ubuntu, o Docker inicia automaticamente.'
+      );
+    }
+
     try {
       // Ensure image exists
       try {
