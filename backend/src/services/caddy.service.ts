@@ -16,12 +16,20 @@ export class CaddyService {
     const apps = dbStorage.getApps().filter(a => a.domain && a.status === 'running');
 
     let content = `# Aegis Auto-Generated Caddyfile\n`;
-    content += `{\n  email admin@localhost\n}\n\n`;
+    content += `{\n  email admin@aegispanel.internal\n}\n\n`;
+
+    const isLocalDomain = (dom: string) => {
+      const clean = dom.toLowerCase();
+      return clean === 'localhost' || clean.endsWith('.localhost') || clean.endsWith('.local') || clean === '127.0.0.1';
+    };
 
     // Direct domain mappings
     for (const d of domains) {
       if (d.status === 'active') {
         content += `${d.domain} {\n`;
+        if (isLocalDomain(d.domain)) {
+          content += `  tls internal\n`;
+        }
         content += `  reverse_proxy localhost:${d.targetPort}\n`;
         content += `  encode gzip zstd\n`;
         content += `}\n\n`;
@@ -32,6 +40,9 @@ export class CaddyService {
     for (const app of apps) {
       if (app.domain && !domains.some(d => d.domain === app.domain)) {
         content += `${app.domain} {\n`;
+        if (isLocalDomain(app.domain)) {
+          content += `  tls internal\n`;
+        }
         content += `  reverse_proxy localhost:${app.port}\n`;
         content += `  encode gzip zstd\n`;
         content += `}\n\n`;
