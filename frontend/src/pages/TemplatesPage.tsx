@@ -12,21 +12,35 @@ import {
   Globe,
   Database,
   Activity,
-  X
+  X,
+  Search,
+  Key,
+  ShieldCheck,
+  Zap,
+  MessageSquare,
+  Copy,
+  Terminal,
+  BookOpen,
+  Server
 } from 'lucide-react';
 import { api } from '../services/api.js';
+import { DatabaseRecord } from '../types/index.js';
 import { NavTab } from '../components/Sidebar.js';
 
 export interface AppTemplate {
   id: string;
   name: string;
-  category: 'automation' | 'database' | 'cms' | 'monitoring' | 'tools';
+  category: 'whatsapp' | 'automation' | 'database' | 'cms' | 'monitoring' | 'tools';
   description: string;
   iconUrl: string;
   defaultPort: number;
   image: string;
+  version: string;
+  author: string;
   env: Record<string, string>;
+  features: string[];
   tags: string[];
+  docsUrl?: string;
 }
 
 interface TemplatesPageProps {
@@ -35,33 +49,64 @@ interface TemplatesPageProps {
 
 export const TemplatesPage: React.FC<TemplatesPageProps> = ({ setActiveTab }) => {
   const [templates, setTemplates] = useState<AppTemplate[]>([]);
+  const [databases, setDatabases] = useState<DatabaseRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // Install modal
   const [selectedTemplate, setSelectedTemplate] = useState<AppTemplate | null>(null);
   const [customName, setCustomName] = useState('');
   const [customPort, setCustomPort] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [selectedPostgresId, setSelectedPostgresId] = useState('');
+  const [selectedRedisId, setSelectedRedisId] = useState('');
 
-  const fetchTemplates = async () => {
+  // Post install modal
+  const [installedApp, setInstalledApp] = useState<{ name: string; port: number; apiKey?: string; templateId: string } | null>(null);
+  const [copiedKey, setCopiedKey] = useState(false);
+
+  const fetchTemplatesAndDbs = async () => {
     try {
       setLoading(true);
-      const res = await api.get('/templates');
-      setTemplates(res.data);
+      const [resTemplates, resDbs] = await Promise.all([
+        api.get('/templates'),
+        api.get('/databases'),
+      ]);
+      setTemplates(resTemplates.data);
+      setDatabases(resDbs.data);
     } catch (err) {
-      console.error('Failed to fetch templates:', err);
+      console.error('Failed to fetch templates or databases:', err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchTemplates();
+    fetchTemplatesAndDbs();
   }, []);
+
+  const generateApiKey = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let key = 'EVO_';
+    for (let i = 0; i < 28; i++) {
+      key += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setApiKey(key);
+  };
 
   const openInstallModal = (t: AppTemplate) => {
     setSelectedTemplate(t);
     setCustomName(`${t.id}-app`);
     setCustomPort(t.defaultPort.toString());
+    if (t.id.includes('evolution')) {
+      generateApiKey();
+      const pg = databases.find(d => d.type === 'postgres');
+      if (pg) setSelectedPostgresId(pg.id);
+      const red = databases.find(d => d.type === 'redis');
+      if (red) setSelectedRedisId(red.id);
+    }
   };
 
   const handleInstall = async (e: React.FormEvent) => {
@@ -70,17 +115,25 @@ export const TemplatesPage: React.FC<TemplatesPageProps> = ({ setActiveTab }) =>
 
     try {
       setInstallingId(selectedTemplate.id);
-      await api.post('/templates/install', {
+      const res = await api.post('/templates/install', {
         templateId: selectedTemplate.id,
         customName: customName || undefined,
         customPort: customPort ? parseInt(customPort) : undefined,
+        apiKey: apiKey || undefined,
+        postgresDbId: selectedPostgresId || undefined,
+        redisDbId: selectedRedisId || undefined,
       });
 
+      const installedPort = customPort ? parseInt(customPort) : selectedTemplate.defaultPort;
+      const appKey = apiKey;
+
       setSelectedTemplate(null);
-      alert(`🎉 Aplicação "${selectedTemplate.name}" instalada com sucesso na porta :${customPort}!`);
-      if (setActiveTab) {
-        setActiveTab('apps');
-      }
+      setInstalledApp({
+        name: customName || selectedTemplate.name,
+        port: installedPort,
+        apiKey: appKey,
+        templateId: selectedTemplate.id,
+      });
     } catch (err: any) {
       alert('Erro ao instalar template: ' + (err.response?.data?.error || err.message));
     } finally {
@@ -89,97 +142,185 @@ export const TemplatesPage: React.FC<TemplatesPageProps> = ({ setActiveTab }) =>
   };
 
   const categories = [
-    { id: 'all', label: 'Todas as Aplicações' },
-    { id: 'automation', label: 'Automação & IA (WhatsApp/n8n)' },
-    { id: 'cms', label: 'CMS & Sites (WordPress)' },
-    { id: 'monitoring', label: 'Monitoramento (Uptime Kuma)' },
-    { id: 'database', label: 'Bancos & Backend (PocketBase)' },
-    { id: 'tools', label: 'Armazenamento (MinIO S3)' },
+    { id: 'all', label: 'Todos os Apps', count: templates.length },
+    { id: 'whatsapp', label: 'WhatsApp & Chatbots', count: templates.filter(t => t.category === 'whatsapp').length },
+    { id: 'automation', label: 'Automação & IA', count: templates.filter(t => t.category === 'automation').length },
+    { id: 'cms', label: 'CMS & Sites', count: templates.filter(t => t.category === 'cms').length },
+    { id: 'monitoring', label: 'Monitoramento', count: templates.filter(t => t.category === 'monitoring').length },
+    { id: 'database', label: 'Bancos & Backend', count: templates.filter(t => t.category === 'database').length },
+    { id: 'tools', label: 'Armazenamento S3', count: templates.filter(t => t.category === 'tools').length },
   ];
 
   const filteredTemplates = templates.filter((t) => {
-    if (selectedCategory === 'all') return true;
-    return t.category === selectedCategory;
+    const matchesCat = selectedCategory === 'all' || t.category === selectedCategory;
+    const matchesSearch =
+      t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      t.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      t.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
+    return matchesCat && matchesSearch;
   });
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(true);
+    setTimeout(() => setCopiedKey(false), 2000);
+  };
+
+  const postgresDbs = databases.filter(d => d.type === 'postgres');
+  const redisDbs = databases.filter(d => d.type === 'redis');
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-            <ShoppingBag className="w-6 h-6 text-indigo-400" />
+      {/* Hero WhatsApp Evolution Banner */}
+      <div className="bg-gradient-to-r from-emerald-950/70 via-indigo-950/50 to-slate-900 rounded-3xl p-6 lg:p-8 border border-emerald-500/30 shadow-2xl relative overflow-hidden">
+        <div className="relative z-10 max-w-2xl space-y-3">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-semibold">
+            <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+            Stack Oficial de WhatsApp & Automações
+          </div>
+
+          <h2 className="text-2xl lg:text-3xl font-extrabold text-white tracking-tight">
             Marketplace de Aplicações 1-Clique
           </h2>
-          <p className="text-sm text-slate-400 mt-1">
-            Instale ferramentas de automação WhatsApp (Evolution API, Typebot), n8n, WordPress, Uptime Kuma e S3 em 1 clique na sua VPS.
+
+          <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+            Instale a <strong>Evolution API v2 do WhatsApp</strong>, <strong>n8n</strong>, <strong>Chatwoot</strong>, <strong>Typebot</strong> e <strong>WordPress</strong> no seu servidor em segundos, com persistência total e banco de dados integrado.
           </p>
+
+          <div className="flex flex-wrap items-center gap-3 pt-2">
+            <button
+              onClick={() => {
+                const evo = templates.find(t => t.id === 'evolution-api-v2');
+                if (evo) openInstallModal(evo);
+              }}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-lg shadow-emerald-600/30 transition-all active:scale-95"
+            >
+              <Zap className="w-4 h-4" /> Instalar WhatsApp Evolution API
+            </button>
+
+            <button
+              onClick={() => {
+                const n8nApp = templates.find(t => t.id === 'n8n');
+                if (n8nApp) openInstallModal(n8nApp);
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/40 text-indigo-200 border border-indigo-500/30 font-semibold text-xs transition-all"
+            >
+              <Bot className="w-4 h-4 text-indigo-400" /> Instalar n8n IA
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Category Pills */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2">
-        {categories.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => setSelectedCategory(c.id)}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-              selectedCategory === c.id
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 border border-slate-800'
-            }`}
-          >
-            {c.label}
-          </button>
-        ))}
+      {/* Search and Categories Bar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        {/* Search */}
+        <div className="relative flex-1 max-w-md">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            placeholder="Buscar por nome, tag (ex: WhatsApp, IA, CMS, S3)..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full bg-[#0f172a] border border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+          />
+        </div>
+
+        {/* Category Pills */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 md:pb-0 custom-scrollbar">
+          {categories.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => setSelectedCategory(c.id)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                selectedCategory === c.id
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                  : 'bg-slate-900/90 text-slate-400 hover:text-slate-200 border border-slate-800'
+              }`}
+            >
+              <span>{c.label}</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${selectedCategory === c.id ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-500'}`}>
+                {c.count}
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Templates Grid */}
       {loading ? (
-        <div className="flex items-center justify-center p-12 text-slate-400">
+        <div className="flex items-center justify-center p-16 text-slate-400">
           <RefreshCw className="w-6 h-6 animate-spin text-indigo-400" />
+        </div>
+      ) : filteredTemplates.length === 0 ? (
+        <div className="bg-[#0f172a]/60 rounded-3xl p-12 border border-slate-800 text-center">
+          <ShoppingBag className="w-8 h-8 text-slate-600 mx-auto mb-3" />
+          <h3 className="font-bold text-white text-base">Nenhum aplicativo encontrado</h3>
+          <p className="text-xs text-slate-400 mt-1">Tente buscar por outro termo ou selecione a categoria "Todos os Apps".</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredTemplates.map((template) => (
             <div
               key={template.id}
-              className="bg-[#0f172a]/80 rounded-2xl p-5 border border-slate-800 hover:border-indigo-500/50 transition-all flex flex-col justify-between group shadow-lg"
+              className={`bg-[#0f172a]/90 rounded-3xl p-6 border transition-all flex flex-col justify-between group shadow-xl hover:shadow-2xl ${
+                template.id === 'evolution-api-v2'
+                  ? 'border-emerald-500/40 hover:border-emerald-500 ring-1 ring-emerald-500/20'
+                  : 'border-slate-800 hover:border-indigo-500/40'
+              }`}
             >
-              <div className="space-y-3">
+              <div className="space-y-4">
+                {/* Top Row: Icon + Version + Port */}
                 <div className="flex items-start justify-between gap-3">
-                  <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 p-2.5 flex items-center justify-center">
-                    <img
-                      src={template.iconUrl}
-                      alt={template.name}
-                      className="w-full h-full object-contain rounded"
-                      onError={(e: any) => {
-                        e.target.style.display = 'none';
-                        e.target.parentElement.innerHTML = '🚀';
-                      }}
-                    />
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 p-2 flex items-center justify-center shadow-inner">
+                      <img
+                        src={template.iconUrl}
+                        alt={template.name}
+                        className="w-full h-full object-contain rounded"
+                        onError={(e: any) => {
+                          e.target.style.display = 'none';
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-mono font-bold text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">
+                          {template.version}
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono">by {template.author}</span>
+                      </div>
+                      <h3 className="font-bold text-white text-base group-hover:text-indigo-300 transition-colors mt-0.5">
+                        {template.name}
+                      </h3>
+                    </div>
                   </div>
 
-                  <span className="text-[11px] font-mono font-bold text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                  <span className="text-[11px] font-mono font-bold text-slate-300 bg-slate-950 px-2 py-1 rounded-xl border border-slate-800 shrink-0">
                     Porta :{template.defaultPort}
                   </span>
                 </div>
 
-                <div>
-                  <h3 className="font-bold text-white text-base group-hover:text-indigo-400 transition-colors">
-                    {template.name}
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1 line-clamp-2 leading-relaxed">
-                    {template.description}
-                  </p>
+                {/* Description */}
+                <p className="text-xs text-slate-400 leading-relaxed line-clamp-2">
+                  {template.description}
+                </p>
+
+                {/* Feature bullets */}
+                <div className="space-y-1.5 pt-1">
+                  {template.features.slice(0, 3).map((feat, idx) => (
+                    <div key={idx} className="flex items-start gap-2 text-[11px] text-slate-300">
+                      <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                      <span className="truncate">{feat}</span>
+                    </div>
+                  ))}
                 </div>
 
                 {/* Tags */}
-                <div className="flex flex-wrap gap-1.5 pt-1">
+                <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-800/80">
                   {template.tags.map((tag) => (
                     <span
                       key={tag}
-                      className="text-[10px] bg-slate-900/90 text-indigo-300 border border-slate-800 px-2 py-0.5 rounded-md font-mono"
+                      className="text-[10px] bg-slate-950 text-slate-400 border border-slate-800 px-2 py-0.5 rounded-lg font-mono"
                     >
                       {tag}
                     </span>
@@ -187,29 +328,45 @@ export const TemplatesPage: React.FC<TemplatesPageProps> = ({ setActiveTab }) =>
                 </div>
               </div>
 
-              {/* Install Button */}
-              <div className="pt-4 mt-4 border-t border-slate-800/80">
+              {/* Install Button & Docs */}
+              <div className="pt-4 mt-4 border-t border-slate-800/80 flex items-center gap-2">
                 <button
                   onClick={() => openInstallModal(template)}
                   disabled={installingId === template.id}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 transition-all active:scale-95 disabled:opacity-50"
+                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs shadow-lg transition-all active:scale-95 disabled:opacity-50 ${
+                    template.id === 'evolution-api-v2'
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
+                      : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30'
+                  }`}
                 >
                   <Download className={`w-4 h-4 ${installingId === template.id ? 'animate-bounce' : ''}`} />
-                  <span>{installingId === template.id ? 'Instalando na VPS...' : 'Instalar em 1-Clique'}</span>
+                  <span>{installingId === template.id ? 'Criando Container...' : 'Configurar & Instalar'}</span>
                 </button>
+
+                {template.docsUrl && (
+                  <a
+                    href={template.docsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Ver documentação oficial"
+                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                  </a>
+                )}
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Modal: Instalar Template */}
+      {/* Modal: Configurar e Instalar Template */}
       {selectedTemplate && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-2xl border border-slate-800 w-full max-w-md overflow-hidden shadow-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 p-2 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 p-2 flex items-center justify-center">
                   <img
                     src={selectedTemplate.iconUrl}
                     alt={selectedTemplate.name}
@@ -218,7 +375,7 @@ export const TemplatesPage: React.FC<TemplatesPageProps> = ({ setActiveTab }) =>
                 </div>
                 <div>
                   <h3 className="font-bold text-white text-base">Instalar {selectedTemplate.name}</h3>
-                  <p className="text-[11px] text-slate-400">Deploy automático com contêiner isolado</p>
+                  <p className="text-[11px] text-slate-400">{selectedTemplate.image}</p>
                 </div>
               </div>
               <button onClick={() => setSelectedTemplate(null)} className="text-slate-400 hover:text-white">
@@ -226,10 +383,10 @@ export const TemplatesPage: React.FC<TemplatesPageProps> = ({ setActiveTab }) =>
               </button>
             </div>
 
-            <form onSubmit={handleInstall} className="space-y-4">
+            <form onSubmit={handleInstall} className="p-6 space-y-4 overflow-y-auto custom-scrollbar">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase mb-1.5">
-                  Identificador / Nome do App *
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Identificador / Nome da Aplicação *
                 </label>
                 <input
                   type="text"
@@ -241,7 +398,7 @@ export const TemplatesPage: React.FC<TemplatesPageProps> = ({ setActiveTab }) =>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase mb-1.5">
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
                   Porta Host no Servidor *
                 </label>
                 <input
@@ -253,28 +410,180 @@ export const TemplatesPage: React.FC<TemplatesPageProps> = ({ setActiveTab }) =>
                 />
               </div>
 
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs font-mono text-slate-400 space-y-1">
-                <div>Imagem: <span className="text-emerald-400">{selectedTemplate.image}</span></div>
-                <div>Porta Interna: <span className="text-indigo-400">:{selectedTemplate.defaultPort}</span></div>
-              </div>
+              {/* Evolution API Specific Settings */}
+              {selectedTemplate.id === 'evolution-api-v2' && (
+                <div className="space-y-4 pt-2 border-t border-slate-800">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Key className="w-3.5 h-3.5" /> API Key Mestre da Evolution API
+                      </label>
+                      <button
+                        type="button"
+                        onClick={generateApiKey}
+                        className="text-[11px] text-indigo-400 hover:underline"
+                      >
+                        Gerar Nova Chave
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      className="w-full bg-slate-950 border border-emerald-500/40 rounded-xl px-3.5 py-2.5 text-emerald-300 text-xs font-mono focus:outline-none focus:border-emerald-500 select-all"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Você usará esta chave no header <code className="text-emerald-400">apikey: SUA_CHAVE</code> para autenticar chamadas de envio de WhatsApp.
+                    </p>
+                  </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+                  {/* Link with PostgreSQL Database */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                      <Database className="w-3.5 h-3.5 text-indigo-400" /> Vincular Banco PostgreSQL (Recomendado)
+                    </label>
+                    <select
+                      value={selectedPostgresId}
+                      onChange={(e) => setSelectedPostgresId(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="">Nenhum (Usar SQLite embutido local)</option>
+                      {postgresDbs.map((db) => (
+                        <option key={db.id} value={db.id}>
+                          {db.name} (Porta :{db.port} - User: {db.dbUser})
+                        </option>
+                      ))}
+                    </select>
+                    {postgresDbs.length === 0 && (
+                      <p className="text-[10px] text-amber-400 mt-1">
+                        💡 Dica: Crie um banco PostgreSQL na aba "Bancos de Dados" para salvar conversas com máxima performance.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Link with Redis Cache */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 text-amber-400" /> Vincular Cache Redis (Opcional)
+                    </label>
+                    <select
+                      value={selectedRedisId}
+                      onChange={(e) => setSelectedRedisId(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="">Nenhum (Sem cache Redis)</option>
+                      {redisDbs.map((db) => (
+                        <option key={db.id} value={db.id}>
+                          {db.name} (Porta :{db.port})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={() => setSelectedTemplate(null)}
-                  className="px-4 py-2 text-slate-400 hover:text-white text-xs font-medium"
+                  className="px-4 py-2.5 text-slate-400 hover:text-white text-xs font-medium"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={installingId === selectedTemplate.id}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/30 transition-all active:scale-95 disabled:opacity-50"
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/30 transition-all active:scale-95 disabled:opacity-50"
                 >
-                  {installingId === selectedTemplate.id ? 'Criando Container...' : 'Confirmar & Instalar'}
+                  {installingId === selectedTemplate.id ? 'Criando Container...' : 'Confirmar & Instalar Agora'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Sucesso Pós-Instalação com Guia Rápido */}
+      {installedApp && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0f172a] rounded-3xl border border-emerald-500/40 w-full max-w-lg overflow-hidden shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-emerald-400 font-bold text-base">
+                <Check className="w-5 h-5" />
+                <span>Aplicação Instalada com Sucesso!</span>
+              </div>
+              <button onClick={() => setInstalledApp(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300">
+              O contêiner de <strong>{installedApp.name}</strong> foi criado e já está rodando na porta <strong>:{installedApp.port}</strong>.
+            </p>
+
+            {/* Quick Links & Keys */}
+            <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3 text-xs font-mono">
+              <div>
+                <span className="text-slate-500 block text-[10px]">ENDEREÇO DE ACESSO</span>
+                <a
+                  href={`http://localhost:${installedApp.port}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-emerald-400 hover:underline flex items-center gap-1 font-bold"
+                >
+                  http://localhost:{installedApp.port}
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+
+              {installedApp.templateId === 'evolution-api-v2' && (
+                <>
+                  <div>
+                    <span className="text-slate-500 block text-[10px]">DOCUMENTAÇÃO SWAGGER EM TEMPO REAL</span>
+                    <a
+                      href={`http://localhost:${installedApp.port}/docs`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-indigo-400 hover:underline flex items-center gap-1"
+                    >
+                      http://localhost:{installedApp.port}/docs
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+
+                  {installedApp.apiKey && (
+                    <div>
+                      <div className="flex justify-between items-center text-[10px] text-slate-500 mb-1">
+                        <span>API KEY MESTRE (AUTENTICAÇÃO)</span>
+                        <button
+                          onClick={() => copyToClipboard(installedApp.apiKey || '')}
+                          className="text-emerald-400 hover:underline flex items-center gap-1"
+                        >
+                          {copiedKey ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                          {copiedKey ? 'Copiada!' : 'Copiar'}
+                        </button>
+                      </div>
+                      <div className="p-2 bg-slate-900 rounded-lg text-emerald-300 text-xs font-mono truncate select-all">
+                        {installedApp.apiKey}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => {
+                  setInstalledApp(null);
+                  if (setActiveTab) setActiveTab('apps');
+                }}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/30 transition-all active:scale-95"
+              >
+                Ir para Aplicações & Logs
+              </button>
+            </div>
           </div>
         </div>
       )}
