@@ -46,15 +46,20 @@ if [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
     git clone https://github.com/WendelDev0/aegispanel.git $INSTALL_DIR || cp -r . $INSTALL_DIR
 fi
 
+# Criar Caddyfile inicial se não existir
+if [ ! -f "$INSTALL_DIR/data/caddy/Caddyfile" ]; then
+    echo "# AegisPanel Default Caddyfile" > "$INSTALL_DIR/data/caddy/Caddyfile"
+fi
+
 # 5. Iniciar serviços via Docker Compose
 cd $INSTALL_DIR
-echo "🚀 [5/5] Iniciando contêineres do AegisPanel..."
-docker compose up -d
+echo "🚀 [5/5] Compilando e iniciando contêineres do AegisPanel..."
+docker compose up -d --build
 
 SERVER_IP=$(curl -s ifconfig.me || curl -s icanhazip.com || echo "IP_DO_SERVIDOR")
 
 echo ""
 echo "======================================================================"
-echo "🎉 AegisPanel instalado e iniciado com sucesso!"
+echo "🎉 AegisPanel instalado e iniciado com sucesso na sua VPS Contabo!"
 echo "👉 Acesse no seu navegador: http://$SERVER_IP:3000"
 echo "======================================================================"
