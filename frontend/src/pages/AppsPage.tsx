@@ -30,7 +30,8 @@ import {
   Key,
   ShieldCheck,
   HelpCircle,
-  FolderTree
+  FolderTree,
+  Settings2
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { AppRecord, DeploymentRecord } from '../types/index.js';
@@ -50,11 +51,19 @@ export const AppsPage: React.FC = () => {
   const [workflowYaml, setWorkflowYaml] = useState('');
   const [selectedBuildLogs, setSelectedBuildLogs] = useState<DeploymentRecord | null>(null);
 
+  // Settings / Port Edit Modal
+  const [selectedEditApp, setSelectedEditApp] = useState<AppRecord | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editPort, setEditPort] = useState('');
+  const [editInternalPort, setEditInternalPort] = useState('');
+  const [editImageName, setEditImageName] = useState('');
+  const [editBranch, setEditBranch] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+
   // Env Editor modal
   const [selectedEnvApp, setSelectedEnvApp] = useState<AppRecord | null>(null);
   const [envString, setEnvString] = useState('');
   const [savingEnv, setSavingEnv] = useState(false);
-  const [showEnvSecrets, setShowEnvSecrets] = useState(false);
 
   // Domain Editor modal
   const [selectedDomainApp, setSelectedDomainApp] = useState<AppRecord | null>(null);
@@ -67,16 +76,16 @@ export const AppsPage: React.FC = () => {
   const [copiedWorkflow, setCopiedWorkflow] = useState(false);
   const [deployingId, setDeployingId] = useState<string | null>(null);
 
-  // Form state
+  // Create Form state
   const [appName, setAppName] = useState('');
   const [sourceType, setSourceType] = useState<'image' | 'git'>('git');
   const [imageName, setImageName] = useState('nginx:alpine');
   const [gitUrl, setGitUrl] = useState('https://github.com/usuario/meu-app.git');
   const [branch, setBranch] = useState('main');
-  const [port, setPort] = useState('3000');
-  const [internalPort, setInternalPort] = useState('3000');
+  const [port, setPort] = useState('5000');
+  const [internalPort, setInternalPort] = useState('80');
   const [createDomain, setCreateDomain] = useState('');
-  const [createEnvString, setCreateEnvString] = useState('NODE_ENV=production\nPORT=3000');
+  const [createEnvString, setCreateEnvString] = useState('NODE_ENV=production\nPORT=5000');
   const [submitting, setSubmitting] = useState(false);
 
   const fetchApps = async () => {
@@ -128,9 +137,42 @@ export const AppsPage: React.FC = () => {
       setCreateDomain('');
       fetchApps();
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Erro ao criar aplicação');
+      alert('Erro ao criar aplicação: ' + (err.response?.data?.error || err.message));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const openEditModal = (app: AppRecord) => {
+    setSelectedEditApp(app);
+    setEditName(app.name);
+    setEditPort(app.port.toString());
+    setEditInternalPort(app.internalPort.toString());
+    setEditImageName(app.imageName || '');
+    setEditBranch(app.branch || 'main');
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEditApp || !editPort) return;
+
+    try {
+      setSavingEdit(true);
+      await api.put(`/apps/${selectedEditApp.id}`, {
+        name: editName,
+        port: parseInt(editPort),
+        internalPort: parseInt(editInternalPort || '3000'),
+        imageName: editImageName || undefined,
+        branch: editBranch || undefined,
+      });
+
+      setSelectedEditApp(null);
+      fetchApps();
+      alert(`🎉 Aplicação atualizada para a porta :${editPort} com sucesso!`);
+    } catch (err: any) {
+      alert('Erro ao atualizar: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -450,12 +492,21 @@ export const AppsPage: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Port Mapping */}
+                  {/* Port Mapping with Edit shortcut */}
                   <div className="flex items-center justify-between text-slate-400">
                     <span>Porta no Servidor:</span>
-                    <span className="text-slate-200 font-semibold select-all">
-                      Host :{app.port} &rarr; Container :{app.internalPort}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-200 font-semibold select-all">
+                        Host <strong className="text-emerald-400">:{app.port}</strong> &rarr; Container :{app.internalPort}
+                      </span>
+                      <button
+                        onClick={() => openEditModal(app)}
+                        title="Mudar porta do host (ex: 5000, 8080)"
+                        className="text-[11px] text-indigo-400 hover:underline font-sans"
+                      >
+                        (Mudar Porta)
+                      </button>
+                    </div>
                   </div>
 
                   {/* Last Commit Info */}
@@ -522,6 +573,15 @@ export const AppsPage: React.FC = () => {
                     <span>{deployingId === app.id ? 'Buildando...' : 'Deploy'}</span>
                   </button>
 
+                  {/* Edit Config / Port */}
+                  <button
+                    onClick={() => openEditModal(app)}
+                    title="Editar configurações (Porta, Nome, Imagem)"
+                    className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
+                  >
+                    <Settings2 className="w-4 h-4" />
+                  </button>
+
                   {/* Start / Stop */}
                   {app.status === 'running' ? (
                     <button
@@ -572,6 +632,113 @@ export const AppsPage: React.FC = () => {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Modal: Editar Configurações & Porta da Aplicação */}
+      {selectedEditApp && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-md overflow-hidden shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Settings2 className="w-5 h-5 text-indigo-400" />
+                <h3 className="font-bold text-white text-base">Editar Configurações: {selectedEditApp.name}</h3>
+              </div>
+              <button onClick={() => setSelectedEditApp(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Nome da Aplicação *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1.5">
+                    Porta no Host *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    placeholder="ex: 5000, 5050, 8080"
+                    value={editPort}
+                    onChange={(e) => setEditPort(e.target.value)}
+                    className="w-full bg-slate-950 border border-emerald-500/40 rounded-xl px-3.5 py-2.5 text-emerald-300 font-mono text-sm focus:outline-none focus:border-emerald-500"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">Use 5000, 5050 ou 8080 para evitar conflito com a porta 3000 do painel.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Porta Interna
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    value={editInternalPort}
+                    onChange={(e) => setEditInternalPort(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {selectedEditApp.sourceType === 'image' ? (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Imagem Docker *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editImageName}
+                    onChange={(e) => setEditImageName(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Branch de Deploy
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editBranch}
+                    onChange={(e) => setEditBranch(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedEditApp(null)}
+                  className="px-4 py-2 text-slate-400 hover:text-white text-xs font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEdit}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/30 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  {savingEdit ? 'Salvando & Aplicando...' : 'Salvar & Fazer Deploy'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -893,11 +1060,12 @@ export const AppsPage: React.FC = () => {
                   <input
                     type="number"
                     required
-                    placeholder="3000"
+                    placeholder="5000"
                     value={port}
                     onChange={(e) => setPort(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
                   />
+                  <p className="text-[10px] text-slate-500 mt-1">Recomendado: 5000, 5050 ou 8080</p>
                 </div>
               </div>
 
@@ -964,7 +1132,7 @@ export const AppsPage: React.FC = () => {
                 </label>
                 <textarea
                   rows={3}
-                  placeholder="CHAVE=VALOR&#10;PORT=3000"
+                  placeholder="CHAVE=VALOR&#10;PORT=5000"
                   value={createEnvString}
                   onChange={(e) => setCreateEnvString(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-xs font-mono focus:outline-none focus:border-indigo-500"

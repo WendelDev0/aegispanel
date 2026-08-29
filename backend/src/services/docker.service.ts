@@ -292,6 +292,10 @@ class DockerManager {
       await container.start();
       return container.id;
     } catch (err: any) {
+      if (err.message && (err.message.includes('port is already allocated') || err.message.includes('address already in use') || err.message.includes('Ports are not available'))) {
+        throw new Error(`A porta do host já está em uso por outro serviço na sua máquina (ex: painel ou outro contêiner). Altere a porta da aplicação para 5000, 5050 ou 8080.`);
+      }
+
       // Secondary fallback if 409 conflict still triggered
       if (err.statusCode === 409 || (err.message && err.message.includes('Conflict'))) {
         try {

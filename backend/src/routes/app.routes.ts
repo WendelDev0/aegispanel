@@ -47,6 +47,44 @@ appRouter.post('/', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+// Update Full App Settings (Port, Name, Image, Branch, etc.)
+appRouter.put('/:id', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const app = dbStorage.getAppById(req.params.id);
+    if (!app) {
+      res.status(404).json({ error: 'App não encontrado' });
+      return;
+    }
+
+    const { name, port, internalPort, imageName, gitUrl, branch, domain } = req.body;
+    if (name) app.name = name;
+    if (port) app.port = parseInt(port);
+    if (internalPort) app.internalPort = parseInt(internalPort);
+    if (imageName) app.imageName = imageName;
+    if (gitUrl) app.gitUrl = gitUrl;
+    if (branch) app.branch = branch;
+    if (domain !== undefined) app.domain = domain ? domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '') : undefined;
+
+    app.updatedAt = new Date().toISOString();
+    dbStorage.saveApp(app);
+
+    // Redeploy with new port/image
+    try {
+      await CicdService.executeDeploy(app, {
+        commitMessage: `Configurações atualizadas (Porta :${app.port})`,
+        triggeredBy: 'manual',
+      });
+    } catch (deployErr: any) {
+      console.warn('Redeploy warning after update:', deployErr.message);
+    }
+
+    await CaddyService.syncCaddyfile();
+    res.json({ success: true, app });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Update App Environment Variables (.env)
 appRouter.put('/:id/env', async (req: Request, res: Response): Promise<void> => {
   try {
