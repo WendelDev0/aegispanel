@@ -1,63 +1,39 @@
-# 🛡️ AegisPanel - Painel de Controle de VPS e Servidor Local
+# 🛡️ AegisPanel - Painel de Controle de VPS e Servidor Local (Open Source)
 
-Um painel completo, moderno e **100% self-hosted** para transformar qualquer **VPS Ubuntu** (ex: Contabo, Hetzner, AWS) ou **servidor físico local** na sua empresa em uma plataforma completa de deploy e infraestrutura, eliminando a dependência do Vercel, Supabase e Heroku.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub stars](https://img.shields.io/github/stars/WendelDev0/aegispanel?style=social)](https://github.com/WendelDev0/aegispanel)
+
+Um painel completo, moderno e **100% self-hosted e open-source** para transformar qualquer **VPS Ubuntu** (ex: Contabo, Hetzner, AWS) ou **servidor físico local** na sua empresa em uma plataforma completa de infraestrutura e deploy contínuo, eliminando a dependência do Vercel, Supabase e Heroku.
 
 ---
 
 ## ✨ Funcionalidades Principais
 
 - 📊 **Dashboard em Tempo Real**: Monitoramento de CPU, Memória RAM, Discos (SSD/NVMe) e Tráfego de Rede via WebSockets.
-- 🚢 **Deploy de Aplicações (Substituto Vercel)**: Hospede APIs Node.js, Next.js, Python, Laravel, Go e imagens Docker com gerenciamento de variáveis de ambiente (`.env`) e logs ao vivo.
-- 🗄️ **Bancos de Dados 1-Clique (Substituto Supabase)**: Crie instâncias de **PostgreSQL**, **MySQL**, **MariaDB**, **Redis** e **MongoDB** com persistência de volumes e strings de conexão instantâneas.
-- 🐳 **Gerenciador Docker Integrado**: Visualize, inicie, pare, reinicie e inspecione contêineres e seus consumos de recursos.
-- 🌐 **Domínios & SSL Automático (HTTPS)**: Mapeie qualquer domínio para as portas de seus serviços com emissão automática de certificados Let's Encrypt via Caddy Proxy.
-- 💻 **Terminal Web Interativo (Web SSH)**: Terminal completo direto no navegador com suporte ao shell do host ou terminal interno de contêineres Docker via `xterm.js`.
-- 📈 **Monitor de Processos**: Veja em tempo real os processos que mais consom CPU e memória na sua máquina.
+- 🔄 **CI/CD com GitHub & Auto-Deploy**: Deploys automáticos no `git push` com Webhooks, histórico de builds e gerador de GitHub Actions (`deploy.yml`).
+- 🗄️ **Bancos de Dados Seguros (Substituto Supabase)**: Provisionamento em 1-clique de **PostgreSQL 16**, **MySQL 8.4**, **MariaDB 11**, **Redis 7** e **MongoDB 7** com **criptografia AES-256-GCM** em repouso e gerador de senhas de alta entropia.
+- 💻 **Database Studio Embutido**: Executor de consultas SQL interativo com visualização de tabelas e esquemas direto pelo navegador.
+- 📂 **Gerenciador de Arquivos & Editor de Código**: Explorador de pastas e editor de arquivos `.env` com proteção contra *Path Traversal*.
+- 🌐 **Domínios & SSL Automático (Hostinger Ready)**: Mapeamento de domínios com assistente de DNS para Hostinger e emissão de HTTPS grátis (Let's Encrypt / TLS 1.3) via Caddy.
+- 🛡️ **Segurança & Firewall UFW**: Gerenciador visual de portas abertas/bloqueadas e auditoria de segurança.
+- 💾 **Backups & Restauração**: Geração de dumps `.sql` e download seguro com 1 clique.
+- 🖥️ **Terminal Web Interativo (Web SSH)**: Terminal completo direto no navegador com suporte ao shell do host ou terminal interno de contêineres Docker via `xterm.js`.
+- 🔔 **Alertas Discord / Telegram**: Notificações automáticas caso a CPU, Memória ou Disco atinjam limites configuráveis.
+- 🌍 **Cluster Multi-Servidor**: Gerencie sua VPS na nuvem e seu servidor físico local no mesmo painel.
 
 ---
 
-## 🚀 Como Executar Localmente (Desenvolvimento)
+## ⚡ Instalação Automatizada 1-Click na VPS (Ubuntu 22.04 / 24.04)
 
-### 1. Iniciar o Backend
+Ao contratar sua VPS na **Contabo** ou configurar o **servidor da empresa**:
+
+Acesse o terminal SSH da sua máquina como root e execute:
+
 ```bash
-cd backend
-npm install
-npm run dev
-```
-O servidor backend iniciará na porta `4000`.
-
-### 2. Iniciar o Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
-O painel estará acessível no seu navegador em `http://localhost:3000`.
-
----
-
-## 📦 Como Instalar na VPS Contabo / Ubuntu (1-Click)
-
-Ao contratar sua VPS na Contabo ou preparar seu servidor na empresa:
-
-1. Acesse o terminal SSH da máquina como root:
-```bash
-ssh root@SEU_IP_DA_VPS
+curl -fsSL https://raw.githubusercontent.com/WendelDev0/aegispanel/main/install.sh | bash
 ```
 
-2. Execute o instalador automático:
-```bash
-curl -fsSL https://raw.githubusercontent.com/seu-usuario/painiel-vps/main/install.sh | bash
-```
-ou clone o repositório e execute:
-```bash
-git clone https://github.com/seu-usuario/painiel-vps.git /opt/aegispanel
-cd /opt/aegispanel
-chmod +x install.sh
-./install.sh
-```
-
-3. Abra no navegador:
+Abra no navegador:
 ```
 http://SEU_IP_DA_VPS:3000
 ```
@@ -65,25 +41,54 @@ No primeiro acesso, você criará a senha mestre do seu usuário Administrador.
 
 ---
 
+## 🚀 Como Executar Localmente no seu Computador
+
+### 1. Iniciar o Backend API
+```bash
+cd backend
+npm install
+npm run dev
+```
+
+### 2. Iniciar o Frontend Web Dashboard
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Abra no navegador: **`http://localhost:3000`**
+
+---
+
 ## 📁 Estrutura do Projeto
 
 ```
-painiel-vps/
-├── backend/                # Backend API & Daemon do Servidor (Node.js + TS + Dockerode)
+aegispanel/
+├── backend/                # Backend API & Daemon (Node.js + Express + Socket.IO + Dockerode)
 │   ├── src/
 │   │   ├── config.ts       # Configurações de ambiente e portas
-│   │   ├── server.ts       # Express + Socket.IO + Servidor Web
-│   │   ├── db/             # Banco JSON embutido (Zero dependência externa)
-│   │   ├── services/       # Docker, Sistema, Caddy SSL, Bancos e Terminal
-│   │   └── routes/         # Endpoints de Autenticação, Docker, Apps, etc.
+│   │   ├── server.ts       # Servidor HTTP, WebSockets e Alertas
+│   │   ├── db/             # Armazenamento embutido (Zero dependência externa)
+│   │   ├── utils/crypto.ts # Criptografia AES-256-GCM e gerador de senhas
+│   │   ├── services/       # CI/CD, Docker, Sistema, Caddy SSL, Bancos e Arquivos
+│   │   └── routes/         # Endpoints REST e Webhooks do GitHub
 │   └── Dockerfile
 ├── frontend/               # Frontend Dashboard (React + Vite + Tailwind + Lucide + XTerm)
 │   ├── src/
-│   │   ├── components/     # Sidebar, Navbar, etc.
-│   │   ├── pages/          # Dashboard, Apps, Databases, Containers, Domínios, Terminal
+│   │   ├── components/     # Sidebar, Navbar com tooltips explicativos
+│   │   ├── pages/          # 12 Módulos completos do painel
 │   │   └── services/       # Axios API client e WebSockets
 │   └── Dockerfile
 ├── docker-compose.yml      # Stack pronta para produção com Caddy SSL
 ├── install.sh              # Script 1-Click para Ubuntu/Debian
+├── LICENSE                 # Licença MIT
 └── README.md
 ```
+
+---
+
+## 📄 Licença
+
+Distribuído sob a licença **MIT Open-Source**. Veja `LICENSE` para mais informações.
+Desenvolvido por **[Wendel (WendelDev0)](https://github.com/WendelDev0)**.
