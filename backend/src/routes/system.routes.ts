@@ -24,6 +24,16 @@ systemRouter.get('/history', (req: Request, res: Response) => {
   res.json(SystemService.getMetricsHistory());
 });
 
+// Run Network Speedtest on Server
+systemRouter.post('/speedtest', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await SystemService.runSpeedtest();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 systemRouter.get('/processes', async (req: Request, res: Response) => {
   try {
     const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
