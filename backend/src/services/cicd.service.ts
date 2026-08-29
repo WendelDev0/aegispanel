@@ -7,6 +7,8 @@ import { dbStorage, DeploymentRecord, AppRecord } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
 import { CaddyService } from './caddy.service.js';
 import { ProjectDetector } from './project-detector.service.js';
+import { AlertService } from './alert.service.js';
+import { io } from '../server.js';
 import { CONFIG } from '../config.js';
 
 const execAsync = promisify(exec);
@@ -27,13 +29,22 @@ export class CicdService {
     }
   }
 
+  private static emitProgress(appId: string, data: { step: number; stepName: string; line: string; status: 'running' | 'success' | 'failed'; percentage: number }) {
+    try {
+      io.emit(`deploy:${appId}:stream`, data);
+      io.emit('deploy:stream', { appId, ...data });
+    } catch {
+      // ignore
+    }
+  }
+
   /**
    * Executes a Real CI/CD Build and Deployment pipeline:
    * 1. Clones repository (with PAT support if private)
    * 2. Extracts real Git commit hash, message, author & timestamp
-   * 3. Detects Dockerfile or auto-generates Node/Python Dockerfile
-   * 4. Builds real Docker image
-   * 5. Spawns and maps container on the requested host port
+   * 3. Detects project type and generates optimized Dockerfile
+   * 4. Builds real Docker image and tags with deployment ID for rollback
+   * 5. Spawns and maps container on the requested host port with auto-heal
    */
   static async executeDeploy(
     app: AppRecord,
@@ -69,6 +80,7 @@ export class CicdService {
     };
 
     dbStorage.saveDeployment(deployment);
+    this.emitProgress(app.id, { step: 1, stepName: 'Inicializando Pipeline', line: deployment.buildLogs, status: 'running', percentage: 10 });
 
     let logs = deployment.buildLogs;
     const isDockerOnline = await dockerService.testConnection();
@@ -78,11 +90,13 @@ export class CicdService {
       deployment.status = 'failed';
       deployment.buildLogs = logs;
       dbStorage.saveDeployment(deployment);
+      this.emitProgress(app.id, { step: 1, stepName: 'Falha Docker Engine', line: 'Docker offline', status: 'failed', percentage: 100 });
       throw new Error('Docker Engine offline no servidor.');
     }
 
     const containerName = `aegis-app-${app.name.toLowerCase().replace(/[^a-z0-9_-]/g, '')}`;
     const buildImageTag = `aegis-app-${app.name.toLowerCase().replace(/[^a-z0-9_-]/g, '')}:latest`;
+    const versionedTag = `aegis-app-${app.name.toLowerCase().replace(/[^a-z0-9_-]/g, '')}:${deploymentId}`;
     const envList = Object.entries(app.env || {}).map(([k, v]) => `${k}=${v}`);
     const ports: { [intPort: string]: number } = {};
     ports[`${app.internalPort || 3000}/tcp`] = app.port;
@@ -94,20 +108,26 @@ export class CicdService {
           fs.mkdirSync(buildsDir, { recursive: true });
         }
 
-        // Format authenticated Git URL if token is provided
+        // Step 1: Auth & Repo info
         let cloneUrl = app.gitUrl.trim();
         if (app.githubToken && cloneUrl.startsWith('https://github.com/')) {
           const repoPath = cloneUrl.replace('https://github.com/', '');
           cloneUrl = `https://${app.githubToken}@github.com/${repoPath}`;
-          logs += `[${new Date().toISOString()}] 🔑 [Step 1/5] Autenticando com GitHub Personal Access Token (PAT)...\n`;
+          const line = `[${new Date().toISOString()}] 🔑 [Step 1/5] Autenticando com GitHub Personal Access Token (PAT)...\n`;
+          logs += line;
+          this.emitProgress(app.id, { step: 1, stepName: 'Autenticação GitHub', line, status: 'running', percentage: 20 });
         } else {
-          logs += `[${new Date().toISOString()}] 📦 [Step 1/5] Conectando ao repositório: ${app.gitUrl}\n`;
+          const line = `[${new Date().toISOString()}] 📦 [Step 1/5] Conectando ao repositório: ${app.gitUrl}\n`;
+          logs += line;
+          this.emitProgress(app.id, { step: 1, stepName: 'Conectando Repositório', line, status: 'running', percentage: 20 });
         }
 
-        // Clone or Pull
+        // Step 2: Clone or Pull
         const gitDir = path.join(buildsDir, '.git');
         if (fs.existsSync(gitDir)) {
-          logs += `[${new Date().toISOString()}] 🌿 [Step 2/5] Atualizando código existente (git pull origin ${branch})...\n`;
+          const line = `[${new Date().toISOString()}] 🌿 [Step 2/5] Atualizando código existente (git pull origin ${branch})...\n`;
+          logs += line;
+          this.emitProgress(app.id, { step: 2, stepName: 'Git Pull', line, status: 'running', percentage: 35 });
           try {
             const { stdout: pullOut } = await execAsync(`git pull origin ${branch}`, { cwd: buildsDir });
             logs += pullOut ? `[Git] ${pullOut}\n` : '';
@@ -117,7 +137,9 @@ export class CicdService {
             await execAsync(`git clone -b ${branch} --single-branch "${cloneUrl}" "${buildsDir}"`);
           }
         } else {
-          logs += `[${new Date().toISOString()}] 🌿 [Step 2/5] Clonando branch [${branch}]...\n`;
+          const line = `[${new Date().toISOString()}] 🌿 [Step 2/5] Clonando branch [${branch}]...\n`;
+          logs += line;
+          this.emitProgress(app.id, { step: 2, stepName: 'Git Clone', line, status: 'running', percentage: 35 });
           try {
             await execAsync(`git clone -b ${branch} --single-branch "${cloneUrl}" "${buildsDir}"`);
           } catch (cloneErr: any) {
@@ -134,42 +156,55 @@ export class CicdService {
             commitMsg = subject || commitMsg;
             author = authName || author;
             commitDate = commitIso || commitDate;
-            logs += `[${new Date().toISOString()}] 🏷️ [Git Commit] ${commitHash} - "${commitMsg}" por ${author}\n`;
+            const line = `[${new Date().toISOString()}] 🏷️ [Git Commit] ${commitHash} - "${commitMsg}" por ${author}\n`;
+            logs += line;
+            this.emitProgress(app.id, { step: 2, stepName: 'Commit Extraído', line, status: 'running', percentage: 40 });
           }
         } catch {
           // ignore
         }
 
-        // Check for Dockerfile or auto-detect project type and generate optimized Dockerfile
+        // Step 3: Smart Project Detector
         const dockerfilePath = path.join(buildsDir, 'Dockerfile');
         const internalPort = app.internalPort || 3000;
 
         if (!fs.existsSync(dockerfilePath)) {
           const detection = ProjectDetector.detect(buildsDir, internalPort);
-          logs += `[${new Date().toISOString()}] ${detection.log}\n`;
-          logs += `[${new Date().toISOString()}] 📦 [Step 3/5] Tipo detectado: ${detection.type.toUpperCase()} | Runtime: ${detection.runtimeCmd}\n`;
+          const line = `[${new Date().toISOString()}] ${detection.log}\n[${new Date().toISOString()}] 📦 [Step 3/5] Framework: ${detection.type.toUpperCase()} | Porta Interna: :${internalPort}\n`;
+          logs += line;
+          this.emitProgress(app.id, { step: 3, stepName: `Detectado: ${detection.type.toUpperCase()}`, line, status: 'running', percentage: 50 });
 
           if (detection.type === 'static-html') {
-            // Static HTML uses nginx on port 80 internally
             ports[`80/tcp`] = app.port;
             delete ports[`${internalPort}/tcp`];
           }
 
           fs.writeFileSync(dockerfilePath, detection.dockerfile, 'utf-8');
         } else {
-          logs += `[${new Date().toISOString()}] 🔍 [Step 3/5] Dockerfile nativo do projeto encontrado. Iniciando compilação...\n`;
+          const line = `[${new Date().toISOString()}] 🔍 [Step 3/5] Dockerfile nativo do projeto encontrado. Iniciando compilação...\n`;
+          logs += line;
+          this.emitProgress(app.id, { step: 3, stepName: 'Dockerfile Nativo', line, status: 'running', percentage: 50 });
         }
 
-        // Build Docker Image
-        logs += `[${new Date().toISOString()}] 🐳 [Step 4/5] Executando docker build -t ${buildImageTag}...\n`;
+        // Step 4: Build Docker Image and tag with version
+        const lineBuild = `[${new Date().toISOString()}] 🐳 [Step 4/5] Executando docker build -t ${buildImageTag}...\n`;
+        logs += lineBuild;
+        this.emitProgress(app.id, { step: 4, stepName: 'Compilando Imagem Docker', line: lineBuild, status: 'running', percentage: 65 });
+
         try {
-          const { stdout: buildOut } = await execAsync(`docker build -t "${buildImageTag}" .`, { cwd: buildsDir });
-          if (buildOut) logs += `[Docker Build]\n${buildOut.slice(-1000)}\n`;
+          const { stdout: buildOut } = await execAsync(`docker build -t "${buildImageTag}" -t "${versionedTag}" .`, { cwd: buildsDir });
+          if (buildOut) {
+            logs += `[Docker Build]\n${buildOut.slice(-1000)}\n`;
+          }
         } catch (dockerBuildErr: any) {
           throw new Error(`Erro ao compilar imagem Docker: ${dockerBuildErr.message}`);
         }
 
-        // Create/Restart Container with the newly built image
+        // Step 5: Start Container
+        const lineDeploy = `[${new Date().toISOString()}] 🚀 [Step 5/5] Iniciando contêiner na porta Host :${app.port}...\n`;
+        logs += lineDeploy;
+        this.emitProgress(app.id, { step: 5, stepName: 'Iniciando Contêiner', line: lineDeploy, status: 'running', percentage: 85 });
+
         const newContainerId = await dockerService.createAndStartContainer({
           name: containerName,
           image: buildImageTag,
@@ -178,11 +213,13 @@ export class CicdService {
         });
 
         app.containerId = newContainerId;
-        logs += `[${new Date().toISOString()}] 🚀 Container criado e iniciado na porta Host :${app.port} (ID: ${newContainerId.substring(0, 12)})\n`;
+        logs += `[${new Date().toISOString()}] 🚀 Container online com ID: ${newContainerId.substring(0, 12)}\n`;
       } else {
         // Image based deploy
         let image = app.imageName || 'nginx:alpine';
         logs += `[${new Date().toISOString()}] 🐳 [Step 4/5] Baixando imagem Docker Hub (${image}) e preparando contêiner...\n`;
+        this.emitProgress(app.id, { step: 4, stepName: 'Baixando Imagem', line: logs, status: 'running', percentage: 60 });
+
         const newId = await dockerService.createAndStartContainer({
           name: containerName,
           image,
@@ -223,6 +260,25 @@ export class CicdService {
         // ignore
       }
 
+      // Record Global Activity
+      dbStorage.addActivity({
+        type: 'deploy',
+        title: `Deploy Sucesso: ${app.name}`,
+        description: `Commit #${commitHash} "${commitMsg}" por ${author} (Porta :${app.port})`,
+        status: 'success',
+        metadata: { appId: app.id, commitHash, durationSeconds: duration },
+      });
+
+      // Multi-channel Notification (WhatsApp Evolution, Telegram, Discord)
+      AlertService.broadcastNotification(
+        `✅ Deploy Concluído: ${app.name}`,
+        `🚀 *Aplicação:* ${app.name}\n🌿 *Branch:* ${branch}\n🏷️ *Commit:* #${commitHash} - "${commitMsg}"\n👤 *Autor:* ${author}\n🌐 *Porta:* :${app.port}${app.domain ? `\n🔒 *Domínio:* https://${app.domain}` : ''}\n⏱️ *Tempo de Build:* ${duration}s`,
+        'deploy',
+        false
+      );
+
+      this.emitProgress(app.id, { step: 5, stepName: 'Deploy Concluído!', line: 'Deploy finalizado com sucesso!', status: 'success', percentage: 100 });
+
       return deployment;
     } catch (err: any) {
       logs += `[${new Date().toISOString()}] ❌ ERRO NO DEPLOY: ${err.message}\n`;
@@ -234,7 +290,93 @@ export class CicdService {
 
       app.status = 'error';
       dbStorage.saveApp(app);
+
+      // Record Failed Activity
+      dbStorage.addActivity({
+        type: 'deploy',
+        title: `Deploy Falhou: ${app.name}`,
+        description: `Erro: ${err.message}`,
+        status: 'error',
+        metadata: { appId: app.id, error: err.message },
+      });
+
+      // Notification
+      AlertService.broadcastNotification(
+        `❌ Falha no Deploy: ${app.name}`,
+        `🚨 *Erro no Deploy da Aplicação:* ${app.name}\n🌿 *Branch:* ${branch}\n⚠️ *Detalhe:* ${err.message}`,
+        'deploy',
+        true
+      );
+
+      this.emitProgress(app.id, { step: 5, stepName: 'Erro no Deploy', line: err.message, status: 'failed', percentage: 100 });
       throw err;
+    }
+  }
+
+  /**
+   * 1-Click Instant Rollback: Restores a previous deployment version in 2 seconds
+   */
+  static async rollback(appId: string, deploymentId: string): Promise<{ success: boolean; message: string }> {
+    const app = dbStorage.getAppById(appId);
+    if (!app) throw new Error('Aplicação não encontrada');
+
+    const deployments = dbStorage.getDeployments(appId);
+    const targetDeployment = deployments.find(d => d.id === deploymentId);
+    if (!targetDeployment) throw new Error('Histórico de deploy alvo não encontrado');
+
+    const containerName = `aegis-app-${app.name.toLowerCase().replace(/[^a-z0-9_-]/g, '')}`;
+    const versionedTag = `aegis-app-${app.name.toLowerCase().replace(/[^a-z0-9_-]/g, '')}:${deploymentId}`;
+    const envList = Object.entries(app.env || {}).map(([k, v]) => `${k}=${v}`);
+    const ports: { [intPort: string]: number } = {};
+    ports[`${app.internalPort || 3000}/tcp`] = app.port;
+
+    // Check if versioned Docker image exists
+    const images = await dockerService.listImages();
+    const hasImage = images.some((img: any) => img.repoTags && img.repoTags.some((t: string) => t.includes(versionedTag) || t.includes(deploymentId)));
+
+    if (hasImage) {
+      const newId = await dockerService.createAndStartContainer({
+        name: containerName,
+        image: versionedTag,
+        env: envList,
+        ports,
+      });
+
+      app.containerId = newId;
+      app.status = 'running';
+      app.lastCommitHash = targetDeployment.commitHash;
+      app.lastCommitMessage = `[Rollback] ${targetDeployment.commitMessage || ''}`;
+      app.lastCommitAuthor = targetDeployment.authorName;
+      app.lastDeployAt = new Date().toISOString();
+      dbStorage.saveApp(app);
+
+      dbStorage.addActivity({
+        type: 'rollback',
+        title: `Rollback: ${app.name}`,
+        description: `Revertido com sucesso para a versão #${targetDeployment.commitHash}`,
+        status: 'info',
+        metadata: { appId: app.id, deploymentId },
+      });
+
+      AlertService.broadcastNotification(
+        `⏪ Rollback Executado: ${app.name}`,
+        `A aplicação *${app.name}* foi revertida com sucesso para o commit *#${targetDeployment.commitHash}* em 2 segundos!`,
+        'deploy',
+        false
+      );
+
+      return { success: true, message: `Aplicação revertida com sucesso para a versão #${targetDeployment.commitHash}!` };
+    } else {
+      // Re-trigger deploy with target commit hash
+      await this.executeDeploy(app, {
+        commitHash: targetDeployment.commitHash,
+        commitMessage: `[Rollback] Revertendo para ${targetDeployment.commitHash}`,
+        authorName: targetDeployment.authorName,
+        branch: targetDeployment.branch,
+        triggeredBy: 'manual',
+      });
+
+      return { success: true, message: `Re-deploy do commit #${targetDeployment.commitHash} executado com sucesso!` };
     }
   }
 

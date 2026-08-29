@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { SystemService } from '../services/system.service.js';
 import { CaddyService } from '../services/caddy.service.js';
+import { AlertService } from '../services/alert.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { dbStorage } from '../db/storage.js';
 import { CONFIG } from '../config.js';
@@ -153,3 +154,29 @@ systemRouter.post('/caddy-reset', async (req: Request, res: Response): Promise<v
     res.status(500).json({ error: err.message });
   }
 });
+
+// Global Activity Timeline Feed
+systemRouter.get('/activities', (req: Request, res: Response): void => {
+  const limit = req.query.limit ? parseInt(req.query.limit as string) : 30;
+  res.json(dbStorage.getActivities(limit));
+});
+
+// Test Notification Channel (WhatsApp, Telegram, Discord)
+systemRouter.post('/test-alert', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { channel, webhookUrl, botToken, chatId, apiUrl, apiKey, instance, recipientNumber } = req.body;
+
+    if (channel === 'discord') {
+      await AlertService.sendDiscordAlert(webhookUrl, 'Teste de Notificação Discord', '🎉 Integração de Alertas com AegisPanel funcionando com sucesso!', 0x10b981);
+    } else if (channel === 'telegram') {
+      await AlertService.sendTelegramAlert(botToken, chatId, '🎉 *Teste de Alerta AegisPanel!*\n\nSua integração com o Telegram foi configurada com sucesso.');
+    } else if (channel === 'whatsapp') {
+      await AlertService.sendWhatsAppAlert(apiUrl, apiKey, instance, recipientNumber, '🎉 *Teste de Alerta AegisPanel!*\n\nSua integração com o WhatsApp Evolution API foi configurada com sucesso.');
+    }
+
+    res.json({ success: true, message: `Mensagem de teste enviada via ${channel}!` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+

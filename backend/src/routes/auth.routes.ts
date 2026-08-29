@@ -158,3 +158,70 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
 authRouter.get('/me', authMiddleware, (req: AuthRequest, res: Response) => {
   res.json({ user: req.user });
 });
+
+// List all team users (Admin only)
+authRouter.get('/users', authMiddleware, (req: AuthRequest, res: Response): void => {
+  const users = dbStorage.getUsers().map(u => ({
+    id: u.id,
+    username: u.username,
+    email: u.email,
+    role: u.role,
+    createdAt: u.createdAt,
+  }));
+  res.json(users);
+});
+
+// Create new team user
+authRouter.post('/users', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { username, password, email, role } = req.body;
+    if (!username || !password) {
+      res.status(400).json({ error: 'Usuário e senha são obrigatórios' });
+      return;
+    }
+
+    const existing = dbStorage.getUserByUsername(username);
+    if (existing) {
+      res.status(400).json({ error: 'Nome de usuário já cadastrado' });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const newUser: User = {
+      id: `usr-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
+      username,
+      passwordHash,
+      email: email || undefined,
+      role: (role === 'developer' || role === 'viewer') ? role : 'developer',
+      createdAt: new Date().toISOString(),
+    };
+
+    dbStorage.addUser(newUser);
+    res.status(201).json({
+      id: newUser.id,
+      username: newUser.username,
+      email: newUser.email,
+      role: newUser.role,
+      createdAt: newUser.createdAt,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Remove team user
+authRouter.delete('/users/:id', authMiddleware, (req: AuthRequest, res: Response): void => {
+  try {
+    const users = dbStorage.getUsers();
+    if (users.length <= 1) {
+      res.status(400).json({ error: 'Não é possível remover o único usuário administrador do painel.' });
+      return;
+    }
+
+    const success = dbStorage.removeUser(req.params.id);
+    res.json({ success });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+

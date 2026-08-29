@@ -41,7 +41,7 @@ import {
   CartesianGrid,
   Legend
 } from 'recharts';
-import { OverviewData, SystemStats } from '../types/index.js';
+import { OverviewData, SystemStats, ActivityRecord } from '../types/index.js';
 import { NavTab } from '../components/Sidebar.js';
 import { api } from '../services/api.js';
 
@@ -90,6 +90,25 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const [runningSpeedtest, setRunningSpeedtest] = useState(false);
   const [speedtestResult, setSpeedtestResult] = useState<SpeedtestResult | null>(null);
 
+  // Global Activity Timeline State
+  const [activities, setActivities] = useState<ActivityRecord[]>([]);
+  const [activityFilter, setActivityFilter] = useState<'all' | 'deploy' | 'domain' | 'database' | 'alert'>('all');
+  const [loadingActivities, setLoadingActivities] = useState(false);
+
+  const fetchActivities = async () => {
+    try {
+      setLoadingActivities(true);
+      const res = await api.get('/system/activities');
+      if (Array.isArray(res.data)) {
+        setActivities(res.data);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingActivities(false);
+    }
+  };
+
   const fetchHistory = async (range = activeTimeRange) => {
     try {
       const res = await api.get('/system/history', {
@@ -109,8 +128,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   useEffect(() => {
     fetchHistory(activeTimeRange);
+    fetchActivities();
     if (activeTimeRange === 'realtime') {
-      const interval = setInterval(() => fetchHistory('realtime'), 2500);
+      const interval = setInterval(() => {
+        fetchHistory('realtime');
+        fetchActivities();
+      }, 3000);
       return () => clearInterval(interval);
     }
   }, [activeTimeRange, customStartDate, customEndDate]);
@@ -638,6 +661,104 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           <p className="text-xs text-slate-400 mt-1">
             {overview?.docker.totalContainers || 0} contêineres instalados no host.
           </p>
+        </div>
+      </div>
+
+      {/* Global Activity Timeline Widget */}
+      <div className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400">
+              <Activity className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <span>Linha do Tempo de Atividades Recentes</span>
+                <span className="text-[11px] font-normal text-slate-400">({activities.length} eventos registrados)</span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Histórico em tempo real de deploys, recargas do Caddy, backups e eventos do servidor.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Filter buttons */}
+            <div className="bg-slate-900/90 p-1 rounded-xl border border-slate-800 flex items-center gap-1 text-[11px]">
+              {(['all', 'deploy', 'domain', 'database', 'alert'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActivityFilter(tab)}
+                  className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
+                    activityFilter === tab
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {tab === 'all' ? 'Todos' : tab === 'deploy' ? 'Deploys 🚀' : tab === 'domain' ? 'Domínios 🌐' : tab === 'database' ? 'Bancos 🗄️' : 'Alertas ⚠️'}
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={fetchActivities}
+              className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors"
+              title="Atualizar atividades"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingActivities ? 'animate-spin text-indigo-400' : ''}`} />
+            </button>
+          </div>
+        </div>
+
+        {/* Activities List */}
+        <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1 custom-scrollbar">
+          {activities.length === 0 ? (
+            <div className="p-8 text-center text-slate-500 text-xs font-mono">
+              Nenhuma atividade recente registrada ainda.
+            </div>
+          ) : (
+            activities
+              .filter(act => activityFilter === 'all' || act.type === activityFilter)
+              .map(act => (
+                <div
+                  key={act.id}
+                  className="flex items-start justify-between p-3 rounded-2xl bg-slate-950/70 border border-slate-800/80 hover:border-slate-700 transition-all text-xs"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`p-2 rounded-xl mt-0.5 ${
+                      act.status === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                      act.status === 'error' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+                      act.status === 'warning' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                      'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                    }`}>
+                      {act.type === 'deploy' ? <Zap className="w-4 h-4" /> :
+                       act.type === 'rollback' ? <Clock className="w-4 h-4" /> :
+                       act.type === 'domain' ? <Globe className="w-4 h-4" /> :
+                       act.type === 'database' ? <Database className="w-4 h-4" /> :
+                       <Activity className="w-4 h-4" />}
+                    </div>
+                    <div>
+                      <div className="font-bold text-white flex items-center gap-2">
+                        <span>{act.title}</span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-md font-mono ${
+                          act.status === 'success' ? 'bg-emerald-500/15 text-emerald-300' :
+                          act.status === 'error' ? 'bg-rose-500/15 text-rose-300' :
+                          act.status === 'warning' ? 'bg-amber-500/15 text-amber-300' :
+                          'bg-indigo-500/15 text-indigo-300'
+                        }`}>
+                          {act.status.toUpperCase()}
+                        </span>
+                      </div>
+                      <p className="text-slate-300 text-xs mt-0.5">{act.description}</p>
+                    </div>
+                  </div>
+
+                  <div className="text-[11px] text-slate-500 font-mono shrink-0 ml-3 text-right">
+                    {new Date(act.timestamp).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </div>
+                </div>
+              ))
+          )}
         </div>
       </div>
 

@@ -42,6 +42,7 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { api } from '../services/api.js';
+import { socket } from '../services/socket.js';
 import { AppRecord, DeploymentRecord } from '../types/index.js';
 
 export const AppsPage: React.FC = () => {
@@ -98,6 +99,18 @@ export const AppsPage: React.FC = () => {
   const [copiedWorkflow, setCopiedWorkflow] = useState(false);
   const [deployingId, setDeployingId] = useState<string | null>(null);
 
+  // Live Deploy Streaming Progress Modal State
+  const [liveDeployModal, setLiveDeployModal] = useState<{
+    app: AppRecord;
+    step: number;
+    stepName: string;
+    logs: string;
+    percentage: number;
+    status: 'running' | 'success' | 'failed';
+  } | null>(null);
+
+  const [rollingBackId, setRollingBackId] = useState<string | null>(null);
+
   // Create Form state
   const [appName, setAppName] = useState('');
   const [sourceType, setSourceType] = useState<'image' | 'git'>('git');
@@ -126,6 +139,25 @@ export const AppsPage: React.FC = () => {
 
   useEffect(() => {
     fetchApps();
+
+    const handleStream = (data: any) => {
+      setLiveDeployModal(prev => {
+        if (!prev || prev.app.id !== data.appId) return prev;
+        return {
+          ...prev,
+          step: data.step || prev.step,
+          stepName: data.stepName || prev.stepName,
+          logs: prev.logs + (data.line || ''),
+          percentage: data.percentage || prev.percentage,
+          status: data.status || prev.status,
+        };
+      });
+    };
+
+    socket.on('deploy:stream', handleStream);
+    return () => {
+      socket.off('deploy:stream', handleStream);
+    };
   }, []);
 
   const handleCreateApp = async (e: React.FormEvent) => {
@@ -209,14 +241,39 @@ export const AppsPage: React.FC = () => {
   const handleTriggerDeploy = async (app: AppRecord) => {
     try {
       setDeployingId(app.id);
+      setLiveDeployModal({
+        app,
+        step: 1,
+        stepName: 'Inicializando Pipeline',
+        logs: `[${new Date().toLocaleTimeString('pt-BR')}] 🚀 Disparando pipeline de build em tempo real...\n`,
+        percentage: 15,
+        status: 'running',
+      });
       await api.post(`/apps/${app.id}/deploy`, {
-        message: 'Deploy manual acionado pelo painel',
+        commitMessage: 'Deploy manual acionado pelo painel',
       });
       fetchApps();
     } catch (err: any) {
       alert('Erro ao disparar deploy: ' + (err.response?.data?.error || err.message));
     } finally {
       setTimeout(() => setDeployingId(null), 1000);
+    }
+  };
+
+  const handleRollback = async (appId: string, deploymentId: string) => {
+    if (!confirm('Deseja realmente reverter a aplicação para esta versão anterior? O contêiner será restaurado em segundos.')) return;
+    try {
+      setRollingBackId(deploymentId);
+      const res = await api.post(`/apps/${appId}/rollback/${deploymentId}`);
+      alert('✅ ' + res.data.message);
+      fetchApps();
+      if (selectedDeploymentsApp) {
+        openDeploymentsHistory(selectedDeploymentsApp);
+      }
+    } catch (err: any) {
+      alert('Erro ao executar rollback: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setRollingBackId(null);
     }
   };
 
@@ -1074,13 +1131,27 @@ export const AppsPage: React.FC = () => {
                       </p>
                     </div>
 
-                    <button
-                      onClick={() => setSelectedBuildLogs(dep)}
-                      title="Ver saída de logs deste build"
-                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-semibold transition-colors"
-                    >
-                      Ver Logs
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setSelectedBuildLogs(dep)}
+                        title="Ver saída de logs deste build"
+                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-semibold transition-colors"
+                      >
+                        Ver Logs
+                      </button>
+
+                      {dep.status === 'success' && (
+                        <button
+                          onClick={() => handleRollback(selectedDeploymentsApp.id, dep.id)}
+                          disabled={rollingBackId === dep.id}
+                          title="Reverter a aplicação para este commit/versão instantaneamente em 2 segundos"
+                          className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold transition-colors flex items-center gap-1 active:scale-95 disabled:opacity-50"
+                        >
+                          <Clock className={`w-3.5 h-3.5 ${rollingBackId === dep.id ? 'animate-spin' : ''}`} />
+                          <span>{rollingBackId === dep.id ? 'Revertendo...' : '⏪ Rollback'}</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))
               )}
@@ -1187,6 +1258,107 @@ export const AppsPage: React.FC = () => {
                 className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold"
               >
                 Concluído
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Live Deploy Streaming Progress Tracker (Vercel Style) */}
+      {liveDeployModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#090d16] rounded-3xl border border-indigo-500/40 w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="p-5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-xl ${
+                  liveDeployModal.status === 'success' ? 'bg-emerald-500/20 text-emerald-400' :
+                  liveDeployModal.status === 'failed' ? 'bg-rose-500/20 text-rose-400' :
+                  'bg-indigo-500/20 text-indigo-400'
+                }`}>
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base flex items-center gap-2">
+                    <span>Deploy em Tempo Real: {liveDeployModal.app.name}</span>
+                    <span className={`text-xs px-2.5 py-0.5 rounded-full font-mono font-semibold ${
+                      liveDeployModal.status === 'success' ? 'bg-emerald-500/20 text-emerald-300' :
+                      liveDeployModal.status === 'failed' ? 'bg-rose-500/20 text-rose-300' :
+                      'bg-indigo-500/20 text-indigo-300 animate-pulse'
+                    }`}>
+                      {liveDeployModal.status.toUpperCase()}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Step {liveDeployModal.step}/5: {liveDeployModal.stepName}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setLiveDeployModal(null)}
+                className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="w-full bg-slate-950 h-2">
+              <div
+                className={`h-full transition-all duration-300 ${
+                  liveDeployModal.status === 'failed' ? 'bg-rose-500' :
+                  liveDeployModal.status === 'success' ? 'bg-emerald-500' :
+                  'bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-500'
+                }`}
+                style={{ width: `${liveDeployModal.percentage}%` }}
+              />
+            </div>
+
+            {/* 5-Step Visual Stepper */}
+            <div className="p-4 bg-slate-950/80 border-b border-slate-800/80 grid grid-cols-5 gap-2 text-center text-[11px]">
+              {[
+                { num: 1, label: 'Auth & Repo' },
+                { num: 2, label: 'Git Clone' },
+                { num: 3, label: 'Detector' },
+                { num: 4, label: 'Build Docker' },
+                { num: 5, label: 'Online' },
+              ].map(st => {
+                const isPassed = liveDeployModal.step > st.num || liveDeployModal.status === 'success';
+                const isCurrent = liveDeployModal.step === st.num && liveDeployModal.status === 'running';
+                return (
+                  <div
+                    key={st.num}
+                    className={`p-2 rounded-xl border transition-all ${
+                      isPassed ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 font-semibold' :
+                      isCurrent ? 'bg-indigo-500/20 border-indigo-500 text-white font-bold animate-pulse' :
+                      'bg-slate-900/40 border-slate-800/60 text-slate-500'
+                    }`}
+                  >
+                    <div className="text-[10px] font-mono mb-0.5">PASSO {st.num}</div>
+                    <div className="truncate">{st.label}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Live Streaming Logs Terminal */}
+            <div className="p-4 bg-black/95 flex-1 overflow-y-auto font-mono text-xs text-emerald-300 leading-relaxed custom-scrollbar whitespace-pre-wrap min-h-[250px] max-h-[350px]">
+              {liveDeployModal.logs || 'Aguardando saída de build do servidor...'}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-900/90 border-t border-slate-800 flex items-center justify-between">
+              <span className="text-xs text-slate-400">
+                {liveDeployModal.status === 'running' ? '⚡ Compilando contêiner isolado...' :
+                 liveDeployModal.status === 'success' ? '🎉 Aplicação online e saudável!' :
+                 '❌ O processo de build encontrou um erro.'}
+              </span>
+              <button
+                onClick={() => setLiveDeployModal(null)}
+                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-lg transition-all"
+              >
+                {liveDeployModal.status === 'running' ? 'Minimizar' : 'Fechar'}
               </button>
             </div>
           </div>

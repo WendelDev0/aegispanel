@@ -94,8 +94,6 @@ export interface AppRecord {
   domain?: string;
   webhookSecret?: string;
   githubToken?: string;
-  autoDeploy?: boolean;
-  deployBranch?: string;
   status: 'running' | 'stopped' | 'building' | 'error';
   lastDeployAt?: string;
   lastCommitHash?: string;
@@ -104,6 +102,20 @@ export interface AppRecord {
   lastCommitAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CronJobRecord {
+  id: string;
+  name: string;
+  schedule: string;
+  type: 'shell' | 'backup' | 'webhook';
+  command?: string;
+  webhookUrl?: string;
+  enabled: boolean;
+  lastRunAt?: string;
+  lastStatus?: 'success' | 'failed';
+  lastOutput?: string;
+  createdAt: string;
 }
 
 export interface DomainRecord {
@@ -146,6 +158,48 @@ export interface ServerNode {
   location?: string;
 }
 
+export interface ActivityRecord {
+  id: string;
+  type: 'deploy' | 'domain' | 'database' | 'backup' | 'alert' | 'system' | 'rollback';
+  title: string;
+  description: string;
+  status: 'success' | 'warning' | 'error' | 'info';
+  user?: string;
+  timestamp: string;
+  metadata?: Record<string, any>;
+}
+
+export interface AlertConfig {
+  enabled: boolean;
+  discordWebhookUrl?: string;
+  telegramBotToken?: string;
+  telegramChatId?: string;
+  whatsappEnabled?: boolean;
+  whatsappApiUrl?: string;
+  whatsappApiKey?: string;
+  whatsappInstance?: string;
+  whatsappRecipientNumber?: string;
+  notifyOnDeploySuccess?: boolean;
+  notifyOnDeployFail?: boolean;
+  notifyOnHighResource?: boolean;
+  notifyOnBackup?: boolean;
+  cpuThresholdPercent: number;
+  memThresholdPercent: number;
+  diskThresholdPercent: number;
+  lastAlertSentAt?: string;
+}
+
+export interface PanelSettings {
+  serverName: string;
+  caddyEnabled: boolean;
+  panelDomain?: string;
+  publicIp?: string;
+  notificationEmail?: string;
+  autoBackup: boolean;
+  backupIntervalHours: number;
+  alertConfig: AlertConfig;
+}
+
 export interface FileItem {
   name: string;
   path: string;
@@ -168,7 +222,8 @@ export interface User {
   id: string;
   username: string;
   email?: string;
-  role: string;
+  role: 'admin' | 'developer' | 'viewer';
+  createdAt?: string;
 }
 
 export interface OverviewData {
@@ -184,8 +239,5 @@ export interface OverviewData {
     databases: number;
     runningDatabases: number;
   };
-  settings: {
-    serverName: string;
-    caddyEnabled: boolean;
-  };
+  settings: PanelSettings;
 }

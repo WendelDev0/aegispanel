@@ -87,6 +87,22 @@ class DockerManager {
     return this.connectionType;
   }
 
+  async listImages(): Promise<any[]> {
+    try {
+      const connected = await this.testConnection();
+      if (!connected) return [];
+      const images = await this.docker.listImages();
+      return images.map(img => ({
+        id: img.Id,
+        repoTags: img.RepoTags || [],
+        size: img.Size,
+        created: img.Created,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
   async listContainers(all: boolean = true): Promise<ContainerInfo[]> {
     try {
       const connected = await this.testConnection();

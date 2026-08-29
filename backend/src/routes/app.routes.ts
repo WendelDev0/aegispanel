@@ -200,6 +200,16 @@ appRouter.post('/:id/deploy', async (req: Request, res: Response): Promise<void>
   }
 });
 
+// 1-Click Instant Rollback to previous deployment
+appRouter.post('/:id/rollback/:deploymentId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await CicdService.rollback(req.params.id, req.params.deploymentId);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Generate GitHub Actions Workflow
 appRouter.get('/:id/workflow', (req: Request, res: Response): void => {
   const app = dbStorage.getAppById(req.params.id);

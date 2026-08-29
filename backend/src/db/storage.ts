@@ -115,11 +115,33 @@ export interface FirewallRule {
   createdAt: string;
 }
 
+export interface ActivityRecord {
+  id: string;
+  type: 'deploy' | 'domain' | 'database' | 'backup' | 'alert' | 'system' | 'rollback';
+  title: string;
+  description: string;
+  status: 'success' | 'warning' | 'error' | 'info';
+  user?: string;
+  timestamp: string;
+  metadata?: Record<string, any>;
+}
+
 export interface AlertConfig {
   enabled: boolean;
   discordWebhookUrl?: string;
   telegramBotToken?: string;
   telegramChatId?: string;
+  // Evolution API (WhatsApp)
+  whatsappEnabled?: boolean;
+  whatsappApiUrl?: string;
+  whatsappApiKey?: string;
+  whatsappInstance?: string;
+  whatsappRecipientNumber?: string;
+  // Alert options
+  notifyOnDeploySuccess?: boolean;
+  notifyOnDeployFail?: boolean;
+  notifyOnHighResource?: boolean;
+  notifyOnBackup?: boolean;
   cpuThresholdPercent: number;
   memThresholdPercent: number;
   diskThresholdPercent: number;
@@ -139,6 +161,7 @@ export interface ServerNode {
 export interface PanelSettings {
   serverName: string;
   caddyEnabled: boolean;
+  panelDomain?: string;
   publicIp?: string;
   notificationEmail?: string;
   autoBackup: boolean;
@@ -156,6 +179,7 @@ interface DatabaseSchema {
   backups: BackupRecord[];
   firewallRules: FirewallRule[];
   serverNodes: ServerNode[];
+  activities: ActivityRecord[];
   settings: PanelSettings;
 }
 
@@ -164,6 +188,7 @@ const DEFAULT_DATA: DatabaseSchema = {
   databases: [],
   apps: [],
   deployments: [],
+  activities: [],
   cronJobs: [
     {
       id: 'cron-daily-backup',
@@ -481,6 +506,39 @@ class JsonStorage {
     return false;
   }
 
+  // Users
+  removeUser(id: string): boolean {
+    const initialLen = this.data.users.length;
+    this.data.users = this.data.users.filter(u => u.id !== id);
+    if (this.data.users.length !== initialLen) {
+      this.save();
+      return true;
+    }
+    return false;
+  }
+
+  // Activities (Global Timeline)
+  getActivities(limit = 30): ActivityRecord[] {
+    if (!this.data.activities) this.data.activities = [];
+    return [...this.data.activities].reverse().slice(0, limit);
+  }
+
+  addActivity(activity: Omit<ActivityRecord, 'id' | 'timestamp'>): ActivityRecord {
+    if (!this.data.activities) this.data.activities = [];
+    const newRecord: ActivityRecord = {
+      ...activity,
+      id: `act-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
+      timestamp: new Date().toISOString(),
+    };
+    this.data.activities.push(newRecord);
+    // Keep max 500 activities
+    if (this.data.activities.length > 500) {
+      this.data.activities = this.data.activities.slice(-500);
+    }
+    this.save();
+    return newRecord;
+  }
+
   // Settings
   getSettings(): PanelSettings {
     return this.data.settings;
@@ -494,3 +552,4 @@ class JsonStorage {
 }
 
 export const dbStorage = new JsonStorage();
+
