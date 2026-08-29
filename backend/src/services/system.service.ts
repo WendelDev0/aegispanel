@@ -39,7 +39,15 @@ export interface SystemStats {
   };
 }
 
+export interface MetricHistoryPoint {
+  time: string;
+  cpu: number;
+  memory: number;
+  disk: number;
+}
+
 let lastNetworkStats: { rx_sec: number; tx_sec: number } = { rx_sec: 0, tx_sec: 0 };
+const metricsHistory: MetricHistoryPoint[] = [];
 
 export class SystemService {
   static async getRealtimeStats(): Promise<SystemStats> {
@@ -78,9 +86,26 @@ export class SystemService {
       mount: disk.mount,
     }));
 
+    const cpuUsage = Math.round(currentLoad.currentLoad * 10) / 10;
+    const memUsed = mem.active || (mem.total - mem.available);
+    const memUsage = Math.round((memUsed / mem.total) * 100 * 10) / 10;
+    const diskUsage = disks[0] ? Math.round(disks[0].usePercent) : 0;
+
+    // Record history
+    const nowStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    metricsHistory.push({
+      time: nowStr,
+      cpu: cpuUsage,
+      memory: memUsage,
+      disk: diskUsage,
+    });
+    if (metricsHistory.length > 25) {
+      metricsHistory.shift();
+    }
+
     return {
       cpu: {
-        usagePercent: Math.round(currentLoad.currentLoad * 10) / 10,
+        usagePercent: cpuUsage,
         cores: cpuInfo.cores || os.cpus().length,
         brand: `${cpuInfo.manufacturer} ${cpuInfo.brand}`.trim() || 'Generic CPU',
         speedGhz: cpuInfo.speed || 0,
@@ -88,9 +113,9 @@ export class SystemService {
       },
       memory: {
         totalBytes: mem.total,
-        usedBytes: mem.active || (mem.total - mem.available),
+        usedBytes: memUsed,
         freeBytes: mem.available,
-        usedPercent: Math.round(((mem.active || (mem.total - mem.available)) / mem.total) * 100 * 10) / 10,
+        usedPercent: memUsage,
       },
       disks,
       network: {
@@ -107,6 +132,10 @@ export class SystemService {
         arch: osInformation.arch || os.arch(),
       }
     };
+  }
+
+  static getMetricsHistory(): MetricHistoryPoint[] {
+    return metricsHistory;
   }
 
   static async getTopProcesses(limit = 10) {

@@ -17,6 +17,10 @@ systemRouter.get('/stats', async (req: Request, res: Response) => {
   }
 });
 
+systemRouter.get('/history', (req: Request, res: Response) => {
+  res.json(SystemService.getMetricsHistory());
+});
+
 systemRouter.get('/processes', async (req: Request, res: Response) => {
   try {
     const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;

@@ -16,7 +16,6 @@ export class FileService {
 
   // Security check to avoid Directory Traversal
   private static resolveSafePath(relPath: string = ''): string {
-    // Strip leading slashes
     const cleanRel = relPath.replace(/^(\/|\\)+/, '');
     const absolute = path.resolve(this.rootDir, cleanRel);
     if (!absolute.startsWith(this.rootDir)) {
@@ -76,6 +75,17 @@ export class FileService {
     return true;
   }
 
+  static uploadBase64(relPath: string, base64Content: string): boolean {
+    const filePath = this.resolveSafePath(relPath);
+    const parent = path.dirname(filePath);
+    if (!fs.existsSync(parent)) {
+      fs.mkdirSync(parent, { recursive: true });
+    }
+    const buffer = Buffer.from(base64Content, 'base64');
+    fs.writeFileSync(filePath, buffer);
+    return true;
+  }
+
   static createDirectory(relPath: string): boolean {
     const dirPath = this.resolveSafePath(relPath);
     if (!fs.existsSync(dirPath)) {
@@ -94,5 +104,9 @@ export class FileService {
       return true;
     }
     return false;
+  }
+
+  static getSafeAbsolutePath(relPath: string): string {
+    return this.resolveSafePath(relPath);
   }
 }

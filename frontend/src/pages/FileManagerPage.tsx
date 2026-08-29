@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   FolderTree,
   Folder,
@@ -9,11 +9,12 @@ import {
   Trash2,
   Save,
   RefreshCw,
-  ChevronRight,
   ArrowLeft,
   X,
   Check,
-  Code
+  Code,
+  Upload,
+  Download
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { FileItem } from '../types/index.js';
@@ -32,6 +33,7 @@ export const FileManagerPage: React.FC = () => {
   const [showNewFileModal, setShowNewFileModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [newFileName, setNewFileName] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchFiles = async (relPath: string = currentPath) => {
     try {
@@ -84,6 +86,33 @@ export const FileManagerPage: React.FC = () => {
     } finally {
       setSavingFile(false);
     }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = (reader.result as string).split(',')[1];
+      const targetPath = currentPath ? `${currentPath}/${file.name}` : file.name;
+
+      try {
+        await api.post('/files/upload', {
+          path: targetPath,
+          base64,
+        });
+        alert(`Arquivo "${file.name}" enviado com sucesso!`);
+        fetchFiles(currentPath);
+      } catch (err: any) {
+        alert('Erro no upload: ' + (err.response?.data?.error || err.message));
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDownloadItem = (item: FileItem) => {
+    window.open(`/api/files/download?path=${encodeURIComponent(item.path)}`, '_blank');
   };
 
   const handleCreateFolder = async (e: React.FormEvent) => {
@@ -144,19 +173,36 @@ export const FileManagerPage: React.FC = () => {
 
   return (
     <div className="space-y-4 flex flex-col h-[calc(100vh-8rem)]">
+      {/* Hidden file input */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+        className="hidden"
+      />
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#0f172a]/90 p-4 rounded-2xl border border-slate-800 shrink-0">
         <div>
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <FolderTree className="w-5 h-5 text-indigo-400" />
-            Gerenciador de Arquivos & Editor de Código
+            Gerenciador de Arquivos, Uploads & .env
           </h2>
           <p className="text-xs text-slate-400">
-            Navegue pelas pastas da VPS, edite arquivos de configuração (.env, json) com proteção total.
+            Navegue pelas pastas da VPS, faça upload de arquivos e edite scripts de configuração.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            title="Fazer upload de arquivo para a pasta atual"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-xs font-semibold border border-indigo-500/30 transition-colors"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            Upload Arquivo
+          </button>
+
           <button
             onClick={() => setShowNewFileModal(true)}
             title="Criar um novo arquivo neste diretório"
@@ -231,9 +277,21 @@ export const FileManagerPage: React.FC = () => {
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-3 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0">
                     {!file.isDirectory && (
-                      <span className="text-[10px] font-mono text-slate-500">{formatBytes(file.sizeBytes)}</span>
+                      <>
+                        <span className="text-[10px] font-mono text-slate-500">{formatBytes(file.sizeBytes)}</span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDownloadItem(file);
+                          }}
+                          title="Baixar este arquivo"
+                          className="p-1 rounded text-slate-500 hover:text-indigo-300 opacity-0 group-hover:opacity-100 transition-all"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </button>
+                      </>
                     )}
                     <button
                       onClick={(e) => {

@@ -10,7 +10,8 @@ import {
   CheckCircle,
   FileText,
   Clock,
-  X
+  X,
+  AlertTriangle
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { BackupRecord, DatabaseRecord } from '../types/index.js';
@@ -22,6 +23,7 @@ export const BackupsPage: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedDbId, setSelectedDbId] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
 
   const fetchBackupsAndDbs = async () => {
     try {
@@ -62,6 +64,22 @@ export const BackupsPage: React.FC = () => {
     }
   };
 
+  const handleRestoreBackup = async (backup: BackupRecord) => {
+    if (!confirm(`⚠️ ATENÇÃO: Deseja restaurar o banco de dados "${backup.targetName}" com o backup "${backup.filename}"?\n\nOs dados atuais serão sobrescritos com este dump.`)) {
+      return;
+    }
+
+    try {
+      setRestoringId(backup.id);
+      await api.post(`/backups/${backup.id}/restore`);
+      alert(`Banco de dados "${backup.targetName}" restaurado com sucesso!`);
+    } catch (err: any) {
+      alert('Erro na restauração: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setRestoringId(null);
+    }
+  };
+
   const handleDeleteBackup = async (id: string, filename: string) => {
     if (!confirm(`Tem certeza que deseja deletar o arquivo de backup "${filename}"?`)) return;
     try {
@@ -91,10 +109,10 @@ export const BackupsPage: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-2">
             <HardDriveDownload className="w-6 h-6 text-emerald-400" />
-            Backups & Restauração de Dados
+            Backups & Restauração 1-Clique
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            Gere cópias de segurança completas dos seus bancos de dados e faça download seguro para seu computador ou nuvem.
+            Gere dumps SQL completos dos seus bancos de dados e restaure instâncias em segundos sem perda de dados.
           </p>
         </div>
 
@@ -157,6 +175,16 @@ export const BackupsPage: React.FC = () => {
                     </td>
                     <td className="py-3.5 px-4 text-right font-sans">
                       <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleRestoreBackup(b)}
+                          disabled={restoringId === b.id}
+                          title="Restaurar este backup no banco de dados ativo"
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30 border border-emerald-500/30 text-xs font-semibold transition-colors"
+                        >
+                          <RotateCcw className={`w-3.5 h-3.5 ${restoringId === b.id ? 'animate-spin' : ''}`} />
+                          <span>{restoringId === b.id ? 'Restaurando...' : 'Restaurar'}</span>
+                        </button>
+
                         <button
                           onClick={() => handleDownload(b.filename)}
                           title="Baixar arquivo de backup para seu computador"

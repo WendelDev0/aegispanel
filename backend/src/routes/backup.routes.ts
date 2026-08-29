@@ -19,6 +19,15 @@ backupRouter.post('/database/:id', async (req: Request, res: Response): Promise<
   }
 });
 
+backupRouter.post('/:id/restore', async (req: Request, res: Response): Promise<void> => {
+  try {
+    await BackupService.restoreBackup(req.params.id);
+    res.json({ success: true, message: 'Banco de dados restaurado com sucesso a partir do backup.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 backupRouter.get('/download/:filename', (req: Request, res: Response): void => {
   const filePath = BackupService.getBackupFilePath(req.params.filename);
   if (!filePath) {
