@@ -28,9 +28,10 @@ export class CicdService {
   /**
    * Executes a Real CI/CD Build and Deployment pipeline:
    * 1. Clones repository (with PAT support if private)
-   * 2. Detects Dockerfile or auto-generates Node/Python Dockerfile
-   * 3. Builds real Docker image
-   * 4. Spawns and maps container on the requested host port
+   * 2. Extracts real Git commit hash, message, author & timestamp
+   * 3. Detects Dockerfile or auto-generates Node/Python Dockerfile
+   * 4. Builds real Docker image
+   * 5. Spawns and maps container on the requested host port
    */
   static async executeDeploy(
     app: AppRecord,
@@ -45,9 +46,10 @@ export class CicdService {
     const deploymentId = `dep-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
     const startTime = Date.now();
     const branch = options.branch || app.branch || 'main';
-    const commitHash = options.commitHash || Math.random().toString(36).substring(2, 9);
-    const commitMsg = options.commitMessage || 'Manual CI/CD Trigger from AegisPanel';
-    const author = options.authorName || 'Developer';
+    let commitHash = options.commitHash || Math.random().toString(36).substring(2, 9);
+    let commitMsg = options.commitMessage || 'Manual CI/CD Trigger from AegisPanel';
+    let author = options.authorName || 'Developer';
+    let commitDate = new Date().toISOString();
 
     const deployment: DeploymentRecord = {
       id: deploymentId,
@@ -121,6 +123,21 @@ export class CicdService {
           }
         }
 
+        // Extract real commit details from git log
+        try {
+          const { stdout: logOut } = await execAsync('git log -1 --format="%H|%h|%s|%an|%cI"', { cwd: buildsDir });
+          if (logOut && logOut.includes('|')) {
+            const [fullHash, shortHash, subject, authName, commitIso] = logOut.trim().split('|');
+            commitHash = shortHash || fullHash?.substring(0, 7) || commitHash;
+            commitMsg = subject || commitMsg;
+            author = authName || author;
+            commitDate = commitIso || commitDate;
+            logs += `[${new Date().toISOString()}] 🏷️ [Git Commit] ${commitHash} - "${commitMsg}" por ${author}\n`;
+          }
+        } catch {
+          // ignore
+        }
+
         // Check for Dockerfile or generate one
         const dockerfilePath = path.join(buildsDir, 'Dockerfile');
         const packageJsonPath = path.join(buildsDir, 'package.json');
@@ -154,7 +171,7 @@ EXPOSE 80
         // Build Docker Image
         logs += `[${new Date().toISOString()}] 🐳 [Step 4/5] Executando docker build -t ${buildImageTag}...\n`;
         try {
-          const { stdout: buildOut, stderr: buildErr } = await execAsync(`docker build -t "${buildImageTag}" .`, { cwd: buildsDir });
+          const { stdout: buildOut } = await execAsync(`docker build -t "${buildImageTag}" .`, { cwd: buildsDir });
           if (buildOut) logs += `[Docker Build]\n${buildOut.slice(-1000)}\n`;
         } catch (dockerBuildErr: any) {
           throw new Error(`Erro ao compilar imagem Docker: ${dockerBuildErr.message}`);
@@ -189,6 +206,9 @@ EXPOSE 80
 
       const duration = Math.round((Date.now() - startTime) / 1000) || 1;
       deployment.status = 'success';
+      deployment.commitHash = commitHash;
+      deployment.commitMessage = commitMsg;
+      deployment.authorName = author;
       deployment.buildLogs = logs;
       deployment.durationSeconds = duration;
       deployment.finishedAt = new Date().toISOString();
@@ -196,7 +216,10 @@ EXPOSE 80
 
       app.status = 'running';
       app.lastDeployAt = deployment.finishedAt;
-      app.lastCommitMessage = `${commitHash.substring(0, 7)}: ${commitMsg}`;
+      app.lastCommitHash = commitHash;
+      app.lastCommitMessage = commitMsg;
+      app.lastCommitAuthor = author;
+      app.lastCommitAt = commitDate;
       app.updatedAt = new Date().toISOString();
       dbStorage.saveApp(app);
 

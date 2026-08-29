@@ -31,7 +31,9 @@ import {
   ShieldCheck,
   HelpCircle,
   FolderTree,
-  Settings2
+  Settings2,
+  GitCommit,
+  User
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { AppRecord, DeploymentRecord } from '../types/index.js';
@@ -544,14 +546,6 @@ export const AppsPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Last Commit Info */}
-                  <div className="flex items-center justify-between text-slate-400">
-                    <span>Último Deploy:</span>
-                    <span className="text-slate-300 truncate max-w-[200px]" title={app.lastCommitMessage}>
-                      {app.lastCommitMessage || 'Deploy inicial'}
-                    </span>
-                  </div>
-
                   {/* Environment Variables Count */}
                   <div className="flex items-center justify-between text-slate-400 pt-1 border-t border-slate-800/60">
                     <span className="flex items-center gap-1">
@@ -565,6 +559,36 @@ export const AppsPage: React.FC = () => {
                     </button>
                   </div>
                 </div>
+
+                {/* Vercel-Style Git Commit & Deploy Status Card */}
+                {app.sourceType === 'git' && (
+                  <div className="bg-slate-950/90 rounded-2xl p-3.5 border border-indigo-500/20 space-y-2 mb-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <GitCommit className="w-4 h-4 text-indigo-400" />
+                        <span className="font-bold text-white">Último Commit Real:</span>
+                      </div>
+                      {app.lastCommitHash && (
+                        <span className="text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/30">
+                          #{app.lastCommitHash}
+                        </span>
+                      )}
+                    </div>
+                    
+                    <div className="text-xs text-slate-200 font-medium line-clamp-2 pl-5 border-l-2 border-indigo-500/40">
+                      "{app.lastCommitMessage || 'Deploy inicial realizado com sucesso'}"
+                    </div>
+                    
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 pl-5 pt-0.5">
+                      <span className="flex items-center gap-1">
+                        <User className="w-3 h-3 text-slate-500" /> {app.lastCommitAuthor || 'Wendel Dev'}
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        {app.lastDeployAt ? new Date(app.lastDeployAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'Recente'}
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {/* CI/CD Quick Action Pills */}
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs pt-1">

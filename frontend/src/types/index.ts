@@ -98,7 +98,10 @@ export interface AppRecord {
   deployBranch?: string;
   status: 'running' | 'stopped' | 'building' | 'error';
   lastDeployAt?: string;
+  lastCommitHash?: string;
   lastCommitMessage?: string;
+  lastCommitAuthor?: string;
+  lastCommitAt?: string;
   createdAt: string;
   updatedAt: string;
 }
