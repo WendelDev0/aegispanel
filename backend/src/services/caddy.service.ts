@@ -17,36 +17,58 @@ export class CaddyService {
     const apps = dbStorage.getApps().filter(a => a.domain && a.status === 'running');
 
     let content = `# Aegis Auto-Generated Caddyfile\n`;
-    content += `{\n  email admin@aegispanel.internal\n}\n\n`;
+    content += `{\n  # Automatic Let's Encrypt HTTPS\n  auto_https disable_redirects\n}\n\n`;
 
     const isLocalDomain = (dom: string) => {
       const clean = dom.toLowerCase();
       return clean === 'localhost' || clean.endsWith('.localhost') || clean.endsWith('.local') || clean === '127.0.0.1';
     };
 
-    // Direct domain mappings
+    // Direct domain mappings (Handles both HTTP and HTTPS smoothly)
     for (const d of domains) {
       if (d.status === 'active') {
-        content += `${d.domain} {\n`;
-        if (isLocalDomain(d.domain)) {
+        const cleanDom = d.domain.toLowerCase().trim();
+        if (isLocalDomain(cleanDom)) {
+          content += `${cleanDom} {\n`;
           content += `  tls internal\n`;
+          content += `  reverse_proxy host.docker.internal:${d.targetPort}\n`;
+          content += `  encode gzip zstd\n`;
+          content += `}\n\n`;
+        } else {
+          content += `http://${cleanDom}, https://${cleanDom} {\n`;
+          content += `  reverse_proxy host.docker.internal:${d.targetPort} {\n`;
+          content += `    header_up Host {host}\n`;
+          content += `    header_up X-Real-IP {remote_host}\n`;
+          content += `    header_up X-Forwarded-For {remote_host}\n`;
+          content += `    header_up X-Forwarded-Proto {scheme}\n`;
+          content += `  }\n`;
+          content += `  encode gzip zstd\n`;
+          content += `}\n\n`;
         }
-        content += `  reverse_proxy host.docker.internal:${d.targetPort}\n`;
-        content += `  encode gzip zstd\n`;
-        content += `}\n\n`;
       }
     }
 
-    // App domain mappings
+    // App domain mappings (if not already in domains list)
     for (const app of apps) {
       if (app.domain && !domains.some(d => d.domain === app.domain)) {
-        content += `${app.domain} {\n`;
-        if (isLocalDomain(app.domain)) {
+        const cleanDom = app.domain.toLowerCase().trim();
+        if (isLocalDomain(cleanDom)) {
+          content += `${cleanDom} {\n`;
           content += `  tls internal\n`;
+          content += `  reverse_proxy host.docker.internal:${app.port}\n`;
+          content += `  encode gzip zstd\n`;
+          content += `}\n\n`;
+        } else {
+          content += `http://${cleanDom}, https://${cleanDom} {\n`;
+          content += `  reverse_proxy host.docker.internal:${app.port} {\n`;
+          content += `    header_up Host {host}\n`;
+          content += `    header_up X-Real-IP {remote_host}\n`;
+          content += `    header_up X-Forwarded-For {remote_host}\n`;
+          content += `    header_up X-Forwarded-Proto {scheme}\n`;
+          content += `  }\n`;
+          content += `  encode gzip zstd\n`;
+          content += `}\n\n`;
         }
-        content += `  reverse_proxy host.docker.internal:${app.port}\n`;
-        content += `  encode gzip zstd\n`;
-        content += `}\n\n`;
       }
     }
 
