@@ -16,7 +16,9 @@ export class CaddyService {
     const domains = dbStorage.getDomains();
     const apps = dbStorage.getApps().filter(a => a.domain && a.status === 'running');
     const adminUser = dbStorage.getUsers()[0];
-    const email = (adminUser && adminUser.email) ? adminUser.email : 'contato@selvamarketing.com';
+    const email = (adminUser && adminUser.email && !adminUser.email.endsWith('.internal'))
+      ? adminUser.email
+      : 'contato@selvamarketing.com';
 
     let content = `# Aegis Auto-Generated Caddyfile\n`;
     content += `{\n  email ${email}\n}\n\n`;
@@ -38,7 +40,8 @@ export class CaddyService {
           content += `}\n\n`;
         } else {
           content += `${cleanDom} {\n`;
-          content += `  reverse_proxy host.docker.internal:${d.targetPort} {\n`;
+          content += `  reverse_proxy host.docker.internal:${d.targetPort} 172.17.0.1:${d.targetPort} {\n`;
+          content += `    lb_policy first\n`;
           content += `    header_up Host {host}\n`;
           content += `    header_up X-Real-IP {remote_host}\n`;
           content += `    header_up X-Forwarded-For {remote_host}\n`;
@@ -62,7 +65,8 @@ export class CaddyService {
           content += `}\n\n`;
         } else {
           content += `${cleanDom} {\n`;
-          content += `  reverse_proxy host.docker.internal:${app.port} {\n`;
+          content += `  reverse_proxy host.docker.internal:${app.port} 172.17.0.1:${app.port} {\n`;
+          content += `    lb_policy first\n`;
           content += `    header_up Host {host}\n`;
           content += `    header_up X-Real-IP {remote_host}\n`;
           content += `    header_up X-Forwarded-For {remote_host}\n`;
