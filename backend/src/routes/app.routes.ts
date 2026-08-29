@@ -77,6 +77,18 @@ appRouter.put('/:id', async (req: Request, res: Response): Promise<void> => {
     app.updatedAt = new Date().toISOString();
     dbStorage.saveApp(app);
 
+    // Sync domain port in storage and Caddy
+    if (app.domain) {
+      const cleanDom = app.domain.trim().toLowerCase();
+      const existingDomain = dbStorage.getDomains().find(d => d.domain.toLowerCase().trim() === cleanDom);
+      if (existingDomain) {
+        existingDomain.targetPort = app.port;
+        existingDomain.status = 'active';
+        dbStorage.saveDomain(existingDomain);
+      }
+      await CaddyService.syncCaddyfile().catch(() => {});
+    }
+
     // Redeploy with new port/image/token
     try {
       await CicdService.executeDeploy(app, {
