@@ -188,11 +188,16 @@ export class SystemService {
           }
         }
         persistentList.push({ ...point, timestamp: nowTimestamp });
-        // Keep max 2000 points (approx 2 weeks of history)
-        if (persistentList.length > 2000) {
-          persistentList = persistentList.slice(-2000);
+        // One point every 30s: 20160 points is roughly a week of history.
+        if (persistentList.length > 20160) {
+          persistentList = persistentList.slice(-20160);
         }
-        fs.writeFileSync(metricsFilePath, JSON.stringify(persistentList), 'utf-8');
+        // Written through a temporary file: this rewrites the whole history
+        // every 30 seconds, and a crash mid-write would otherwise leave a
+        // truncated file that the next read discards entirely.
+        const tmpPath = `${metricsFilePath}.tmp`;
+        fs.writeFileSync(tmpPath, JSON.stringify(persistentList), 'utf-8');
+        fs.renameSync(tmpPath, metricsFilePath);
       }
     } catch {
       // ignore
@@ -234,97 +239,70 @@ export class SystemService {
     return metricsHistory;
   }
 
-  static getHistoricalMetrics(range: string = 'realtime', startDate?: string, endDate?: string): MetricHistoryPoint[] {
+  /**
+   * Historical metrics actually measured by this server.
+   *
+   * Returns only recorded points. An earlier version synthesised a plausible
+   * looking series with sin/cos around the latest reading whenever there was
+   * not enough history, so a freshly installed panel showed a full week of
+   * invented CPU and network activity that a user could not tell from real
+   * measurements.
+   */
+  static getHistoricalMetrics(
+    range: string = 'realtime',
+    startDate?: string,
+    endDate?: string
+  ): { points: MetricHistoryPoint[]; collectedSince: string | null; complete: boolean } {
     if (range === 'realtime') {
-      return metricsHistory;
+      return { points: metricsHistory, collectedSince: null, complete: true };
     }
 
-    // Try reading real persistent points from disk
+    let list: Array<MetricHistoryPoint & { timestamp: number }> = [];
     try {
       const metricsFilePath = path.join(CONFIG.DATA_DIR, 'metrics_persistent.json');
       if (fs.existsSync(metricsFilePath)) {
-        const raw = fs.readFileSync(metricsFilePath, 'utf-8');
-        const list: Array<MetricHistoryPoint & { timestamp: number }> = JSON.parse(raw);
-        if (list && list.length > 0) {
-          const now = Date.now();
-          let cutoff = now - 24 * 3600 * 1000;
-          if (range === '2d') cutoff = now - 48 * 3600 * 1000;
-          if (range === '3d') cutoff = now - 72 * 3600 * 1000;
-          if (range === '7d') cutoff = now - 7 * 24 * 3600 * 1000;
-          if (range === 'custom' && startDate && endDate) {
-            const startMs = new Date(startDate).getTime();
-            const endMs = new Date(endDate).getTime();
-            return list.filter(p => p.timestamp >= startMs && p.timestamp <= endMs);
-          }
-
-          const filtered = list.filter(p => p.timestamp >= cutoff);
-          if (filtered.length >= 5) {
-            return filtered;
-          }
-        }
+        const parsed = JSON.parse(fs.readFileSync(metricsFilePath, 'utf-8'));
+        if (Array.isArray(parsed)) list = parsed;
       }
     } catch {
-      // fallback
+      // A damaged history file is not worth failing the request over.
+      list = [];
     }
 
-    const current = metricsHistory[metricsHistory.length - 1] || {
-      cpu: 15,
-      memory: 38,
-      disk: 22,
-      rxMbps: 1.2,
-      txMbps: 0.8,
-    };
-
-    let totalPoints = 24;
-    let stepHours = 1;
-
-    if (range === '1d') {
-      totalPoints = 24;
-      stepHours = 1;
-    } else if (range === '2d') {
-      totalPoints = 24;
-      stepHours = 2;
-    } else if (range === '3d') {
-      totalPoints = 36;
-      stepHours = 2;
-    } else if (range === '7d') {
-      totalPoints = 28;
-      stepHours = 6;
-    } else if (range === 'custom') {
-      totalPoints = 30;
-      stepHours = 4;
+    if (list.length === 0) {
+      return { points: [], collectedSince: null, complete: false };
     }
 
     const now = Date.now();
-    const result: MetricHistoryPoint[] = [];
+    const windowMs: Record<string, number> = {
+      '1d': 24 * 3600 * 1000,
+      '2d': 48 * 3600 * 1000,
+      '3d': 72 * 3600 * 1000,
+      '7d': 7 * 24 * 3600 * 1000,
+    };
 
-    for (let i = totalPoints - 1; i >= 0; i--) {
-      const timePoint = new Date(now - i * stepHours * 3600 * 1000);
-      const label = range === '7d' || range === 'custom' || range === '3d'
-        ? `${timePoint.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' })} ${timePoint.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}`
-        : timePoint.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+    let points: Array<MetricHistoryPoint & { timestamp: number }>;
+    let cutoff: number;
 
-      // Natural deterministic variation around current values
-      const sinOffset = Math.sin((i * 13) % 360) * 6;
-      const cosOffset = Math.cos((i * 7) % 360) * 4;
-
-      const cpu = Math.min(95, Math.max(3, Math.round((current.cpu + sinOffset) * 10) / 10));
-      const memory = Math.min(95, Math.max(15, Math.round((current.memory + cosOffset * 0.5) * 10) / 10));
-      const disk = Math.min(100, Math.max(5, Math.round((current.disk) * 10) / 10));
-      const rxMbps = Math.max(0.1, Math.round((current.rxMbps + Math.abs(sinOffset * 0.3)) * 100) / 100);
-      const txMbps = Math.max(0.1, Math.round((current.txMbps + Math.abs(cosOffset * 0.2)) * 100) / 100);
-
-      result.push({
-        time: label,
-        cpu,
-        memory,
-        disk,
-        rxMbps,
-        txMbps,
-      });
+    if (range === 'custom' && startDate && endDate) {
+      const startMs = new Date(startDate).getTime();
+      const endMs = new Date(endDate).getTime();
+      cutoff = startMs;
+      points = list.filter((p) => p.timestamp >= startMs && p.timestamp <= endMs);
+    } else {
+      cutoff = now - (windowMs[range] ?? windowMs['1d']);
+      points = list.filter((p) => p.timestamp >= cutoff);
     }
 
-    return result;
+    const oldest = list[0]?.timestamp ?? now;
+
+    return {
+      points: points.map(({ timestamp, ...rest }) => rest),
+      collectedSince: new Date(oldest).toISOString(),
+      // False when collection started after the requested window began, so the
+      // chart can say "coletando desde X" instead of implying a gap in traffic.
+      complete: oldest <= cutoff,
+    };
   }
 
   static async getTopProcesses(limit = 10) {

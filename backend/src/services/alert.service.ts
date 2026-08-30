@@ -1,9 +1,27 @@
 import http from 'http';
 import https from 'https';
 import { dbStorage } from '../db/storage.js';
+import { CONFIG } from '../config.js';
+
+/**
+ * Blocks outbound notifications from a development copy.
+ *
+ * A local instance restored from a production backup carries the real Discord
+ * webhook, Telegram token and WhatsApp key. Left unguarded it would page the
+ * team from a developer's laptop.
+ */
+function outboundBlocked(channel: string): boolean {
+  if (!CONFIG.LOCAL_MODE || CONFIG.ALLOW_OUTBOUND_ALERTS) return false;
+  console.warn(
+    `🧪 Modo local: notificação para ${channel} NÃO enviada. ` +
+      'Defina AEGIS_ALLOW_OUTBOUND_ALERTS=true para permitir envios reais daqui.'
+  );
+  return true;
+}
 
 export class AlertService {
   static async sendDiscordAlert(webhookUrl: string, title: string, description: string, color: number = 0x6366f1) {
+    if (outboundBlocked('Discord')) return;
     if (!webhookUrl) return;
 
     try {
@@ -43,6 +61,7 @@ export class AlertService {
   }
 
   static async sendTelegramAlert(botToken: string, chatId: string, text: string) {
+    if (outboundBlocked('Telegram')) return;
     if (!botToken || !chatId) return;
 
     try {
@@ -72,6 +91,7 @@ export class AlertService {
   }
 
   static async sendWhatsAppAlert(apiUrl: string, apiKey: string, instance: string, number: string, message: string) {
+    if (outboundBlocked('WhatsApp')) return;
     if (!apiUrl || !apiKey || !instance || !number) return;
 
     try {

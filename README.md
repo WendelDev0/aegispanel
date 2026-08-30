@@ -86,8 +86,31 @@ chmod 600 .env
 
 ## 🚀 Executando localmente
 
+Rodar o painel na sua máquina **não interfere** na VPS nem em servidores de
+terceiros. Fora de produção o painel entra em **modo local**, que é ligado por
+padrão justamente porque o caminho perigoso é o silencioso: você restaura um
+backup da VPS para depurar algo e a cópia local começa a pedir certificados
+para domínios que não são dela e a disparar alertas nos canais reais da equipe.
+
+Em modo local o painel:
+
+| Comportamento | Motivo |
+|---|---|
+| Caddy emite certificados **internos** (`local_certs`), nunca fala com o Let's Encrypt | Pedir certificado para um domínio que aponta para a VPS falha, e falhas repetidas consomem o limite daquele domínio no servidor de verdade |
+| Notificações Discord/Telegram/WhatsApp são **bloqueadas** e apenas registradas no log | Uma cópia local restaurada de produção carrega os webhooks e tokens reais |
+| Agendador de cron **desligado** | O backup noturno e tarefas shell rodariam na sua máquina no horário do servidor |
+
+Para permitir envios reais a partir da máquina local:
+`AEGIS_ALLOW_OUTBOUND_ALERTS=true`. Para desligar o modo local por completo:
+`AEGIS_LOCAL_MODE=false`.
+
+> O painel só administra o Docker da **máquina onde ele roda**. Não existe
+> caminho pelo qual uma instância local altere containers de outro servidor.
+
+### Opção 1 — desenvolvimento com hot reload
+
 ```bash
-# Backend (gera .env.local automaticamente em desenvolvimento)
+# Backend (gera .env.local com segredos próprios na primeira execução)
 cd backend && npm install && npm run dev
 
 # Frontend
@@ -95,6 +118,21 @@ cd frontend && npm install && npm run dev
 ```
 
 Abra **`http://localhost:3000`**.
+
+### Opção 2 — stack completa isolada em contêineres
+
+```bash
+npm run local:up      # sobe tudo
+npm run local:logs    # acompanha o backend
+npm run local:down    # derruba
+```
+
+Abra **`http://localhost:3001`**.
+
+Essa stack usa nome de projeto, rede, volumes e dados (`./data-local`)
+próprios, e publica tudo **apenas em `127.0.0.1`** nas portas 3001/8080/8443 —
+então convive com uma instalação de produção na mesma máquina sem colidir e
+sem ficar exposta na rede.
 
 ### Qualidade
 

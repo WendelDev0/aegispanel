@@ -1,5 +1,6 @@
 import { exec } from 'child_process';
 import util from 'util';
+import { CONFIG } from '../config.js';
 import { dbStorage, CronJobRecord } from '../db/storage.js';
 import { BackupService } from './backup.service.js';
 
@@ -114,6 +115,14 @@ export class CronService {
    */
   static start(): void {
     if (this.timer) return;
+
+    // Scheduled jobs stay off in a development copy: the backup routine and any
+    // shell task would otherwise run against the developer's own machine on the
+    // schedule configured for the server. Running one by hand still works.
+    if (CONFIG.LOCAL_MODE) {
+      console.warn('🧪 Modo local: agendador de cron desativado. Execute tarefas manualmente pelo painel.');
+      return;
+    }
 
     const tick = async () => {
       const now = new Date();

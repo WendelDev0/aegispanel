@@ -96,7 +96,17 @@ export class CaddyService {
 
     let content = '# Aegis Auto-Generated Caddyfile\n';
     content += '# Gerado automaticamente pelo AegisPanel. Edições manuais são sobrescritas.\n';
-    if (email) {
+
+    if (CONFIG.LOCAL_MODE) {
+      // local_certs makes Caddy sign everything with its own internal CA and
+      // never contact an ACME provider. Without it, a development copy holding
+      // production domains would request public certificates for hostnames it
+      // does not serve: those attempts fail, and repeated failures count
+      // against the rate limit of the real domain on the real server.
+      content += '# MODO LOCAL: certificados internos, nenhuma requisição ao Let\'s Encrypt.\n';
+      content += '{\n  local_certs\n}\n\n';
+      console.warn('🧪 Modo local: Caddy usará certificados internos; nenhum certificado público será solicitado.');
+    } else if (email) {
       content += `{\n  email ${email}\n}\n\n`;
     } else {
       content +=
@@ -124,7 +134,7 @@ export class CaddyService {
         ? `${containerNameForApp(appName)}:${internalPort}`
         : `host.docker.internal:${hostPort}`;
 
-      content += this.renderSite(domain, upstream, isLocalDomain(domain));
+      content += this.renderSite(domain, upstream, CONFIG.LOCAL_MODE || isLocalDomain(domain));
     };
 
     for (const d of domains) {

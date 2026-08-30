@@ -75,6 +75,24 @@ export const CONFIG = {
   ACCESS_LOG_PATH: process.env.ACCESS_LOG_PATH || path.join(process.cwd(), 'data', 'caddy-logs', 'access.log'),
   /** Sends visitor IPs to ip-api.com to resolve country and city. */
   GEOIP_ENABLED: process.env.GEOIP_ENABLED !== 'false',
+
+  /**
+   * Local mode: this instance is a development copy, not the server that owns
+   * the domains and integrations in its database.
+   *
+   * Defaults to on outside production, because the dangerous direction is the
+   * silent one: a developer copies the panel state from a live VPS to debug
+   * something, and the local copy starts requesting TLS certificates for
+   * domains it does not control and firing alerts into the team's real
+   * channels. Turning the guard on by default makes the safe case the one that
+   * needs no thought.
+   */
+  LOCAL_MODE:
+    process.env.AEGIS_LOCAL_MODE === 'true' ||
+    (process.env.AEGIS_LOCAL_MODE !== 'false' && process.env.NODE_ENV !== 'production'),
+
+  /** Escape hatch to send real notifications from a local instance. */
+  ALLOW_OUTBOUND_ALERTS: process.env.AEGIS_ALLOW_OUTBOUND_ALERTS === 'true',
   /** Comma-separated list of allowed browser origins. Empty means same-origin only. */
   CORS_ORIGINS: (process.env.CORS_ORIGINS || '')
     .split(',')

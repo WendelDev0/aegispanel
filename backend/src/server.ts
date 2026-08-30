@@ -154,6 +154,13 @@ server.listen(CONFIG.PORT, () => {
   console.log(`🛡️  AegisPanel Daemon running on port ${CONFIG.PORT}`);
   console.log(`🚀 Mode: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📂 Data directory: ${CONFIG.DATA_DIR}`);
+  if (CONFIG.LOCAL_MODE) {
+    console.log(`🧪 MODO LOCAL ATIVO`);
+    console.log(`   - Certificados TLS internos (nenhuma chamada ao Let's Encrypt)`);
+    console.log(`   - Notificações externas bloqueadas`);
+    console.log(`   - Agendador de cron desativado`);
+    console.log(`   Para rodar como servidor de verdade: NODE_ENV=production`);
+  }
   console.log(`========================================================`);
 
   CronService.start();

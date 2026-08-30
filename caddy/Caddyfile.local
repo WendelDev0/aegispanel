@@ -1,0 +1,4 @@
+# AegisPanel - Caddyfile local (gerado pelo painel em modo local)
+{
+  local_certs
+}

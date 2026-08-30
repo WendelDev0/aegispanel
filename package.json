@@ -10,7 +10,10 @@
     "start": "docker compose up -d",
     "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck",
     "test": "npm --prefix backend test",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "local:up": "docker compose -f docker-compose.local.yml up -d --build",
+    "local:down": "docker compose -f docker-compose.local.yml down",
+    "local:logs": "docker compose -f docker-compose.local.yml logs -f backend"
   },
   "keywords": [
     "vps",

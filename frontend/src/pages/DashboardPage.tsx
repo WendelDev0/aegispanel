@@ -78,6 +78,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const stats = realtimeStats || overview?.system;
 
   const [historyData, setHistoryData] = useState<MetricHistoryPoint[]>([]);
+  const [historyMeta, setHistoryMeta] = useState<{ collectedSince: string | null; complete: boolean }>({
+    collectedSince: null,
+    complete: true,
+  });
   const [activeChartMetric, setActiveChartMetric] = useState<'all' | 'cpu' | 'memory' | 'network' | 'disk'>('all');
   const [activeTimeRange, setActiveTimeRange] = useState<'realtime' | '1d' | '2d' | '3d' | '7d' | 'custom'>('realtime');
   const [customStartDate, setCustomStartDate] = useState('');
@@ -118,11 +122,18 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           endDate: customEndDate || undefined,
         },
       });
-      if (Array.isArray(res.data) && res.data.length > 0) {
-        setHistoryData(res.data);
-      }
+
+      // The endpoint reports only measured points, plus how far back collection
+      // actually goes. An empty result now means "not collected yet" rather
+      // than a gap, so it replaces the chart instead of leaving stale data.
+      const points = Array.isArray(res.data?.points) ? res.data.points : [];
+      setHistoryData(points);
+      setHistoryMeta({
+        collectedSince: res.data?.collectedSince ?? null,
+        complete: res.data?.complete !== false,
+      });
     } catch {
-      // fallback
+      setHistoryData([]);
     }
   };
 
@@ -503,11 +514,23 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
         </div>
 
+        {!historyMeta.complete && historyMeta.collectedSince && historyData.length > 0 && (
+          <p className="text-[11px] text-amber-300/80 flex items-center gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            Coletando métricas desde {new Date(historyMeta.collectedSince).toLocaleString('pt-BR')} — o período
+            anterior a isso não foi medido.
+          </p>
+        )}
+
         {/* Recharts Multi-Metric Area / Line Container */}
         <div className="h-72 w-full pt-2">
           {historyData.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-slate-500 text-xs">
-              <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Carregando histórico de métricas...
+            <div className="flex flex-col items-center justify-center h-full text-center px-6">
+              <p className="text-slate-300 text-sm font-semibold">Ainda sem histórico para este período</p>
+              <p className="text-slate-500 text-xs mt-1.5 max-w-md">
+                O painel grava um ponto a cada 30 segundos a partir do momento em que sobe. Períodos
+                anteriores a isso ficam vazios porque não foram medidos.
+              </p>
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
