@@ -133,8 +133,14 @@ export const DomainsPage: React.FC = () => {
   const handleRenewSsl = async (domainObj: DomainRecord) => {
     setRenewingSslId(domainObj.id);
     try {
-      await api.post(`/domains/${domainObj.id}/renew-ssl`);
-      alert(`Certificado SSL para ${domainObj.domain} renovado com sucesso!`);
+      // The endpoint reports whether Caddy actually accepted and reloaded the
+      // configuration, so a failed reload is no longer announced as a success.
+      const res = await api.post(`/domains/${domainObj.id}/renew-ssl`);
+      alert(
+        res.data.success
+          ? `${domainObj.domain}: ${res.data.message}`
+          : `Falha ao renovar ${domainObj.domain}: ${res.data.message}`
+      );
       fetchDomains();
     } catch (err: any) {
       alert('Erro ao renovar SSL: ' + (err.response?.data?.error || err.message));

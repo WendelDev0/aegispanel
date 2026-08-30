@@ -57,6 +57,8 @@ export const AppsPage: React.FC = () => {
   // Modals state
   const [selectedLogsApp, setSelectedLogsApp] = useState<AppRecord | null>(null);
   const [selectedWebhookApp, setSelectedWebhookApp] = useState<AppRecord | null>(null);
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [webhookLoading, setWebhookLoading] = useState(false);
   const [selectedDeploymentsApp, setSelectedDeploymentsApp] = useState<AppRecord | null>(null);
   const [deploymentsList, setDeploymentsList] = useState<DeploymentRecord[]>([]);
   const [selectedWorkflowApp, setSelectedWorkflowApp] = useState<AppRecord | null>(null);
@@ -280,7 +282,9 @@ export const AppsPage: React.FC = () => {
     setEditImageName(app.imageName || '');
     setEditGitUrl(app.gitUrl || '');
     setEditBranch(app.branch || 'main');
-    setEditGithubToken(app.githubToken || '');
+    // Write-only: the stored token is never sent to the browser, so the field
+    // starts empty and only overwrites the stored value when filled in.
+    setEditGithubToken('');
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
@@ -524,10 +528,44 @@ export const AppsPage: React.FC = () => {
     }
   };
 
-  const copyWebhookUrl = (app: AppRecord) => {
-    const host = window.location.origin;
-    const url = `${host}/api/webhooks/deploy/${app.id}?secret=${app.webhookSecret || 'aegis_default_secret'}`;
-    navigator.clipboard.writeText(url);
+  /**
+   * The webhook secret is never included in the apps listing: it is fetched
+   * from a dedicated endpoint only when the user opens this modal.
+   */
+  const openWebhookModal = async (app: AppRecord) => {
+    setSelectedWebhookApp(app);
+    setWebhookUrl('');
+    setWebhookLoading(true);
+    try {
+      const res = await api.get(`/apps/${app.id}/webhook`);
+      setWebhookUrl(res.data.url);
+    } catch (err: any) {
+      setWebhookUrl('');
+      alert('Não foi possível obter a URL do webhook: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setWebhookLoading(false);
+    }
+  };
+
+  const rotateWebhookSecret = async (app: AppRecord) => {
+    if (!confirm('Gerar um novo segredo invalida a URL atual. Você precisará atualizá-la no GitHub. Continuar?')) {
+      return;
+    }
+    setWebhookLoading(true);
+    try {
+      await api.post(`/apps/${app.id}/webhook-secret`);
+      const res = await api.get(`/apps/${app.id}/webhook`);
+      setWebhookUrl(res.data.url);
+    } catch (err: any) {
+      alert('Falha ao gerar novo segredo: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setWebhookLoading(false);
+    }
+  };
+
+  const copyWebhookUrl = () => {
+    if (!webhookUrl) return;
+    navigator.clipboard.writeText(webhookUrl);
     setCopiedWebhook(true);
     setTimeout(() => setCopiedWebhook(false), 2000);
   };
@@ -648,7 +686,7 @@ export const AppsPage: React.FC = () => {
                         {app.sourceType === 'git' ? (
                           <span className="text-[10px] font-mono text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded-md flex items-center gap-1 border border-indigo-500/30">
                             <GitBranch className="w-3 h-3" /> {app.branch || 'main'}
-                            {app.githubToken && (
+                            {app.hasGithubToken && (
                               <span title="Repositório Privado com Token">
                                 <Lock className="w-2.5 h-2.5 text-amber-400" />
                               </span>
@@ -824,7 +862,7 @@ export const AppsPage: React.FC = () => {
                   </button>
 
                   <button
-                    onClick={() => setSelectedWebhookApp(app)}
+                    onClick={() => openWebhookModal(app)}
                     title="Copiar URL de Webhook para Auto-Deploy"
                     className="text-cyan-400 hover:underline flex items-center gap-1 font-mono text-[11px]"
                   >
@@ -1409,10 +1447,10 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
               <label className="text-[11px] font-semibold text-slate-400 uppercase">Payload URL</label>
               <div className="flex items-center gap-2 bg-slate-950 p-3 rounded-xl border border-slate-800 font-mono text-xs text-indigo-300">
                 <span className="truncate flex-1 select-all">
-                  {`${window.location.origin}/api/webhooks/deploy/${selectedWebhookApp.id}?secret=${selectedWebhookApp.webhookSecret || 'aegis_default_secret'}`}
+                  {webhookLoading ? 'Carregando...' : webhookUrl || 'Indisponível'}
                 </span>
                 <button
-                  onClick={() => copyWebhookUrl(selectedWebhookApp)}
+                  onClick={copyWebhookUrl}
                   title="Copiar URL do Webhook"
                   className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
                 >
@@ -1421,7 +1459,19 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
               </div>
             </div>
 
-            <div className="flex justify-end">
+            <p className="text-[11px] text-slate-400 mb-4">
+              Trate esta URL como uma senha: quem a possui pode disparar deploys desta aplicação.
+              Se ela vazar, gere um novo segredo e atualize o webhook no GitHub.
+            </p>
+
+            <div className="flex justify-between items-center gap-2">
+              <button
+                onClick={() => rotateWebhookSecret(selectedWebhookApp)}
+                disabled={webhookLoading}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 rounded-xl text-xs font-semibold"
+              >
+                Gerar novo segredo
+              </button>
               <button
                 onClick={() => setSelectedWebhookApp(null)}
                 className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold"

@@ -27,6 +27,22 @@ export const FirewallPage: React.FC = () => {
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  /**
+   * Whether ufw can actually be driven from this process. The panel usually
+   * runs in a container without ufw, and rules listed here were previously
+   * shown as active while nothing had been applied on the host.
+   */
+  const [enforcement, setEnforcement] = useState<{ available: boolean; reason: string } | null>(null);
+
+  const fetchEnforcement = async () => {
+    try {
+      const res = await api.get('/firewall/status');
+      setEnforcement(res.data);
+    } catch {
+      setEnforcement(null);
+    }
+  };
+
   const fetchRules = async () => {
     try {
       setLoading(true);
@@ -41,6 +57,7 @@ export const FirewallPage: React.FC = () => {
 
   useEffect(() => {
     fetchRules();
+    fetchEnforcement();
   }, []);
 
   const handleAddRule = async (e: React.FormEvent) => {
@@ -106,6 +123,20 @@ export const FirewallPage: React.FC = () => {
           Nova Regra de Porta
         </button>
       </div>
+
+      {enforcement && !enforcement.available && (
+        <div className="flex items-start gap-3 p-4 rounded-2xl border border-amber-500/40 bg-amber-500/10">
+          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <h4 className="font-bold text-amber-200 text-sm">As regras abaixo não estão sendo aplicadas no sistema</h4>
+            <p className="text-xs text-amber-100/80 mt-1">{enforcement.reason}</p>
+            <p className="text-xs text-amber-100/60 mt-1">
+              Elas ficam registradas no painel como documentação, mas o bloqueio real precisa ser feito no host
+              com <code className="font-mono">sudo ufw</code>.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Security Audit Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">

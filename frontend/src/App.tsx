@@ -1,24 +1,39 @@
-import React, { useState, useEffect } from 'react';
-import { Sidebar, NavTab } from './components/Sidebar.js';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
+import { Sidebar } from './components/Sidebar.js';
 import { Navbar } from './components/Navbar.js';
-import { DashboardPage } from './pages/DashboardPage.js';
-import { TemplatesPage } from './pages/TemplatesPage.js';
-import { AppsPage } from './pages/AppsPage.js';
-import { DatabasesPage } from './pages/DatabasesPage.js';
-import { ContainersPage } from './pages/ContainersPage.js';
-import { DomainsPage } from './pages/DomainsPage.js';
-import { TerminalPage } from './pages/TerminalPage.js';
-import { SystemMonitorPage } from './pages/SystemMonitorPage.js';
-import { SettingsPage } from './pages/SettingsPage.js';
-import { HelpPage } from './pages/HelpPage.js';
-import { FileManagerPage } from './pages/FileManagerPage.js';
-import { QueryStudioPage } from './pages/QueryStudioPage.js';
-import { FirewallPage } from './pages/FirewallPage.js';
-import { BackupsPage } from './pages/BackupsPage.js';
-import { CronPage } from './pages/CronPage.js';
 import { AuthPage } from './pages/AuthPage.js';
+
+/**
+ * Sections are code-split.
+ *
+ * Everything used to be pulled into a single bundle, so opening the login
+ * screen downloaded the terminal emulator, the charting library and every
+ * management page. Each section now loads on first visit.
+ */
+const DashboardPage = lazy(() => import('./pages/DashboardPage.js').then(m => ({ default: m.DashboardPage })));
+const TemplatesPage = lazy(() => import('./pages/TemplatesPage.js').then(m => ({ default: m.TemplatesPage })));
+const AppsPage = lazy(() => import('./pages/AppsPage.js').then(m => ({ default: m.AppsPage })));
+const DatabasesPage = lazy(() => import('./pages/DatabasesPage.js').then(m => ({ default: m.DatabasesPage })));
+const ContainersPage = lazy(() => import('./pages/ContainersPage.js').then(m => ({ default: m.ContainersPage })));
+const DomainsPage = lazy(() => import('./pages/DomainsPage.js').then(m => ({ default: m.DomainsPage })));
+const TerminalPage = lazy(() => import('./pages/TerminalPage.js').then(m => ({ default: m.TerminalPage })));
+const SystemMonitorPage = lazy(() => import('./pages/SystemMonitorPage.js').then(m => ({ default: m.SystemMonitorPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage.js').then(m => ({ default: m.SettingsPage })));
+const HelpPage = lazy(() => import('./pages/HelpPage.js').then(m => ({ default: m.HelpPage })));
+const FileManagerPage = lazy(() => import('./pages/FileManagerPage.js').then(m => ({ default: m.FileManagerPage })));
+const QueryStudioPage = lazy(() => import('./pages/QueryStudioPage.js').then(m => ({ default: m.QueryStudioPage })));
+const FirewallPage = lazy(() => import('./pages/FirewallPage.js').then(m => ({ default: m.FirewallPage })));
+const BackupsPage = lazy(() => import('./pages/BackupsPage.js').then(m => ({ default: m.BackupsPage })));
+const CronPage = lazy(() => import('./pages/CronPage.js').then(m => ({ default: m.CronPage })));
+
+const PageFallback = () => (
+  <div className="flex items-center justify-center h-64">
+    <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+  </div>
+);
 import { api } from './services/api.js';
-import { socket } from './services/socket.js';
+import { socket, connectSocket, disconnectSocket } from './services/socket.js';
+import { useRoute } from './hooks/useRoute.js';
 import { OverviewData, SystemStats, User } from './types/index.js';
 
 export function App() {
@@ -28,7 +43,7 @@ export function App() {
     return raw ? JSON.parse(raw) : null;
   });
 
-  const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
+  const [activeTab, setActiveTab] = useRoute();
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [realtimeStats, setRealtimeStats] = useState<SystemStats | null>(null);
 
@@ -46,18 +61,23 @@ export function App() {
   };
 
   useEffect(() => {
-    if (token) {
-      fetchOverview();
-
-      // Listen for WebSocket real-time metrics
-      socket.on('system:metrics', (metrics: SystemStats) => {
-        setRealtimeStats(metrics);
-      });
-
-      return () => {
-        socket.off('system:metrics');
-      };
+    if (!token) {
+      disconnectSocket();
+      return;
     }
+
+    fetchOverview();
+
+    // The handshake carries the session token, so the socket is opened only
+    // after login and closed on logout.
+    connectSocket();
+
+    const onMetrics = (metrics: SystemStats) => setRealtimeStats(metrics);
+    socket.on('system:metrics', onMetrics);
+
+    return () => {
+      socket.off('system:metrics', onMetrics);
+    };
   }, [token]);
 
   useEffect(() => {
@@ -74,9 +94,25 @@ export function App() {
   const handleLogout = () => {
     localStorage.removeItem('aegis_token');
     localStorage.removeItem('aegis_user');
+    disconnectSocket();
     setToken(null);
     setUser(null);
   };
+
+  // The API client clears the stored token on any 401 and fires this event, so
+  // an expired session drops back to the login screen instead of leaving the
+  // UI stuck on failing requests.
+  useEffect(() => {
+    const onAuthChange = () => {
+      if (!localStorage.getItem('aegis_token')) {
+        disconnectSocket();
+        setToken(null);
+        setUser(null);
+      }
+    };
+    window.addEventListener('aegis_auth_change', onAuthChange);
+    return () => window.removeEventListener('aegis_auth_change', onAuthChange);
+  }, []);
 
   if (!token) {
     return <AuthPage onLoginSuccess={handleLoginSuccess} />;
@@ -137,7 +173,7 @@ export function App() {
         />
 
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 custom-scrollbar">
-          {renderContent()}
+          <Suspense fallback={<PageFallback />}>{renderContent()}</Suspense>
         </main>
       </div>
     </div>

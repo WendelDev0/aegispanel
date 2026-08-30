@@ -14,7 +14,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
-  const [serverName, setServerName] = useState('Minha VPS Contabo');
+  const [serverName, setServerName] = useState('Meu Servidor');
   const [errorMsg, setErrorMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -112,7 +112,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
                   required
                   value={serverName}
                   onChange={(e) => setServerName(e.target.value)}
-                  placeholder="Minha VPS Contabo"
+                  placeholder="Meu Servidor"
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -163,12 +163,18 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLoginSuccess }) => {
               <input
                 type="password"
                 required
+                minLength={isSetup ? 12 : undefined}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
               />
             </div>
+            {isSetup && (
+              <p className="text-[11px] text-slate-500 mt-1.5">
+                Mínimo de 12 caracteres. Esta conta controla todo o servidor.
+              </p>
+            )}
           </div>
 
           <button

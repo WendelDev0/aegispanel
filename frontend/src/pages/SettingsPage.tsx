@@ -347,7 +347,7 @@ export const SettingsPage: React.FC = () => {
               </label>
               <input
                 type="text"
-                placeholder="ex: painel.selvamarketing.com"
+                placeholder="ex: painel.seudominio.com"
                 value={panelDomain}
                 onChange={(e) => setPanelDomain(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-indigo-500"
@@ -397,7 +397,7 @@ export const SettingsPage: React.FC = () => {
                   </label>
                   <input
                     type="text"
-                    placeholder="https://evo.selvamarketing.com ou http://localhost:8080"
+                    placeholder="https://evolution.seudominio.com ou http://localhost:8080"
                     value={whatsappApiUrl}
                     onChange={(e) => setWhatsappApiUrl(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-emerald-500"
@@ -756,7 +756,7 @@ export const SettingsPage: React.FC = () => {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Terminal className="w-4 h-4 text-emerald-400" />
-            <h3 className="font-bold text-white text-base">Script Oficial de Instalação na VPS Contabo</h3>
+            <h3 className="font-bold text-white text-base">Script Oficial de Instalação em VPS Linux</h3>
           </div>
           <button
             onClick={copyInstallScript}
@@ -807,7 +807,8 @@ export const SettingsPage: React.FC = () => {
                 <input
                   type="password"
                   required
-                  placeholder="Mínimo 6 caracteres"
+                  minLength={12}
+                  placeholder="Mínimo 12 caracteres"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"
@@ -818,7 +819,7 @@ export const SettingsPage: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-300 mb-1">E-mail (Opcional)</label>
                 <input
                   type="email"
-                  placeholder="dev@selvamarketing.com"
+                  placeholder="voce@seudominio.com"
                   value={newEmail}
                   onChange={(e) => setNewEmail(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"

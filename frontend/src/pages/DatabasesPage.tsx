@@ -169,16 +169,43 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
     }
   };
 
-  const copyConnectionString = (conn: string, id: string) => {
+  /**
+   * Credentials are not part of the databases listing: the API returns the
+   * connection string with the password masked. The real value is requested
+   * only when the user explicitly asks to see or copy it, and is kept in
+   * component state rather than being refetched on every render.
+   */
+  const [credentialsMap, setCredentialsMap] = useState<Record<string, string>>({});
+
+  const fetchConnectionString = async (id: string): Promise<string | null> => {
+    if (credentialsMap[id]) return credentialsMap[id];
+    try {
+      const res = await api.get(`/databases/${id}/credentials`);
+      const conn: string = res.data.connectionString;
+      setCredentialsMap(prev => ({ ...prev, [id]: conn }));
+      return conn;
+    } catch (err: any) {
+      alert('Não foi possível obter as credenciais: ' + (err.response?.data?.error || err.message));
+      return null;
+    }
+  };
+
+  const copyConnectionString = async (id: string) => {
+    const conn = await fetchConnectionString(id);
+    if (!conn) return;
     const host = window.location.hostname || 'localhost';
-    const finalConn = conn.replace('HOST_IP', host);
-    navigator.clipboard.writeText(finalConn);
+    navigator.clipboard.writeText(conn.replace('HOST_IP', host));
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const togglePasswordVisibility = (id: string) => {
-    setShowPasswordMap(prev => ({ ...prev, [id]: !prev[id] }));
+  const togglePasswordVisibility = async (id: string) => {
+    const willShow = !showPasswordMap[id];
+    if (willShow && !credentialsMap[id]) {
+      const conn = await fetchConnectionString(id);
+      if (!conn) return;
+    }
+    setShowPasswordMap(prev => ({ ...prev, [id]: willShow }));
   };
 
   // Password strength calculation
@@ -266,8 +293,12 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {databases.map((db) => {
             const host = window.location.hostname || 'localhost';
-            const displayConn = db.connectionString.replace('HOST_IP', host);
             const isPassVisible = showPasswordMap[db.id] || false;
+            // The listing carries a masked string; the revealed value comes
+            // from the credentials endpoint.
+            const displayConn = (
+              isPassVisible && credentialsMap[db.id] ? credentialsMap[db.id] : db.connectionString
+            ).replace('HOST_IP', host);
 
             return (
               <div
@@ -332,7 +363,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                         {isPassVisible ? displayConn : displayConn.replace(/:([^:@]+)@/, ':••••••••••••@')}
                       </span>
                       <button
-                        onClick={() => copyConnectionString(db.connectionString, db.id)}
+                        onClick={() => copyConnectionString(db.id)}
                         className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors shrink-0 flex items-center gap-1 text-[11px]"
                         title="Copiar URL de conexão para colar no .env do seu projeto"
                       >

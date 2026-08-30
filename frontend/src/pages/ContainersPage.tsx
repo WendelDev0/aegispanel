@@ -176,7 +176,7 @@ export const ContainersPage: React.FC = () => {
             <p className="text-xs text-slate-300 mt-1 leading-relaxed">
               {dockerStatus?.isAvailable
                 ? 'O motor Docker está respondendo normalmente a todos os comandos de criação e deploy.'
-                : '💡 No seu computador Windows: Abra o aplicativo "Docker Desktop". Na sua VPS Ubuntu na Contabo, o Docker roda 24h automaticamente como serviço de sistema.'}
+                : '💡 No Windows, abra o Docker Desktop. Em um servidor Linux, o Docker roda como serviço do sistema.'}
             </p>
           </div>
         </div>

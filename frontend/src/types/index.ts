@@ -92,8 +92,13 @@ export interface AppRecord {
   internalPort: number;
   env: Record<string, string>;
   domain?: string;
-  webhookSecret?: string;
-  githubToken?: string;
+  /**
+   * Credentials are write-only. The API returns these booleans instead of the
+   * values so a GitHub token or webhook secret never reaches the browser in a
+   * list response; the webhook URL is fetched from /apps/:id/webhook on demand.
+   */
+  hasWebhookSecret?: boolean;
+  hasGithubToken?: boolean;
   status: 'running' | 'stopped' | 'building' | 'error';
   lastDeployAt?: string;
   lastCommitHash?: string;

@@ -3,7 +3,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { Terminal as TerminalIcon, RefreshCw, Trash2, Boxes } from 'lucide-react';
-import { socket } from '../services/socket.js';
+import { socket, connectSocket } from '../services/socket.js';
 import { api } from '../services/api.js';
 import { ContainerInfo } from '../types/index.js';
 
@@ -67,11 +67,31 @@ export const TerminalPage: React.FC = () => {
       term.write(data);
     };
 
+    // Surfaces a rejected shell (insufficient role, invalid container) in the
+    // terminal itself instead of leaving a silent blank screen.
+    const onReady = (payload: { success: boolean; error?: string }) => {
+      if (!payload.success && payload.error) {
+        term.write(`
+[31m${payload.error}[0m
+`);
+      }
+    };
+
     socket.off('terminal:data');
     socket.on('terminal:data', onData);
+    socket.off('terminal:ready');
+    socket.on('terminal:ready', onReady);
 
-    // Initialize backend PTY process
-    socket.emit('terminal:init', { containerId });
+    // The socket is authenticated at the handshake and stays closed until a
+    // session exists, so make sure it is open before requesting a shell.
+    connectSocket();
+
+    const requestShell = () => socket.emit('terminal:init', { containerId });
+    if (socket.connected) {
+      requestShell();
+    } else {
+      socket.once('connect', requestShell);
+    }
 
     // Handle resize
     const handleResize = () => {
@@ -82,6 +102,8 @@ export const TerminalPage: React.FC = () => {
     return () => {
       window.removeEventListener('resize', handleResize);
       socket.off('terminal:data', onData);
+      socket.off('terminal:ready', onReady);
+      socket.off('connect', requestShell);
       term.dispose();
     };
   };
