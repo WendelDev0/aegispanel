@@ -7,7 +7,10 @@
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
     "build": "npm --prefix backend run build && npm --prefix frontend run build",
-    "start": "docker compose up -d"
+    "start": "docker compose up -d",
+    "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck",
+    "test": "npm --prefix backend test",
+    "check": "npm run typecheck && npm test"
   },
   "keywords": [
     "vps",
@@ -23,5 +26,8 @@
   "license": "MIT",
   "devDependencies": {
     "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
