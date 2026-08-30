@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { CONFIG } from '../config.js';
+import { resolveSafePath } from '../utils/safe-path.js';
 
 export interface FileItem {
   name: string;
@@ -14,14 +15,10 @@ export interface FileItem {
 export class FileService {
   private static rootDir = path.resolve(CONFIG.DATA_DIR);
 
-  // Security check to avoid Directory Traversal
+  // Delegates to the shared checker, which compares path segments and resolves
+  // symlinks instead of doing a string prefix test.
   private static resolveSafePath(relPath: string = ''): string {
-    const cleanRel = relPath.replace(/^(\/|\\)+/, '');
-    const absolute = path.resolve(this.rootDir, cleanRel);
-    if (!absolute.startsWith(this.rootDir)) {
-      throw new Error('Acesso negado: Tentativa de Path Traversal detectada.');
-    }
-    return absolute;
+    return resolveSafePath(this.rootDir, relPath);
   }
 
   static listFiles(relPath: string = ''): FileItem[] {

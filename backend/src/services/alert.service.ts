@@ -149,48 +149,83 @@ export class AlertService {
     }
   }
 
+  /**
+   * Evaluates every resource threshold.
+   *
+   * Each metric is checked independently and throttled independently: the
+   * previous version chained them with else-if, so memory was never evaluated
+   * while CPU was high, and the disk threshold was not evaluated at all - a
+   * full disk produced no alert.
+   */
+  private static lastAlertByMetric: Record<string, number> = {};
+  private static readonly THROTTLE_MS = 10 * 60 * 1000;
+
   static async checkThresholds(cpuPercent: number, memPercent: number, diskPercent: number) {
-    const settings = dbStorage.getSettings();
-    const config = settings.alertConfig;
+    const config = dbStorage.getSettings().alertConfig;
     if (!config || !config.enabled) return;
 
-    // Throttle to 1 alert every 10 minutes
+    const checks: Array<{
+      metric: string;
+      value: number;
+      threshold: number;
+      title: string;
+      label: string;
+    }> = [
+      {
+        metric: 'cpu',
+        value: cpuPercent,
+        threshold: config.cpuThresholdPercent,
+        title: '⚠️ Alerta: Carga Alta de CPU',
+        label: 'uso de CPU',
+      },
+      {
+        metric: 'memory',
+        value: memPercent,
+        threshold: config.memThresholdPercent,
+        title: '⚠️ Alerta: Uso Elevado de Memória RAM',
+        label: 'consumo de memória RAM',
+      },
+      {
+        metric: 'disk',
+        value: diskPercent,
+        threshold: config.diskThresholdPercent,
+        title: '⚠️ Alerta: Disco Quase Cheio',
+        label: 'uso de disco',
+      },
+    ];
+
     const now = Date.now();
-    if (config.lastAlertSentAt && now - new Date(config.lastAlertSentAt).getTime() < 10 * 60 * 1000) {
-      return;
-    }
 
-    if (cpuPercent >= config.cpuThresholdPercent) {
+    for (const check of checks) {
+      if (!Number.isFinite(check.value) || !Number.isFinite(check.threshold)) continue;
+      if (check.value < check.threshold) continue;
+
+      const last = this.lastAlertByMetric[check.metric] || 0;
+      if (now - last < this.THROTTLE_MS) continue;
+      this.lastAlertByMetric[check.metric] = now;
+
+      const rounded = Math.round(check.value * 10) / 10;
+
       await this.broadcastNotification(
-        '⚠️ Alerta: Carga Alta de CPU',
-        `O uso de CPU da sua VPS atingiu *${cpuPercent}%* (Limite: ${config.cpuThresholdPercent}%).`,
+        check.title,
+        `O ${check.label} da sua VPS atingiu *${rounded}%* (limite: ${check.threshold}%).`,
         'alert',
         true
       );
-      config.lastAlertSentAt = new Date().toISOString();
-      dbStorage.updateSettings({ alertConfig: config });
 
       dbStorage.addActivity({
         type: 'alert',
-        title: 'Alerta de CPU Alta',
-        description: `CPU atingiu ${cpuPercent}% (Limite: ${config.cpuThresholdPercent}%)`,
+        title: check.title.replace('⚠️ Alerta: ', 'Alerta de '),
+        description: `${check.label} atingiu ${rounded}% (limite: ${check.threshold}%)`,
         status: 'warning',
+        metadata: { metric: check.metric, value: rounded, threshold: check.threshold },
       });
-    } else if (memPercent >= config.memThresholdPercent) {
-      await this.broadcastNotification(
-        '⚠️ Alerta: Uso Elevado de Memória RAM',
-        `O consumo de memória RAM da sua VPS atingiu *${memPercent}%* (Limite: ${config.memThresholdPercent}%).`,
-        'alert',
-        true
-      );
-      config.lastAlertSentAt = new Date().toISOString();
-      dbStorage.updateSettings({ alertConfig: config });
 
-      dbStorage.addActivity({
-        type: 'alert',
-        title: 'Alerta de Memória RAM Alta',
-        description: `Memória RAM atingiu ${memPercent}% (Limite: ${config.memThresholdPercent}%)`,
-        status: 'warning',
+      // Persisted only when an alert actually fired. This method runs every
+      // two seconds, so an unconditional write here would rewrite the whole
+      // database file continuously.
+      dbStorage.updateSettings({
+        alertConfig: { ...config, lastAlertSentAt: new Date().toISOString() },
       });
     }
   }

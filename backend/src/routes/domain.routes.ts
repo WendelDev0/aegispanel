@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { dbStorage, DomainRecord } from '../db/storage.js';
 import { CaddyService } from '../services/caddy.service.js';
 import { DomainService } from '../services/domain.service.js';
-import { authMiddleware } from './auth.routes.js';
+import { authMiddleware, requireWrite } from '../middleware/auth.js';
 
 export const domainRouter = Router();
 
@@ -46,7 +46,7 @@ domainRouter.get('/', (req: Request, res: Response) => {
 });
 
 // Check DNS propagation for any domain
-domainRouter.post('/check-dns', async (req: Request, res: Response): Promise<void> => {
+domainRouter.post('/check-dns', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
     const { domain } = req.body;
     if (!domain) {
@@ -78,7 +78,7 @@ domainRouter.get('/:id/ssl-status', async (req: Request, res: Response): Promise
 });
 
 // Force Renew SSL
-domainRouter.post('/:id/renew-ssl', async (req: Request, res: Response): Promise<void> => {
+domainRouter.post('/:id/renew-ssl', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
     await DomainService.renewSsl(req.params.id);
     res.json({ success: true, message: 'Certificado SSL renovado com sucesso via Caddy Proxy.' });
@@ -87,7 +87,7 @@ domainRouter.post('/:id/renew-ssl', async (req: Request, res: Response): Promise
   }
 });
 
-domainRouter.post('/', async (req: Request, res: Response): Promise<void> => {
+domainRouter.post('/', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
     const { domain, targetPort, targetContainer } = req.body;
     if (!domain || !targetPort) {
@@ -116,7 +116,7 @@ domainRouter.post('/', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-domainRouter.delete('/:id', async (req: Request, res: Response) => {
+domainRouter.delete('/:id', requireWrite, async (req: Request, res: Response) => {
   try {
     const domainToRemove = dbStorage.getDomains().find(d => d.id === req.params.id);
     const success = dbStorage.removeDomain(req.params.id);

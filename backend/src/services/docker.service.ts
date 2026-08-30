@@ -1,5 +1,12 @@
 import Docker from 'dockerode';
+import { PassThrough, Readable } from 'stream';
 import { CONFIG } from '../config.js';
+
+export interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
 
 export interface ContainerInfo {
   id: string;
@@ -85,6 +92,121 @@ class DockerManager {
 
   getConnectionType(): string {
     return this.connectionType;
+  }
+
+  /**
+   * Runs a command inside a container through the Docker API.
+   *
+   * Deliberately not `child_process.exec("docker exec ...")`: that path builds
+   * a shell string, so any interpolated value (a SQL statement, a database
+   * name) is evaluated by /bin/sh. Here the command is an argv array that the
+   * daemon execs directly, and secrets travel in `env` over the socket instead
+   * of appearing in the host process list.
+   */
+  async execInContainer(
+    containerId: string,
+    cmd: string[],
+    options: { env?: string[]; stdin?: string; timeoutMs?: number } = {}
+  ): Promise<ExecResult> {
+    const container = this.docker.getContainer(containerId);
+    const exec = await container.exec({
+      Cmd: cmd,
+      Env: options.env,
+      AttachStdin: options.stdin !== undefined,
+      AttachStdout: true,
+      AttachStderr: true,
+    });
+
+    const stream = await exec.start({ hijack: true, stdin: options.stdin !== undefined });
+
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    const stdoutStream = new PassThrough();
+    const stderrStream = new PassThrough();
+    stdoutStream.on('data', (c: Buffer) => stdoutChunks.push(c));
+    stderrStream.on('data', (c: Buffer) => stderrChunks.push(c));
+    this.docker.modem.demuxStream(stream, stdoutStream, stderrStream);
+
+    if (options.stdin !== undefined) {
+      Readable.from([Buffer.from(options.stdin, 'utf-8')]).pipe(stream);
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = options.timeoutMs
+        ? setTimeout(() => {
+            stream.destroy();
+            reject(new Error(`Comando excedeu o tempo limite de ${options.timeoutMs}ms`));
+          }, options.timeoutMs)
+        : null;
+
+      stream.on('end', () => {
+        if (timeout) clearTimeout(timeout);
+        resolve();
+      });
+      stream.on('error', (err: Error) => {
+        if (timeout) clearTimeout(timeout);
+        reject(err);
+      });
+    });
+
+    const inspect = await exec.inspect();
+
+    return {
+      stdout: Buffer.concat(stdoutChunks).toString('utf-8'),
+      stderr: Buffer.concat(stderrChunks).toString('utf-8'),
+      exitCode: inspect.ExitCode ?? 0,
+    };
+  }
+
+  /**
+   * Like execInContainer, but streams stdout straight to a writable stream.
+   * Used for database dumps, which can be far larger than a sane in-memory
+   * buffer and previously went through a shell redirect.
+   */
+  async execToStream(
+    containerId: string,
+    cmd: string[],
+    destination: NodeJS.WritableStream,
+    options: { env?: string[]; timeoutMs?: number } = {}
+  ): Promise<{ stderr: string; exitCode: number }> {
+    const container = this.docker.getContainer(containerId);
+    const exec = await container.exec({
+      Cmd: cmd,
+      Env: options.env,
+      AttachStdout: true,
+      AttachStderr: true,
+    });
+
+    const stream = await exec.start({ hijack: true, stdin: false });
+
+    const stderrChunks: Buffer[] = [];
+    const stderrStream = new PassThrough();
+    stderrStream.on('data', (c: Buffer) => stderrChunks.push(c));
+    this.docker.modem.demuxStream(stream, destination, stderrStream);
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = options.timeoutMs
+        ? setTimeout(() => {
+            stream.destroy();
+            reject(new Error(`Comando excedeu o tempo limite de ${options.timeoutMs}ms`));
+          }, options.timeoutMs)
+        : null;
+
+      stream.on('end', () => {
+        if (timeout) clearTimeout(timeout);
+        resolve();
+      });
+      stream.on('error', (err: Error) => {
+        if (timeout) clearTimeout(timeout);
+        reject(err);
+      });
+    });
+
+    const inspect = await exec.inspect();
+    return {
+      stderr: Buffer.concat(stderrChunks).toString('utf-8'),
+      exitCode: inspect.ExitCode ?? 0,
+    };
   }
 
   async listImages(): Promise<any[]> {
@@ -236,6 +358,78 @@ class DockerManager {
     });
   }
 
+  async removeContainerByName(name: string, force: boolean = true): Promise<boolean> {
+    try {
+      await this.docker.getContainer(name).remove({ force });
+      return true;
+    } catch (err: any) {
+      if (err.statusCode === 404) return false;
+      throw err;
+    }
+  }
+
+  private buildCreateOptions(options: {
+    name: string;
+    image: string;
+    env?: string[];
+    ports?: { [internalPort: string]: number };
+    volumes?: { [hostPath: string]: string };
+    restartPolicy?: string;
+    labels?: { [key: string]: string };
+    networkName?: string;
+  }): Docker.ContainerCreateOptions {
+    const PortBindings: { [key: string]: Array<{ HostPort: string }> } = {};
+    const ExposedPorts: { [key: string]: object } = {};
+
+    for (const [intPort, hostPort] of Object.entries(options.ports || {})) {
+      const portKey = intPort.includes('/') ? intPort : `${intPort}/tcp`;
+      ExposedPorts[portKey] = {};
+      PortBindings[portKey] = [{ HostPort: hostPort.toString() }];
+    }
+
+    const Binds: string[] = Object.entries(options.volumes || {}).map(
+      ([host, container]) => `${host}:${container}`
+    );
+
+    return {
+      name: options.name,
+      Image: options.image,
+      Env: options.env || [],
+      ExposedPorts,
+      Labels: {
+        'aegis.managed': 'true',
+        ...(options.labels || {}),
+      },
+      HostConfig: {
+        PortBindings,
+        Binds,
+        RestartPolicy: { Name: options.restartPolicy || 'unless-stopped' },
+        // Joining the panel network at creation lets Caddy reach the container
+        // by name immediately, instead of after a second connect call that may
+        // land while the first request is already being proxied.
+        ...(options.networkName ? { NetworkMode: options.networkName } : {}),
+      },
+    };
+  }
+
+  private async findAegisNetworkName(): Promise<string | undefined> {
+    try {
+      const nets = await this.docker.listNetworks();
+      return nets.find((n) => n.Name.includes('aegis-net'))?.Name;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Creates and starts a container, replacing any previous one with the same
+   * name.
+   *
+   * The previous container is renamed aside rather than deleted up front: if
+   * the new one fails to start (a port taken by another service, a bad image)
+   * the old container is restored under its original name. Deleting first
+   * meant a failed deploy left the application simply gone.
+   */
   async createAndStartContainer(options: {
     name: string;
     image: string;
@@ -252,124 +446,70 @@ class DockerManager {
       );
     }
 
-    // 1. Remove existing container with same name if already present (Prevents 409 Conflict)
+    // Ensure the image exists locally before touching the running container.
+    try {
+      await this.docker.getImage(options.image).inspect();
+    } catch {
+      console.log(`Pulling image ${options.image}...`);
+      await this.pullImage(options.image);
+    }
+
+    const networkName = await this.findAegisNetworkName();
+    const createOptions = this.buildCreateOptions({ ...options, networkName });
+
+    const backupName = `${options.name}-prev-${Date.now().toString(36)}`;
+    let renamedOld = false;
+
     try {
       const existing = this.docker.getContainer(options.name);
-      await existing.remove({ force: true });
+      await existing.inspect();
+      await existing.rename({ name: backupName });
+      renamedOld = true;
+      try {
+        await existing.stop({ t: 10 });
+      } catch {
+        // already stopped
+      }
     } catch {
-      // ignore if not existing
+      // nothing to replace
     }
 
     try {
-      // Ensure image exists
-      try {
-        await this.docker.getImage(options.image).inspect();
-      } catch {
-        console.log(`Pulling image ${options.image}...`);
-        await this.pullImage(options.image);
-      }
-
-      const PortBindings: { [key: string]: Array<{ HostPort: string }> } = {};
-      const ExposedPorts: { [key: string]: object } = {};
-
-      if (options.ports) {
-        for (const [intPort, hostPort] of Object.entries(options.ports)) {
-          const portKey = intPort.includes('/') ? intPort : `${intPort}/tcp`;
-          ExposedPorts[portKey] = {};
-          PortBindings[portKey] = [{ HostPort: hostPort.toString() }];
-        }
-      }
-
-      const Binds: string[] = [];
-      if (options.volumes) {
-        for (const [host, container] of Object.entries(options.volumes)) {
-          Binds.push(`${host}:${container}`);
-        }
-      }
-
-      const container = await this.docker.createContainer({
-        name: options.name,
-        Image: options.image,
-        Env: options.env || [],
-        ExposedPorts,
-        Labels: {
-          'aegis.managed': 'true',
-          ...(options.labels || {}),
-        },
-        HostConfig: {
-          PortBindings,
-          Binds,
-          RestartPolicy: {
-            Name: options.restartPolicy || 'unless-stopped',
-          },
-        },
-      });
-
+      const container = await this.docker.createContainer(createOptions);
       await container.start();
 
-      // Connect to aegis-net network so Caddy can reach it directly by container name
-      try {
-        const nets = await this.docker.listNetworks();
-        const aegisNet = nets.find(n => n.Name.includes('aegis-net'));
-        if (aegisNet) {
-          const net = this.docker.getNetwork(aegisNet.Id);
-          await net.connect({ Container: container.id }).catch(() => {});
+      if (renamedOld) {
+        try {
+          await this.docker.getContainer(backupName).remove({ force: true });
+        } catch (err: any) {
+          console.warn('Não foi possível remover o contêiner anterior:', err.message);
         }
-      } catch {
-        // ignore
       }
 
       return container.id;
     } catch (err: any) {
-      if (err.message && (err.message.includes('port is already allocated') || err.message.includes('address already in use') || err.message.includes('Ports are not available'))) {
-        throw new Error(`A porta do host já está em uso por outro serviço na sua máquina (ex: painel ou outro contêiner). Altere a porta da aplicação para 5000, 5050 ou 8080.`);
+      // Roll back to the previous container so a failed deploy does not take
+      // the application offline.
+      if (renamedOld) {
+        try {
+          const old = this.docker.getContainer(backupName);
+          await old.rename({ name: options.name });
+          await old.start().catch(() => {});
+          console.warn(`Deploy falhou; contêiner anterior "${options.name}" foi restaurado.`);
+        } catch (restoreErr: any) {
+          console.error('Falha ao restaurar o contêiner anterior:', restoreErr.message);
+        }
       }
 
-      // Secondary fallback if 409 conflict still triggered
-      if (err.statusCode === 409 || (err.message && err.message.includes('Conflict'))) {
-        try {
-          const existing = this.docker.getContainer(options.name);
-          await existing.remove({ force: true });
-          const PortBindings: { [key: string]: Array<{ HostPort: string }> } = {};
-          const ExposedPorts: { [key: string]: object } = {};
-
-          if (options.ports) {
-            for (const [intPort, hostPort] of Object.entries(options.ports)) {
-              const portKey = intPort.includes('/') ? intPort : `${intPort}/tcp`;
-              ExposedPorts[portKey] = {};
-              PortBindings[portKey] = [{ HostPort: hostPort.toString() }];
-            }
-          }
-
-          const Binds: string[] = [];
-          if (options.volumes) {
-            for (const [host, container] of Object.entries(options.volumes)) {
-              Binds.push(`${host}:${container}`);
-            }
-          }
-
-          const retryContainer = await this.docker.createContainer({
-            name: options.name,
-            Image: options.image,
-            Env: options.env || [],
-            ExposedPorts,
-            Labels: {
-              'aegis.managed': 'true',
-              ...(options.labels || {}),
-            },
-            HostConfig: {
-              PortBindings,
-              Binds,
-              RestartPolicy: {
-                Name: options.restartPolicy || 'unless-stopped',
-              },
-            },
-          });
-          await retryContainer.start();
-          return retryContainer.id;
-        } catch (retryErr) {
-          throw retryErr;
-        }
+      if (
+        err.message &&
+        (err.message.includes('port is already allocated') ||
+          err.message.includes('address already in use') ||
+          err.message.includes('Ports are not available'))
+      ) {
+        throw new Error(
+          'A porta do host já está em uso por outro serviço na sua máquina (ex: painel ou outro contêiner). Altere a porta da aplicação para 5000, 5050 ou 8080.'
+        );
       }
 
       console.error('Failed to create and start container:', err);

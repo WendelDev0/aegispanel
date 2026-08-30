@@ -1,33 +1,33 @@
 import { Router, Request, Response } from 'express';
+import express from 'express';
 import fs from 'fs';
 import { FileService } from '../services/file.service.js';
-import { authMiddleware } from './auth.routes.js';
+import { authMiddleware, requireWrite } from '../middleware/auth.js';
 
 export const fileRouter = Router();
 
 fileRouter.use(authMiddleware);
 
+/** Uploads are the only endpoint that legitimately carries a large payload. */
+const uploadBodyParser = express.json({ limit: '50mb' });
+
 fileRouter.get('/list', (req: Request, res: Response): void => {
   try {
-    const relPath = (req.query.path as string) || '';
-    const files = FileService.listFiles(relPath);
-    res.json(files);
+    res.json(FileService.listFiles((req.query.path as string) || ''));
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    res.status(403).json({ error: err.message });
   }
 });
 
 fileRouter.get('/read', (req: Request, res: Response): void => {
   try {
-    const relPath = (req.query.path as string) || '';
-    const content = FileService.readFile(relPath);
-    res.json({ content });
+    res.json({ content: FileService.readFile((req.query.path as string) || '') });
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    res.status(403).json({ error: err.message });
   }
 });
 
-fileRouter.post('/write', (req: Request, res: Response): void => {
+fileRouter.post('/write', requireWrite, (req: Request, res: Response): void => {
   try {
     const { path: relPath, content } = req.body;
     if (!relPath) {
@@ -37,11 +37,11 @@ fileRouter.post('/write', (req: Request, res: Response): void => {
     FileService.writeFile(relPath, content || '');
     res.json({ success: true });
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    res.status(403).json({ error: err.message });
   }
 });
 
-fileRouter.post('/upload', (req: Request, res: Response): void => {
+fileRouter.post('/upload', requireWrite, uploadBodyParser, (req: Request, res: Response): void => {
   try {
     const { path: relPath, base64 } = req.body;
     if (!relPath || !base64) {
@@ -51,25 +51,24 @@ fileRouter.post('/upload', (req: Request, res: Response): void => {
     FileService.uploadBase64(relPath, base64);
     res.json({ success: true });
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    res.status(403).json({ error: err.message });
   }
 });
 
 fileRouter.get('/download', (req: Request, res: Response): void => {
   try {
-    const relPath = (req.query.path as string) || '';
-    const absPath = FileService.getSafeAbsolutePath(relPath);
+    const absPath = FileService.getSafeAbsolutePath((req.query.path as string) || '');
     if (!fs.existsSync(absPath) || fs.statSync(absPath).isDirectory()) {
       res.status(404).json({ error: 'Arquivo não encontrado' });
       return;
     }
     res.download(absPath);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    res.status(403).json({ error: err.message });
   }
 });
 
-fileRouter.post('/create-folder', (req: Request, res: Response): void => {
+fileRouter.post('/create-folder', requireWrite, (req: Request, res: Response): void => {
   try {
     const { path: relPath } = req.body;
     if (!relPath) {
@@ -79,20 +78,19 @@ fileRouter.post('/create-folder', (req: Request, res: Response): void => {
     FileService.createDirectory(relPath);
     res.json({ success: true });
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    res.status(403).json({ error: err.message });
   }
 });
 
-fileRouter.delete('/delete', (req: Request, res: Response): void => {
+fileRouter.delete('/delete', requireWrite, (req: Request, res: Response): void => {
   try {
     const relPath = (req.query.path as string) || '';
     if (!relPath) {
       res.status(400).json({ error: 'Caminho é obrigatório' });
       return;
     }
-    const success = FileService.deleteItem(relPath);
-    res.json({ success });
+    res.json({ success: FileService.deleteItem(relPath) });
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    res.status(403).json({ error: err.message });
   }
 });

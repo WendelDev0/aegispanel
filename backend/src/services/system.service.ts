@@ -96,6 +96,18 @@ fetchPublicIp().then(ip => {
 });
 
 export class SystemService {
+  /**
+   * Public address of this server, used to tell whether a domain's A record
+   * actually points here. Resolved lazily and cached.
+   */
+  static async getPublicIp(): Promise<string> {
+    if (!cachedPublicIp) {
+      const ip = await fetchPublicIp();
+      if (ip) cachedPublicIp = ip;
+    }
+    return cachedPublicIp;
+  }
+
   static async getRealtimeStats(): Promise<SystemStats> {
     const [
       currentLoad,
@@ -339,86 +351,114 @@ export class SystemService {
    * Real Network Speedtest Engine
    * Measures Latency (Ping), Jitter, Download Speed (Mbps) and Upload Speed (Mbps)
    */
+  /**
+   * Measures the server's own bandwidth against Cloudflare.
+   *
+   * Reports what was actually measured. The previous version floored the
+   * result with Math.max(downloadMbps, 120.5) and returned a hardcoded ISP and
+   * location, so a saturated or throttled link always looked healthy, and the
+   * error paths invented byte counts to keep the numbers plausible.
+   */
   static async runSpeedtest(): Promise<SpeedtestResult> {
-    // 1. Measure Latency (Ping)
-    const pingStarts: number[] = [];
+    // 1. Latency and jitter, plus the edge location Cloudflare answered from.
     const pings: number[] = [];
+    let colo = '';
 
     for (let i = 0; i < 4; i++) {
       const start = Date.now();
-      await new Promise<void>((resolve) => {
-        https.get('https://1.1.1.1/cdn-cgi/trace', { timeout: 3000 }, (res) => {
-          res.on('data', () => {});
-          res.on('end', () => {
-            pings.push(Date.now() - start);
-            resolve();
+      const body = await new Promise<string>((resolve) => {
+        https
+          .get('https://speed.cloudflare.com/cdn-cgi/trace', { timeout: 3000 }, (res) => {
+            let data = '';
+            res.on('data', (chunk) => (data += chunk));
+            res.on('end', () => resolve(data));
+          })
+          .on('error', () => resolve(''))
+          .on('timeout', function (this: any) {
+            this.destroy();
+            resolve('');
           });
-        }).on('error', () => {
-          pings.push(35);
-          resolve();
-        });
       });
+
+      if (body) {
+        pings.push(Date.now() - start);
+        const match = body.match(/^colo=(.+)$/m);
+        if (match) colo = match[1].trim();
+      }
     }
 
-    const avgPing = Math.round(pings.reduce((a, b) => a + b, 0) / pings.length) || 15;
-    const jitter = Math.round(Math.abs(pings[pings.length - 1] - pings[0]) / 2) || 2;
+    if (pings.length === 0) {
+      throw new Error(
+        'Não foi possível alcançar o servidor de teste. Verifique a conectividade de saída deste servidor.'
+      );
+    }
 
-    // 2. Measure Download Speed (Stream 10MB test chunk)
-    let downloadedBytes = 0;
-    const downloadStart = Date.now();
+    const avgPing = Math.round(pings.reduce((a, b) => a + b, 0) / pings.length);
+    const jitter =
+      pings.length > 1
+        ? Math.round(
+            pings.reduce((acc, p) => acc + Math.abs(p - avgPing), 0) / pings.length
+          )
+        : 0;
 
-    await new Promise<void>((resolve) => {
-      https.get('https://speed.cloudflare.com/__down?bytes=10000000', { timeout: 10000 }, (res) => {
-        res.on('data', (chunk) => {
-          downloadedBytes += chunk.length;
-        });
-        res.on('end', resolve);
-      }).on('error', () => {
-        downloadedBytes = 8500000; // fallback approximation
-        resolve();
+    // 2. Download.
+    const download = await new Promise<{ bytes: number; seconds: number } | null>((resolve) => {
+      let bytes = 0;
+      const start = Date.now();
+      const req = https.get(
+        'https://speed.cloudflare.com/__down?bytes=10000000',
+        { timeout: 20000 },
+        (res) => {
+          res.on('data', (chunk) => (bytes += chunk.length));
+          res.on('end', () => resolve({ bytes, seconds: (Date.now() - start) / 1000 }));
+        }
+      );
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(null);
       });
     });
 
-    const downloadDurationSec = Math.max(0.2, (Date.now() - downloadStart) / 1000);
-    const downloadMbps = Math.round(((downloadedBytes * 8) / (downloadDurationSec * 1_000_000)) * 10) / 10;
+    if (!download || download.bytes === 0) {
+      throw new Error('Falha ao medir a velocidade de download.');
+    }
 
-    // 3. Measure Upload Speed (Send 3MB payload)
+    // 3. Upload.
     const uploadPayload = Buffer.alloc(3 * 1024 * 1024, 'a');
-    let uploadedBytes = 0;
-    const uploadStart = Date.now();
-
-    await new Promise<void>((resolve) => {
-      const req = https.request('https://speed.cloudflare.com/__up', {
-        method: 'POST',
-        timeout: 10000,
-        headers: { 'Content-Length': uploadPayload.length },
-      }, (res) => {
-        res.on('data', () => {});
-        res.on('end', () => {
-          uploadedBytes = uploadPayload.length;
-          resolve();
-        });
+    const upload = await new Promise<{ bytes: number; seconds: number } | null>((resolve) => {
+      const start = Date.now();
+      const req = https.request(
+        'https://speed.cloudflare.com/__up',
+        {
+          method: 'POST',
+          timeout: 20000,
+          headers: { 'Content-Length': uploadPayload.length },
+        },
+        (res) => {
+          res.on('data', () => {});
+          res.on('end', () => resolve({ bytes: uploadPayload.length, seconds: (Date.now() - start) / 1000 }));
+        }
+      );
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(null);
       });
-
-      req.on('error', () => {
-        uploadedBytes = 2500000;
-        resolve();
-      });
-
       req.write(uploadPayload);
       req.end();
     });
 
-    const uploadDurationSec = Math.max(0.2, (Date.now() - uploadStart) / 1000);
-    const uploadMbps = Math.round(((uploadedBytes * 8) / (uploadDurationSec * 1_000_000)) * 10) / 10;
+    const toMbps = (bytes: number, seconds: number) =>
+      Math.round(((bytes * 8) / (Math.max(seconds, 0.001) * 1_000_000)) * 10) / 10;
 
     return {
-      downloadMbps: Math.max(downloadMbps, 120.5),
-      uploadMbps: Math.max(uploadMbps, 85.2),
+      downloadMbps: toMbps(download.bytes, download.seconds),
+      uploadMbps: upload ? toMbps(upload.bytes, upload.seconds) : 0,
       pingMs: avgPing,
       jitterMs: jitter,
-      serverLocation: 'São Paulo / Frankfurt (Contabo Global Backbone)',
-      isp: 'Contabo GmbH / High-Speed Cloud',
+      serverLocation: colo ? `Cloudflare ${colo}` : 'Cloudflare (edge não identificado)',
+      isp: cachedPublicIp ? `IP público ${cachedPublicIp}` : 'desconhecido',
       testedAt: new Date().toISOString(),
     };
   }

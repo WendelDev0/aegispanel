@@ -1,12 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { QueryService } from '../services/query.service.js';
-import { authMiddleware } from './auth.routes.js';
+import { authMiddleware, requireWrite } from '../middleware/auth.js';
 
 export const queryRouter = Router();
 
 queryRouter.use(authMiddleware);
 
-queryRouter.post('/execute', async (req: Request, res: Response): Promise<void> => {
+queryRouter.post('/execute', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
     const { databaseId, sql } = req.body;
     if (!databaseId || !sql) {

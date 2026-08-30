@@ -16,21 +16,47 @@ export interface CreateDbDTO {
 }
 
 export class DatabaseService {
+  /**
+   * Lists databases without their credentials.
+   *
+   * The previous implementation decrypted every password and returned it in
+   * the list response, so the plaintext of every database reached the browser
+   * on each page load. Credentials are now fetched explicitly, one record at a
+   * time, through getCredentials().
+   */
   static getAll(): DatabaseRecord[] {
-    const databases = dbStorage.getDatabases();
-    // Decrypt passwords for authenticated API responses
-    return databases.map(db => {
-      const rawPassword = EncryptionService.decrypt(db.dbPassword);
-      const plainConnString = db.connectionString.includes('***ENCRYPTED***')
-        ? db.connectionString.replace('***ENCRYPTED***', rawPassword)
-        : db.connectionString;
+    return dbStorage.getDatabases().map((db) => ({
+      ...db,
+      dbPassword: '',
+      connectionString: db.connectionString.replace(/:\/\/([^:]+):([^@]*)@/, '://$1:***@'),
+    }));
+  }
 
-      return {
-        ...db,
-        dbPassword: rawPassword,
-        connectionString: plainConnString,
-      };
-    });
+  /** Returns the decrypted credentials for a single database. */
+  static getCredentials(id: string): {
+    dbUser: string;
+    dbPassword: string;
+    dbName: string;
+    connectionString: string;
+  } {
+    const db = dbStorage.getDatabaseById(id);
+    if (!db) throw new Error('Banco de dados não encontrado');
+
+    const password = EncryptionService.tryDecrypt(db.dbPassword);
+    if (password === null) {
+      throw new Error(
+        'Não foi possível descriptografar a senha deste banco. A ENCRYPTION_KEY do servidor mudou desde que o registro foi criado.'
+      );
+    }
+
+    return {
+      dbUser: db.dbUser,
+      dbPassword: password,
+      dbName: db.dbName,
+      connectionString: db.connectionString.includes('***ENCRYPTED***')
+        ? db.connectionString.replace('***ENCRYPTED***', password)
+        : db.connectionString,
+    };
   }
 
   static getCredentialsSuggestion(type: string = 'postgres') {
@@ -201,7 +227,7 @@ export class DatabaseService {
       await dockerService.startContainer(db.containerId);
       db.status = 'running';
       const saved = dbStorage.saveDatabase(db);
-      return { ...saved, dbPassword: EncryptionService.decrypt(saved.dbPassword) };
+      return { ...saved, dbPassword: '' };
     }
     throw new Error('No container associated');
   }
@@ -214,7 +240,7 @@ export class DatabaseService {
       await dockerService.stopContainer(db.containerId);
       db.status = 'stopped';
       const saved = dbStorage.saveDatabase(db);
-      return { ...saved, dbPassword: EncryptionService.decrypt(saved.dbPassword) };
+      return { ...saved, dbPassword: '' };
     }
     throw new Error('No container associated');
   }
@@ -227,7 +253,7 @@ export class DatabaseService {
       await dockerService.restartContainer(db.containerId);
       db.status = 'running';
       const saved = dbStorage.saveDatabase(db);
-      return { ...saved, dbPassword: EncryptionService.decrypt(saved.dbPassword) };
+      return { ...saved, dbPassword: '' };
     }
     throw new Error('No container associated');
   }

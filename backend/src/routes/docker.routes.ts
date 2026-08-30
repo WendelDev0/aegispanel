@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { dockerService } from '../services/docker.service.js';
-import { authMiddleware } from './auth.routes.js';
+import { authMiddleware, requireWrite } from '../middleware/auth.js';
 
 export const dockerRouter = Router();
 
@@ -19,7 +19,7 @@ dockerRouter.get('/status', async (req: Request, res: Response) => {
   });
 });
 
-dockerRouter.post('/reconnect', async (req: Request, res: Response) => {
+dockerRouter.post('/reconnect', requireWrite, async (req: Request, res: Response) => {
   const connected = await dockerService.detectAndConnect();
   res.json({
     success: connected,
@@ -47,7 +47,7 @@ dockerRouter.get('/containers/:id/stats', async (req: Request, res: Response) =>
   }
 });
 
-dockerRouter.post('/containers/:id/start', async (req: Request, res: Response) => {
+dockerRouter.post('/containers/:id/start', requireWrite, async (req: Request, res: Response) => {
   try {
     await dockerService.startContainer(req.params.id);
     res.json({ success: true });
@@ -56,7 +56,7 @@ dockerRouter.post('/containers/:id/start', async (req: Request, res: Response) =
   }
 });
 
-dockerRouter.post('/containers/:id/stop', async (req: Request, res: Response) => {
+dockerRouter.post('/containers/:id/stop', requireWrite, async (req: Request, res: Response) => {
   try {
     await dockerService.stopContainer(req.params.id);
     res.json({ success: true });
@@ -65,7 +65,7 @@ dockerRouter.post('/containers/:id/stop', async (req: Request, res: Response) =>
   }
 });
 
-dockerRouter.post('/containers/:id/restart', async (req: Request, res: Response) => {
+dockerRouter.post('/containers/:id/restart', requireWrite, async (req: Request, res: Response) => {
   try {
     await dockerService.restartContainer(req.params.id);
     res.json({ success: true });
@@ -74,7 +74,7 @@ dockerRouter.post('/containers/:id/restart', async (req: Request, res: Response)
   }
 });
 
-dockerRouter.delete('/containers/:id', async (req: Request, res: Response) => {
+dockerRouter.delete('/containers/:id', requireWrite, async (req: Request, res: Response) => {
   try {
     await dockerService.removeContainer(req.params.id, true);
     res.json({ success: true });

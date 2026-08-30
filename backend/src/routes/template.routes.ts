@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { TemplateService } from '../services/template.service.js';
-import { authMiddleware } from './auth.routes.js';
+import { authMiddleware, requireWrite } from '../middleware/auth.js';
 
 export const templateRouter = Router();
 
@@ -10,7 +10,7 @@ templateRouter.get('/', (req: Request, res: Response) => {
   res.json(TemplateService.getCatalog());
 });
 
-templateRouter.post('/install', async (req: Request, res: Response): Promise<void> => {
+templateRouter.post('/install', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
     const { templateId, customPort, customName, apiKey, postgresDbId, redisDbId, customEnv } = req.body;
     if (!templateId) {

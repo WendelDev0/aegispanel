@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { dbStorage, ServerNode } from '../db/storage.js';
-import { authMiddleware } from './auth.routes.js';
+import { authMiddleware, requireAdmin } from '../middleware/auth.js';
 
 export const nodeRouter = Router();
 
@@ -10,7 +10,7 @@ nodeRouter.get('/', (req: Request, res: Response) => {
   res.json(dbStorage.getServerNodes());
 });
 
-nodeRouter.post('/', async (req: Request, res: Response): Promise<void> => {
+nodeRouter.post('/', requireAdmin, async (req: Request, res: Response): Promise<void> => {
   try {
     const { name, type, hostIp, location } = req.body;
     if (!name || !hostIp) {

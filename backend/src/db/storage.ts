@@ -1,13 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 import { CONFIG } from '../config.js';
+import type { UserRole } from '../middleware/auth.js';
 
 export interface User {
   id: string;
   username: string;
   passwordHash: string;
   email?: string;
-  role: 'admin' | 'user';
+  role: UserRole;
   createdAt: string;
 }
 
@@ -169,7 +170,7 @@ export interface PanelSettings {
   alertConfig: AlertConfig;
 }
 
-interface DatabaseSchema {
+export interface DatabaseSchema {
   users: User[];
   databases: DatabaseRecord[];
   apps: AppRecord[];
@@ -217,11 +218,11 @@ const DEFAULT_DATA: DatabaseSchema = {
     { id: 'fw-80', port: 80, protocol: 'tcp', action: 'allow', comment: 'HTTP Web Traffic', createdAt: new Date().toISOString() },
     { id: 'fw-443', port: 443, protocol: 'tcp', action: 'allow', comment: 'HTTPS Secure Web', createdAt: new Date().toISOString() },
     { id: 'fw-3000', port: 3000, protocol: 'tcp', action: 'allow', comment: 'AegisPanel Web Dashboard', createdAt: new Date().toISOString() },
-    { id: 'fw-4000', port: 4000, protocol: 'tcp', action: 'allow', comment: 'AegisPanel API Daemon', createdAt: new Date().toISOString() },
   ],
+  // Only the machine running this process. Additional nodes are registered by
+  // the operator; shipping a placeholder for someone else's provider is noise.
   serverNodes: [
-    { id: 'node-local', name: 'Nó Local (Esta Máquina)', type: 'local', hostIp: '127.0.0.1', isCurrent: true, status: 'online', location: 'On-Premise' },
-    { id: 'node-contabo-vps', name: 'VPS Contabo Principal', type: 'vps', hostIp: 'Pendente IP', isCurrent: false, status: 'offline', location: 'Alemanha / EUA' },
+    { id: 'node-local', name: 'Este Servidor', type: 'local', hostIp: '127.0.0.1', isCurrent: true, status: 'online', location: 'On-Premise' },
   ],
   settings: {
     serverName: 'Aegis Node 01',
@@ -251,24 +252,91 @@ class JsonStorage {
   }
 
   private load(): DatabaseSchema {
-    try {
-      if (fs.existsSync(this.filePath)) {
-        const raw = fs.readFileSync(this.filePath, 'utf-8');
-        return { ...DEFAULT_DATA, ...JSON.parse(raw) };
-      }
-    } catch (err) {
-      console.error('Error loading database file, initializing default:', err);
+    if (!fs.existsSync(this.filePath)) {
+      const fresh = structuredClone(DEFAULT_DATA);
+      this.data = fresh;
+      this.save(fresh);
+      return fresh;
     }
-    this.save(DEFAULT_DATA);
-    return JSON.parse(JSON.stringify(DEFAULT_DATA));
+
+    let raw: string;
+    try {
+      raw = fs.readFileSync(this.filePath, 'utf-8');
+    } catch (err: any) {
+      throw new Error(`Não foi possível ler ${this.filePath}: ${err.message}`);
+    }
+
+    let parsed: Partial<DatabaseSchema>;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err: any) {
+      // A corrupt file is almost always a truncated write, not an empty panel.
+      // Overwriting it with defaults here would silently destroy every user,
+      // app and database record, so the file is preserved and startup aborts.
+      const quarantine = `${this.filePath}.corrupt-${Date.now()}`;
+      try {
+        fs.copyFileSync(this.filePath, quarantine);
+      } catch {
+        // best effort
+      }
+      throw new Error(
+        `panel_db.json está corrompido e NÃO foi sobrescrito. ` +
+          `Cópia preservada em ${quarantine}. Erro: ${err.message}. ` +
+          `Restaure um backup ou corrija o JSON antes de reiniciar o painel.`
+      );
+    }
+
+    // Merge one level into the defaults so a file written by an older version
+    // gains newly added collections, and nested settings gain new fields
+    // instead of being replaced wholesale by the stored object.
+    return {
+      ...DEFAULT_DATA,
+      ...parsed,
+      settings: {
+        ...DEFAULT_DATA.settings,
+        ...(parsed.settings || {}),
+        alertConfig: {
+          ...DEFAULT_DATA.settings.alertConfig,
+          ...(parsed.settings?.alertConfig || {}),
+        },
+      },
+    };
   }
 
+  /**
+   * Persists the whole document.
+   *
+   * Written to a temporary file in the same directory and then renamed, which
+   * is atomic on a single filesystem: a crash or a concurrent write can never
+   * leave a half-written JSON behind. Writes are also serialised through a
+   * simple in-process guard, since deploys and the metrics loop both mutate
+   * state from different async paths.
+   */
   private save(data?: DatabaseSchema) {
+    const toWrite = data || this.data;
+    const payload = JSON.stringify(toWrite, null, 2);
+    const tmpPath = path.join(
+      path.dirname(this.filePath),
+      `.panel_db.${process.pid}.${Date.now()}.tmp`
+    );
+
     try {
-      const toWrite = data || this.data;
-      fs.writeFileSync(this.filePath, JSON.stringify(toWrite, null, 2), 'utf-8');
+      const fd = fs.openSync(tmpPath, 'w');
+      try {
+        fs.writeFileSync(fd, payload, 'utf-8');
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      fs.renameSync(tmpPath, this.filePath);
     } catch (err) {
+      try {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+      } catch {
+        // best effort
+      }
       console.error('Failed to save database file:', err);
+      throw err;
     }
   }
 
@@ -285,6 +353,98 @@ class JsonStorage {
     this.data.users.push(user);
     this.save();
     return user;
+  }
+
+  saveUser(user: User): User {
+    const idx = this.data.users.findIndex(u => u.id === user.id);
+    if (idx >= 0) {
+      this.data.users[idx] = user;
+    } else {
+      this.data.users.push(user);
+    }
+    this.save();
+    return user;
+  }
+
+  /** Snapshot of the in-memory document, for the migration export. */
+  exportState(): DatabaseSchema {
+    return structuredClone(this.data);
+  }
+
+  /**
+   * Checks that an imported document has the shape this panel expects.
+   * Returns a list of problems; an empty list means the payload is usable.
+   */
+  validateState(candidate: unknown): string[] {
+    const problems: string[] = [];
+
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      return ['O conteúdo enviado não é um objeto JSON válido.'];
+    }
+
+    const obj = candidate as Record<string, unknown>;
+    const arrayKeys: Array<keyof DatabaseSchema> = [
+      'users',
+      'databases',
+      'apps',
+      'deployments',
+      'cronJobs',
+      'domains',
+      'backups',
+      'firewallRules',
+      'serverNodes',
+      'activities',
+    ];
+
+    for (const key of arrayKeys) {
+      if (obj[key] !== undefined && !Array.isArray(obj[key])) {
+        problems.push(`O campo "${key}" deveria ser uma lista.`);
+      }
+    }
+
+    if (!Array.isArray(obj.users) || obj.users.length === 0) {
+      problems.push('O campo "users" é obrigatório e deve conter ao menos um usuário.');
+    } else {
+      for (const [i, u] of (obj.users as any[]).entries()) {
+        if (!u || typeof u.id !== 'string' || typeof u.username !== 'string' || typeof u.passwordHash !== 'string') {
+          problems.push(`users[${i}] não possui id, username e passwordHash válidos.`);
+        }
+        if (u && !['admin', 'developer', 'viewer'].includes(u.role)) {
+          problems.push(`users[${i}] possui um perfil inválido: ${u?.role}`);
+        }
+      }
+    }
+
+    if (obj.settings !== undefined && (typeof obj.settings !== 'object' || obj.settings === null)) {
+      problems.push('O campo "settings" deveria ser um objeto.');
+    }
+
+    return problems;
+  }
+
+  /**
+   * Replaces the entire document after validation.
+   *
+   * Applied through the same in-memory instance and atomic write as any other
+   * mutation, so the running process and the file on disk cannot diverge -
+   * writing panel_db.json directly used to leave the process serving stale
+   * state until the next restart.
+   */
+  importState(candidate: Partial<DatabaseSchema>): DatabaseSchema {
+    this.data = {
+      ...DEFAULT_DATA,
+      ...candidate,
+      settings: {
+        ...DEFAULT_DATA.settings,
+        ...(candidate.settings || {}),
+        alertConfig: {
+          ...DEFAULT_DATA.settings.alertConfig,
+          ...(candidate.settings?.alertConfig || {}),
+        },
+      },
+    };
+    this.save();
+    return this.data;
   }
 
   // Databases

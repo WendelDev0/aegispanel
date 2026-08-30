@@ -7,19 +7,24 @@ import { CicdService } from '../services/cicd.service.js';
 import { CaddyService } from '../services/caddy.service.js';
 import { dbStorage } from '../db/storage.js';
 import { CONFIG } from '../config.js';
-import { authMiddleware } from './auth.routes.js';
+import { resolveSafePath } from '../utils/safe-path.js';
+import { authMiddleware, requireWrite, AuthRequest } from '../middleware/auth.js';
 
 export const appRouter = Router();
 
 appRouter.use(authMiddleware);
 
+/** Repository files live under data/builds/<appId>. */
+function buildsDirFor(appId: string): string {
+  return path.join(CONFIG.DATA_DIR, 'builds', appId);
+}
+
 appRouter.get('/', (req: Request, res: Response) => {
-  const apps = AppService.getAll();
-  res.json(apps);
+  res.json(AppService.getAll().map(AppService.toPublic));
 });
 
 // Pre-Deploy Repo Inspector (Vercel Style Auto-Discovery)
-appRouter.post('/inspect-repo', async (req: Request, res: Response): Promise<void> => {
+appRouter.post('/inspect-repo', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
     const { gitUrl, branch, githubToken } = req.body;
     if (!gitUrl) {
@@ -27,19 +32,14 @@ appRouter.post('/inspect-repo', async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    const result = await CicdService.inspectRepository({
-      gitUrl,
-      branch,
-      githubToken,
-    });
-
+    const result = await CicdService.inspectRepository({ gitUrl, branch, githubToken });
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: 'Falha ao inspecionar repositório: ' + err.message });
   }
 });
 
-appRouter.post('/', async (req: Request, res: Response): Promise<void> => {
+appRouter.post('/', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
     const { name, sourceType, gitUrl, branch, imageName, port, internalPort, env, domain, githubToken } = req.body;
     if (!name || !port) {
@@ -57,17 +57,14 @@ appRouter.post('/', async (req: Request, res: Response): Promise<void> => {
       internalPort: internalPort ? parseInt(internalPort) : undefined,
       env: env || {},
       domain,
+      githubToken,
     });
 
-    if (githubToken) {
-      created.githubToken = githubToken;
-      dbStorage.saveApp(created);
-    }
+    // Returned immediately so the client can open the live deploy stream; the
+    // pipeline reports its own outcome over the socket and in the deployment
+    // history, so a failure here is never silent.
+    res.status(201).json(AppService.toPublic(created));
 
-    // Return created app immediately so frontend can open live streaming modal instantly
-    res.status(201).json(created);
-
-    // Trigger deploy in background asynchronously
     CicdService.executeDeploy(created, {
       commitMessage: 'Initial Deployment Setup',
       triggeredBy: 'manual',
@@ -79,8 +76,8 @@ appRouter.post('/', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-// Update Full App Settings (Port, Name, Image, Branch, GitHub Token, etc.)
-appRouter.put('/:id', async (req: Request, res: Response): Promise<void> => {
+// Update app settings
+appRouter.put('/:id', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
     const app = dbStorage.getAppById(req.params.id);
     if (!app) {
@@ -89,6 +86,14 @@ appRouter.put('/:id', async (req: Request, res: Response): Promise<void> => {
     }
 
     const { name, port, internalPort, imageName, gitUrl, branch, domain, githubToken } = req.body;
+
+    const previousName = app.name;
+    const previousPort = app.port;
+    const previousInternalPort = app.internalPort;
+    const previousImage = app.imageName;
+    const previousGitUrl = app.gitUrl;
+    const previousBranch = app.branch;
+
     if (name) app.name = name;
     if (port) app.port = parseInt(port);
     if (internalPort) app.internalPort = parseInt(internalPort);
@@ -96,15 +101,23 @@ appRouter.put('/:id', async (req: Request, res: Response): Promise<void> => {
     if (gitUrl) app.gitUrl = gitUrl;
     if (branch) app.branch = branch;
     if (githubToken !== undefined) app.githubToken = githubToken;
-    if (domain !== undefined) app.domain = domain ? domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '') : undefined;
+    if (domain !== undefined) {
+      app.domain = domain ? domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '') : undefined;
+    }
 
     app.updatedAt = new Date().toISOString();
     dbStorage.saveApp(app);
 
-    // Sync domain port in storage and Caddy
+    // A rename changes the derived container name. Without removing the old
+    // one it keeps running forever, holding the host port and shadowing the
+    // new deploy.
+    if (name && name !== previousName) {
+      await AppService.removeContainerByAppName(previousName);
+    }
+
     if (app.domain) {
       const cleanDom = app.domain.trim().toLowerCase();
-      const existingDomain = dbStorage.getDomains().find(d => d.domain.toLowerCase().trim() === cleanDom);
+      const existingDomain = dbStorage.getDomains().find((d) => d.domain.toLowerCase().trim() === cleanDom);
       if (existingDomain) {
         existingDomain.targetPort = app.port;
         existingDomain.status = 'active';
@@ -113,23 +126,39 @@ appRouter.put('/:id', async (req: Request, res: Response): Promise<void> => {
       await CaddyService.syncCaddyfile().catch(() => {});
     }
 
-    // Redeploy with new port/image/token
-    try {
-      await CicdService.executeDeploy(app, {
-        commitMessage: `Configurações atualizadas (Porta :${app.port})`,
-        triggeredBy: 'manual',
-      });
-    } catch {
-      // ignore
+    // Only rebuild when something the running container actually depends on
+    // changed. Renaming an app or editing its domain used to trigger a full
+    // rebuild and a minutes-long outage.
+    const needsRedeploy =
+      app.name !== previousName ||
+      app.port !== previousPort ||
+      app.internalPort !== previousInternalPort ||
+      app.imageName !== previousImage ||
+      app.gitUrl !== previousGitUrl ||
+      app.branch !== previousBranch;
+
+    if (needsRedeploy) {
+      try {
+        await CicdService.executeDeploy(app, {
+          commitMessage: `Configurações atualizadas (Porta :${app.port})`,
+          triggeredBy: 'manual',
+        });
+      } catch (err: any) {
+        res.status(500).json({
+          error: `Configurações salvas, mas o redeploy falhou: ${err.message}`,
+          app: AppService.toPublic(app),
+        });
+        return;
+      }
     }
 
-    res.json(app);
+    res.json(AppService.toPublic(app));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Manage .env Variables
+// Manage .env variables
 appRouter.get('/:id/env', (req: Request, res: Response): void => {
   const app = dbStorage.getAppById(req.params.id);
   if (!app) {
@@ -139,7 +168,7 @@ appRouter.get('/:id/env', (req: Request, res: Response): void => {
   res.json({ env: app.env || {} });
 });
 
-appRouter.put('/:id/env', async (req: Request, res: Response): Promise<void> => {
+appRouter.put('/:id/env', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
     const app = dbStorage.getAppById(req.params.id);
     if (!app) {
@@ -148,7 +177,7 @@ appRouter.put('/:id/env', async (req: Request, res: Response): Promise<void> => 
     }
 
     const { env } = req.body;
-    if (typeof env !== 'object' || env === null) {
+    if (typeof env !== 'object' || env === null || Array.isArray(env)) {
       res.status(400).json({ error: 'O campo env deve ser um objeto chave-valor' });
       return;
     }
@@ -157,24 +186,27 @@ appRouter.put('/:id/env', async (req: Request, res: Response): Promise<void> => 
     app.updatedAt = new Date().toISOString();
     dbStorage.saveApp(app);
 
-    // Trigger auto-redeploy to apply updated env vars into container
     try {
       await CicdService.executeDeploy(app, {
         commitMessage: 'Variáveis de ambiente (.env) atualizadas via AegisPanel',
         triggeredBy: 'manual',
       });
     } catch (deployErr: any) {
-      console.warn('Auto-redeploy notice after env change:', deployErr.message);
+      res.status(500).json({
+        error: `Variáveis salvas, mas o redeploy falhou: ${deployErr.message}`,
+        app: AppService.toPublic(app),
+      });
+      return;
     }
 
-    res.json({ success: true, app });
+    res.json({ success: true, app: AppService.toPublic(app) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Update Domain for specific App
-appRouter.put('/:id/domain', async (req: Request, res: Response): Promise<void> => {
+// Update domain for a specific app
+appRouter.put('/:id/domain', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
     const app = dbStorage.getAppById(req.params.id);
     if (!app) {
@@ -183,29 +215,27 @@ appRouter.put('/:id/domain', async (req: Request, res: Response): Promise<void> 
     }
 
     const { domain } = req.body;
-    const cleanDomain = domain ? domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '') : undefined;
-
-    app.domain = cleanDomain;
+    app.domain = domain
+      ? domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+      : undefined;
     app.updatedAt = new Date().toISOString();
     dbStorage.saveApp(app);
 
-    // Sync domains in Caddy
     await CaddyService.syncCaddyfile();
 
-    res.json({ success: true, app });
+    res.json({ success: true, app: AppService.toPublic(app) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// List Deployments History
+// Deployment history
 appRouter.get('/:id/deployments', (req: Request, res: Response): void => {
-  const deployments = dbStorage.getDeployments(req.params.id);
-  res.json(deployments);
+  res.json(dbStorage.getDeployments(req.params.id));
 });
 
-// Trigger Manual Deploy
-appRouter.post('/:id/deploy', async (req: Request, res: Response): Promise<void> => {
+// Manual deploy
+appRouter.post('/:id/deploy', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
     const app = dbStorage.getAppById(req.params.id);
     if (!app) {
@@ -224,58 +254,74 @@ appRouter.post('/:id/deploy', async (req: Request, res: Response): Promise<void>
   }
 });
 
-// 1-Click Instant Rollback to previous deployment
-appRouter.post('/:id/rollback/:deploymentId', async (req: Request, res: Response): Promise<void> => {
+// 1-click rollback
+appRouter.post('/:id/rollback/:deploymentId', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await CicdService.rollback(req.params.id, req.params.deploymentId);
-    res.json(result);
+    res.json(await CicdService.rollback(req.params.id, req.params.deploymentId));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Generate GitHub Actions Workflow
-appRouter.get('/:id/workflow', (req: Request, res: Response): void => {
+// Rotate the webhook secret
+appRouter.post('/:id/webhook-secret', requireWrite, (req: Request, res: Response): void => {
+  try {
+    res.json({ webhookSecret: AppService.rotateWebhookSecret(req.params.id) });
+  } catch (err: any) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+// Reveal the webhook URL, including the secret
+appRouter.get('/:id/webhook', requireWrite, (req: Request, res: Response): void => {
+  const app = dbStorage.getAppById(req.params.id);
+  if (!app) {
+    res.status(404).json({ error: 'App não encontrado' });
+    return;
+  }
+  const secret = app.webhookSecret || AppService.rotateWebhookSecret(app.id);
+  const hostUrl = `${req.protocol}://${req.get('host') || 'localhost:4000'}`;
+  res.json({ url: `${hostUrl}/api/webhooks/deploy/${app.id}?secret=${encodeURIComponent(secret)}`, secret });
+});
+
+// GitHub Actions workflow
+appRouter.get('/:id/workflow', requireWrite, (req: Request, res: Response): void => {
   const app = dbStorage.getAppById(req.params.id);
   if (!app) {
     res.status(404).json({ error: 'App não encontrado' });
     return;
   }
 
-  const hostUrl = req.protocol + '://' + (req.get('host') || 'localhost:4000');
-  const yaml = CicdService.generateGitHubWorkflow(app, hostUrl);
-  res.json({ yaml });
+  const hostUrl = `${req.protocol}://${req.get('host') || 'localhost:4000'}`;
+  res.json({ yaml: CicdService.generateGitHubWorkflow(app, hostUrl) });
 });
 
-appRouter.post('/:id/start', async (req: Request, res: Response) => {
+appRouter.post('/:id/start', requireWrite, async (req: Request, res: Response) => {
   try {
-    const updated = await AppService.startApp(req.params.id);
-    res.json(updated);
+    res.json(AppService.toPublic(await AppService.startApp(req.params.id)));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-appRouter.post('/:id/stop', async (req: Request, res: Response) => {
+appRouter.post('/:id/stop', requireWrite, async (req: Request, res: Response) => {
   try {
-    const updated = await AppService.stopApp(req.params.id);
-    res.json(updated);
+    res.json(AppService.toPublic(await AppService.stopApp(req.params.id)));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-appRouter.post('/:id/restart', async (req: Request, res: Response) => {
+appRouter.post('/:id/restart', requireWrite, async (req: Request, res: Response) => {
   try {
-    const updated = await AppService.restartApp(req.params.id);
-    res.json(updated);
+    res.json(AppService.toPublic(await AppService.restartApp(req.params.id)));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Application File Explorer: List files
-appRouter.get('/:id/files', async (req: Request, res: Response): Promise<void> => {
+// File explorer: list
+appRouter.get('/:id/files', (req: Request, res: Response): void => {
   try {
     const app = dbStorage.getAppById(req.params.id);
     if (!app) {
@@ -283,41 +329,33 @@ appRouter.get('/:id/files', async (req: Request, res: Response): Promise<void> =
       return;
     }
 
+    const buildsDir = buildsDirFor(app.id);
     const subPath = (req.query.subPath as string) || '';
-    const buildsDir = path.join(CONFIG.DATA_DIR, 'builds', app.id);
-    const targetDir = path.resolve(buildsDir, subPath);
-
-    // Security check: path traversal prevention
-    if (!targetDir.startsWith(path.resolve(buildsDir))) {
-      res.status(403).json({ error: 'Acesso negado fora do diretório da aplicação' });
-      return;
-    }
+    const targetDir = resolveSafePath(buildsDir, subPath);
 
     if (!fs.existsSync(targetDir)) {
       res.json({ currentPath: subPath, items: [] });
       return;
     }
 
-    const entries = fs.readdirSync(targetDir, { withFileTypes: true });
-    const items = entries
-      .filter(e => e.name !== '.git') // skip internal .git
-      .map(entry => {
+    const items = fs
+      .readdirSync(targetDir, { withFileTypes: true })
+      .filter((e) => e.name !== '.git')
+      .map((entry) => {
         const itemPath = path.join(targetDir, entry.name);
-        const relativePath = path.relative(buildsDir, itemPath).replace(/\\/g, '/');
         let size = 0;
         let modifiedAt = new Date().toISOString();
-
         try {
           const stat = fs.statSync(itemPath);
           size = stat.size;
           modifiedAt = stat.mtime.toISOString();
         } catch {
-          // ignore
+          // unreadable entries are still listed, without metadata
         }
 
         return {
           name: entry.name,
-          path: relativePath,
+          path: path.relative(buildsDir, itemPath).replace(/\\/g, '/'),
           isDirectory: entry.isDirectory(),
           sizeBytes: size,
           modifiedAt,
@@ -325,19 +363,18 @@ appRouter.get('/:id/files', async (req: Request, res: Response): Promise<void> =
         };
       })
       .sort((a, b) => {
-        if (a.isDirectory && !b.isDirectory) return -1;
-        if (!a.isDirectory && b.isDirectory) return 1;
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
         return a.name.localeCompare(b.name);
       });
 
     res.json({ currentPath: subPath.replace(/\\/g, '/'), items });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(403).json({ error: err.message });
   }
 });
 
-// Application File Explorer: Read file content
-appRouter.get('/:id/files/content', async (req: Request, res: Response): Promise<void> => {
+// File explorer: read
+appRouter.get('/:id/files/content', (req: Request, res: Response): void => {
   try {
     const app = dbStorage.getAppById(req.params.id);
     if (!app) {
@@ -351,35 +388,26 @@ appRouter.get('/:id/files/content', async (req: Request, res: Response): Promise
       return;
     }
 
-    const buildsDir = path.join(CONFIG.DATA_DIR, 'builds', app.id);
-    const targetFile = path.resolve(buildsDir, filePath);
-
-    if (!targetFile.startsWith(path.resolve(buildsDir))) {
-      res.status(403).json({ error: 'Acesso negado fora do diretório da aplicação' });
-      return;
-    }
-
+    const targetFile = resolveSafePath(buildsDirFor(app.id), filePath);
     if (!fs.existsSync(targetFile) || fs.statSync(targetFile).isDirectory()) {
       res.status(404).json({ error: 'Arquivo não encontrado' });
       return;
     }
 
-    const content = fs.readFileSync(targetFile, 'utf-8');
     const stat = fs.statSync(targetFile);
-
     res.json({
       filename: path.basename(targetFile),
       path: filePath.replace(/\\/g, '/'),
-      content,
+      content: fs.readFileSync(targetFile, 'utf-8'),
       sizeBytes: stat.size,
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(403).json({ error: err.message });
   }
 });
 
-// Application File Explorer: Edit / Save file content
-appRouter.put('/:id/files/content', async (req: Request, res: Response): Promise<void> => {
+// File explorer: write
+appRouter.put('/:id/files/content', requireWrite, (req: Request, res: Response): void => {
   try {
     const app = dbStorage.getAppById(req.params.id);
     if (!app) {
@@ -393,30 +421,22 @@ appRouter.put('/:id/files/content', async (req: Request, res: Response): Promise
       return;
     }
 
-    const buildsDir = path.join(CONFIG.DATA_DIR, 'builds', app.id);
-    const targetFile = path.resolve(buildsDir, filePath);
-
-    if (!targetFile.startsWith(path.resolve(buildsDir))) {
-      res.status(403).json({ error: 'Acesso negado fora do diretório da aplicação' });
-      return;
-    }
-
+    const targetFile = resolveSafePath(buildsDirFor(app.id), filePath);
     fs.writeFileSync(targetFile, content, 'utf-8');
     res.json({ success: true, message: 'Arquivo salvo com sucesso!' });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(403).json({ error: err.message });
   }
 });
 
 appRouter.get('/:id/logs', async (req: Request, res: Response) => {
   try {
-    const app = AppService.getAll().find(a => a.id === req.params.id);
+    const app = dbStorage.getAppById(req.params.id);
     if (!app) {
       res.status(404).json({ error: 'App não encontrado' });
       return;
     }
 
-    // Try container logs if container exists
     if (app.containerId) {
       try {
         const logs = await dockerService.getLogs(app.containerId, 100);
@@ -425,17 +445,16 @@ appRouter.get('/:id/logs', async (req: Request, res: Response) => {
           return;
         }
       } catch {
-        // fallback
+        // fall through to build logs
       }
     }
 
-    // Fallback: Return build and deployment logs
     const deployments = dbStorage.getDeployments(app.id);
     if (deployments.length > 0 && deployments[0].buildLogs) {
       let logMsg = `📋 [Logs de Build do CI/CD - Status: ${deployments[0].status.toUpperCase()}]:\n\n`;
-      logMsg += deployments[0].buildLogs;
+      logMsg += CicdService.redactSecrets(deployments[0].buildLogs);
       if (!app.containerId) {
-        logMsg += '\n💡 Dica: Inicie o Docker Desktop no seu Windows para que o contêiner suba e exiba os logs de execução da aplicação.';
+        logMsg += '\n💡 Dica: verifique se o Docker Engine está ativo para que o contêiner suba.';
       }
       res.json({ logs: logMsg });
       return;
@@ -447,10 +466,9 @@ appRouter.get('/:id/logs', async (req: Request, res: Response) => {
   }
 });
 
-appRouter.delete('/:id', async (req: Request, res: Response) => {
+appRouter.delete('/:id', requireWrite, async (req: Request, res: Response) => {
   try {
-    const success = await AppService.deleteApp(req.params.id);
-    res.json({ success });
+    res.json({ success: await AppService.deleteApp(req.params.id) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
