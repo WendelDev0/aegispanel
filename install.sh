@@ -1,74 +1,131 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# AegisPanel - Script de Instalação Automatizada 1-Click para VPS Ubuntu / Debian
-# Compatível com Contabo, Hetzner, AWS, DigitalOcean, e Servidores Locais
+# AegisPanel - Instalação automatizada para VPS Ubuntu / Debian
+# Compatível com Contabo, Hetzner, AWS, DigitalOcean e servidores locais
 # Repositório: https://github.com/WendelDev0/aegispanel
 # ==============================================================================
 
-set -e
+set -euo pipefail
+
+INSTALL_DIR="${AEGIS_INSTALL_DIR:-/opt/aegispanel}"
+REPO_URL="https://github.com/WendelDev0/aegispanel.git"
 
 echo "======================================================================"
 echo "🛡️  Instalando AegisPanel - Cloud & Server Management Platform"
 echo "======================================================================"
 
-# 0. Configurar fuso horário de Brasília
-sudo timedatectl set-timezone America/Sao_Paulo || true
-
-# 1. Atualizar pacotes do sistema
-echo "📦 [1/5] Atualizando repositórios do sistema..."
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y curl git ufw htop ca-certificates gnupg
-
-# 2. Instalar Docker se não existir
-if ! command -v docker &> /dev/null; then
-    echo "🐳 [2/5] Instalando Docker Engine e Docker Compose..."
-    curl -fsSL https://get.docker.com | bash
-    sudo systemctl enable --now docker
-    sudo usermod -aG docker $USER
-else
-    echo "✅ Docker já está instalado."
+if [ "$(id -u)" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
+    echo "❌ Execute como root ou instale o sudo."
+    exit 1
 fi
 
-# 3. Configurar Firewall (Liberando portas de aplicações de 3000 até 9999)
-echo "🔒 [3/5] Configurando Firewall UFW..."
-sudo ufw allow 22/tcp || true
-sudo ufw allow 80/tcp || true
-sudo ufw allow 443/tcp || true
-sudo ufw allow 3000:9999/tcp || true
-sudo ufw --force enable || true
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+    SUDO="sudo"
+fi
 
-# 4. Baixar repositório do AegisPanel
-INSTALL_DIR="/opt/aegispanel"
-echo "📁 [4/5] Configurando diretório da aplicação em $INSTALL_DIR..."
+# 0. Fuso horário
+$SUDO timedatectl set-timezone America/Sao_Paulo || true
 
+# 1. Pacotes base
+echo "📦 [1/6] Atualizando repositórios do sistema..."
+$SUDO apt-get update
+$SUDO apt-get install -y curl git ufw ca-certificates gnupg openssl
+
+# 2. Docker
+if ! command -v docker >/dev/null 2>&1; then
+    echo "🐳 [2/6] Instalando Docker Engine e Docker Compose..."
+    curl -fsSL https://get.docker.com | $SUDO bash
+    $SUDO systemctl enable --now docker
+    $SUDO usermod -aG docker "${SUDO_USER:-$USER}" || true
+else
+    echo "✅ [2/6] Docker já está instalado."
+fi
+
+# 3. Firewall
+#
+# Apenas as portas realmente necessárias são abertas. A versão anterior deste
+# script liberava a faixa inteira 3000-9999/tcp, o que expunha a API interna e
+# qualquer contêiner de aplicação diretamente à internet. Aplicações publicadas
+# devem ser acessadas pelo domínio, através do Caddy nas portas 80/443.
+echo "🔒 [3/6] Configurando firewall UFW..."
+$SUDO ufw allow 22/tcp    comment 'SSH'    || true
+$SUDO ufw allow 80/tcp    comment 'HTTP'   || true
+$SUDO ufw allow 443/tcp   comment 'HTTPS'  || true
+$SUDO ufw allow 3000/tcp  comment 'AegisPanel Dashboard' || true
+$SUDO ufw --force enable || true
+
+echo "   ℹ️  Para publicar uma aplicação em uma porta específica, libere-a"
+echo "      manualmente com: sudo ufw allow <porta>/tcp"
+
+# 4. Código
+echo "📁 [4/6] Preparando $INSTALL_DIR..."
 if [ -d "$INSTALL_DIR/.git" ]; then
     echo "🔄 Atualizando repositório existente..."
-    cd $INSTALL_DIR
-    git pull origin main
+    $SUDO git -C "$INSTALL_DIR" pull --ff-only origin main
 else
-    sudo rm -rf $INSTALL_DIR
-    sudo git clone https://github.com/WendelDev0/aegispanel.git $INSTALL_DIR
-    cd $INSTALL_DIR
+    if [ -e "$INSTALL_DIR" ]; then
+        echo "❌ $INSTALL_DIR já existe e não é um clone do AegisPanel."
+        echo "   Remova ou renomeie o diretório manualmente antes de continuar."
+        exit 1
+    fi
+    $SUDO git clone "$REPO_URL" "$INSTALL_DIR"
 fi
 
-sudo mkdir -p $INSTALL_DIR/caddy
-sudo mkdir -p $INSTALL_DIR/data
-sudo chown -R $USER:$USER $INSTALL_DIR
+$SUDO mkdir -p "$INSTALL_DIR/caddy" "$INSTALL_DIR/data"
+$SUDO chown -R "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$INSTALL_DIR"
 
-# Criar Caddyfile inicial se não existir
 if [ ! -f "$INSTALL_DIR/caddy/Caddyfile" ]; then
-    echo "# AegisPanel Default Caddyfile" > "$INSTALL_DIR/caddy/Caddyfile"
+    printf '# AegisPanel Default Caddyfile\n' > "$INSTALL_DIR/caddy/Caddyfile"
 fi
 
-# 5. Iniciar serviços via Docker Compose
-cd $INSTALL_DIR
-echo "🚀 [5/5] Compilando e iniciando contêineres do AegisPanel..."
+# 5. Segredos
+#
+# Gerados por instalação. Um valor padrão embutido no repositório seria idêntico
+# em todo servidor do mundo, permitindo forjar um token de administrador e
+# descriptografar as senhas de banco de qualquer instalação.
+ENV_FILE="$INSTALL_DIR/.env"
+echo "🔑 [5/6] Configurando segredos em $ENV_FILE..."
+
+if [ ! -f "$ENV_FILE" ]; then
+    cp "$INSTALL_DIR/.env.example" "$ENV_FILE"
+fi
+
+ensure_secret() {
+    local key="$1"
+    local current
+    current=$(grep -E "^${key}=" "$ENV_FILE" | head -n1 | cut -d= -f2- || true)
+    if [ -z "$current" ]; then
+        local generated
+        generated=$(openssl rand -hex 32)
+        if grep -qE "^${key}=" "$ENV_FILE"; then
+            sed -i "s|^${key}=.*|${key}=${generated}|" "$ENV_FILE"
+        else
+            printf '%s=%s\n' "$key" "$generated" >> "$ENV_FILE"
+        fi
+        echo "   ✅ ${key} gerada."
+    else
+        echo "   ↩️  ${key} já configurada, mantida."
+    fi
+}
+
+ensure_secret JWT_SECRET
+ensure_secret ENCRYPTION_KEY
+chmod 600 "$ENV_FILE"
+
+# 6. Subir a stack
+cd "$INSTALL_DIR"
+echo "🚀 [6/6] Compilando e iniciando os contêineres..."
 docker compose up -d --build
 
-SERVER_IP=$(curl -s ifconfig.me || curl -s icanhazip.com || echo "IP_DO_SERVIDOR")
+SERVER_IP=$(curl -s --max-time 5 ifconfig.me || curl -s --max-time 5 icanhazip.com || echo "IP_DO_SERVIDOR")
 
 echo ""
 echo "======================================================================"
-echo "🎉 AegisPanel instalado e iniciado com sucesso na sua VPS Contabo!"
-echo "👉 Acesse no seu navegador: http://$SERVER_IP:3000"
+echo "🎉 AegisPanel instalado com sucesso!"
+echo "👉 Acesse: http://$SERVER_IP:3000"
+echo ""
+echo "   No primeiro acesso você define a senha do administrador."
+echo "   Depois de apontar um domínio para o painel, defina PANEL_BIND=127.0.0.1"
+echo "   em $ENV_FILE e sirva o painel por HTTPS através do Caddy."
 echo "======================================================================"

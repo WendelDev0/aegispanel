@@ -8,12 +8,15 @@ dist/
 build/
 */build/
 
-# Local data and secrets
+# Secrets and local state
 .env
-.env.local
-.env.production
-backend/data/
+.env.*
+!.env.example
 data/
+*/data/
+caddy/data/
+caddy/config/
+panel_db.json*
 
 # Logs
 npm-debug.log*

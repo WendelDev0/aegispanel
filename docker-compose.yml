@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Caddy Reverse Proxy with Automatic SSL (HTTPS Let's Encrypt)
   caddy:
@@ -10,13 +8,13 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      - TZ=America/Sao_Paulo
+      - TZ=${TZ:-America/Sao_Paulo}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile
-      - ./caddy/data:/data
-      - ./caddy/config:/config
+      - caddy_data:/data
+      - caddy_config:/config
     networks:
       - aegis-net
 
@@ -27,23 +25,38 @@ services:
       dockerfile: Dockerfile
     container_name: aegis-backend
     restart: unless-stopped
-    ports:
-      - "4000:4000"
+    # No published ports on purpose. The API is reached through the frontend's
+    # nginx proxy on the internal network; publishing 4000 exposed the API and
+    # the terminal WebSocket directly to the internet.
+    expose:
+      - "4000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
     environment:
+      - NODE_ENV=production
       - PORT=4000
       - DATA_DIR=/app/data
       - CADDY_CONFIG_PATH=/app/caddy/Caddyfile
       - DOCKER_SOCKET=/var/run/docker.sock
-      - JWT_SECRET=aegis-secret-key-change-this-in-production
-      - TZ=America/Sao_Paulo
+      - TZ=${TZ:-America/Sao_Paulo}
+      # Required. The container refuses to start if these are unset; generate
+      # them with: openssl rand -hex 32
+      - JWT_SECRET=${JWT_SECRET:?defina JWT_SECRET no arquivo .env}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?defina ENCRYPTION_KEY no arquivo .env}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data:/app/data
       - ./caddy:/app/caddy
     networks:
       - aegis-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   # Frontend Web Dashboard
   frontend:
@@ -53,9 +66,12 @@ services:
     container_name: aegis-frontend
     restart: unless-stopped
     ports:
-      - "3000:80"
+      # Bound to all interfaces so the panel is reachable at http://SEU_IP:3000
+      # before a domain exists. Once PANEL_DOMAIN is set up in Caddy, change
+      # this to "127.0.0.1:3000:80" so the panel is only served over HTTPS.
+      - "${PANEL_BIND:-0.0.0.0}:3000:80"
     environment:
-      - TZ=America/Sao_Paulo
+      - TZ=${TZ:-America/Sao_Paulo}
     depends_on:
       - backend
     networks:
@@ -63,4 +79,9 @@ services:
 
 networks:
   aegis-net:
+    name: aegis-net
     driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
