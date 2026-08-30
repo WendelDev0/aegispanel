@@ -9,6 +9,7 @@ import { TerminalService } from './services/terminal.service.js';
 import { AlertService } from './services/alert.service.js';
 import { CaddyService } from './services/caddy.service.js';
 import { CronService } from './services/cron.service.js';
+import { AnalyticsService } from './services/analytics.service.js';
 import { verifyToken, AuthUser } from './middleware/auth.js';
 
 // Routers
@@ -26,6 +27,7 @@ import { webhookRouter } from './routes/webhook.routes.js';
 import { nodeRouter } from './routes/node.routes.js';
 import { templateRouter } from './routes/template.routes.js';
 import { cronRouter } from './routes/cron.routes.js';
+import { analyticsRouter } from './routes/analytics.routes.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -103,6 +105,7 @@ app.use('/api/query', queryRouter);
 app.use('/api/firewall', firewallRouter);
 app.use('/api/webhooks', webhookRouter);
 app.use('/api/nodes', nodeRouter);
+app.use('/api/analytics', analyticsRouter);
 
 // WebSocket Setup
 io.on('connection', (socket) => {
@@ -154,6 +157,7 @@ server.listen(CONFIG.PORT, () => {
   console.log(`========================================================`);
 
   CronService.start();
+  AnalyticsService.start();
 
   // Auto-heal: Sync Caddyfile with correct email and domains on every startup
   setTimeout(async () => {
@@ -170,6 +174,7 @@ function shutdown(signal: string) {
   console.log(`\n${signal} recebido, encerrando...`);
   clearInterval(metricsTimer);
   CronService.stop();
+  AnalyticsService.stop();
   io.close();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5000).unref();

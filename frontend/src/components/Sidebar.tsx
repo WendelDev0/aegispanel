@@ -16,13 +16,15 @@ import {
   Flame,
   ShoppingBag,
   Clock,
-  HelpCircle
+  HelpCircle,
+  Globe2
 } from 'lucide-react';
 
 export type NavTab =
   | 'dashboard'
   | 'templates'
   | 'apps'
+  | 'analytics'
   | 'databases'
   | 'querystudio'
   | 'filemanager'
@@ -50,6 +52,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serve
         { id: 'dashboard' as NavTab, label: 'Visão Geral', icon: LayoutDashboard, tooltip: 'Painel com métricas de CPU, RAM e status geral da VPS' },
         { id: 'templates' as NavTab, label: 'Marketplace 1-Clique', icon: ShoppingBag, badge: 'NOVO', tooltip: 'Instale n8n, WhatsApp Evolution API, Typebot, WordPress e S3 em 1 clique' },
         { id: 'apps' as NavTab, label: 'Aplicações & CI/CD', icon: Layers, badge: 'PaaS', tooltip: 'Deploy de sites e APIs com Webhook automático estilo Vercel' },
+        { id: 'analytics' as NavTab, label: 'Analytics', icon: Globe2, badge: 'NOVO', tooltip: 'Visitas, origem geográfica dos acessos e erros de cada aplicação' },
         { id: 'databases' as NavTab, label: 'Bancos de Dados', icon: Database, badge: '1-Click', tooltip: 'PostgreSQL, MySQL, Redis e MongoDB com criptografia AES-256' },
         { id: 'querystudio' as NavTab, label: 'Database Studio', icon: Code2, badge: 'SQL', tooltip: 'Executor de queries SQL e visualizador de tabelas em tempo real' },
         { id: 'filemanager' as NavTab, label: 'Arquivos & .env', icon: FolderTree, tooltip: 'Explorador de pastas, uploads e editor de arquivos de configuração' },

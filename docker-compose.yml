@@ -15,6 +15,8 @@ services:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
+      # Access logs, read by the backend to build per-application analytics.
+      - caddy_logs:/var/log/caddy
     networks:
       - aegis-net
 
@@ -39,6 +41,7 @@ services:
       - PORT=4000
       - DATA_DIR=/app/data
       - CADDY_CONFIG_PATH=/app/caddy/Caddyfile
+      - ACCESS_LOG_PATH=/var/log/caddy/access.log
       - DOCKER_SOCKET=/var/run/docker.sock
       - TZ=${TZ:-America/Sao_Paulo}
       # Required. The container refuses to start if these are unset; generate
@@ -49,6 +52,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data:/app/data
       - ./caddy:/app/caddy
+      # Read-only: the backend consumes Caddy's access log and must never be
+      # able to alter or truncate it.
+      - caddy_logs:/var/log/caddy:ro
     networks:
       - aegis-net
     healthcheck:
@@ -89,3 +95,4 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
+  caddy_logs:

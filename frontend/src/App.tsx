@@ -13,6 +13,7 @@ import { AuthPage } from './pages/AuthPage.js';
 const DashboardPage = lazy(() => import('./pages/DashboardPage.js').then(m => ({ default: m.DashboardPage })));
 const TemplatesPage = lazy(() => import('./pages/TemplatesPage.js').then(m => ({ default: m.TemplatesPage })));
 const AppsPage = lazy(() => import('./pages/AppsPage.js').then(m => ({ default: m.AppsPage })));
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage.js').then(m => ({ default: m.AnalyticsPage })));
 const DatabasesPage = lazy(() => import('./pages/DatabasesPage.js').then(m => ({ default: m.DatabasesPage })));
 const ContainersPage = lazy(() => import('./pages/ContainersPage.js').then(m => ({ default: m.ContainersPage })));
 const DomainsPage = lazy(() => import('./pages/DomainsPage.js').then(m => ({ default: m.DomainsPage })));
@@ -43,7 +44,7 @@ export function App() {
     return raw ? JSON.parse(raw) : null;
   });
 
-  const [activeTab, setActiveTab] = useRoute();
+  const [activeTab, setActiveTab, routeParam] = useRoute();
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [realtimeStats, setRealtimeStats] = useState<SystemStats | null>(null);
 
@@ -125,7 +126,9 @@ export function App() {
       case 'templates':
         return <TemplatesPage setActiveTab={setActiveTab} />;
       case 'apps':
-        return <AppsPage />;
+        return <AppsPage onOpenAnalytics={(appId) => setActiveTab('analytics', appId)} />;
+      case 'analytics':
+        return <AnalyticsPage initialAppId={routeParam} />;
       case 'databases':
         return <DatabasesPage setActiveTab={setActiveTab} />;
       case 'querystudio':

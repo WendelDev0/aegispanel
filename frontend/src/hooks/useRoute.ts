@@ -21,9 +21,12 @@ const TABS: NavTab[] = [
 
 const DEFAULT_TAB: NavTab = 'dashboard';
 
-function tabFromPath(pathname: string): NavTab {
-  const segment = pathname.replace(/^\/+/, '').split('/')[0];
-  return (TABS as string[]).includes(segment) ? (segment as NavTab) : DEFAULT_TAB;
+function parsePath(pathname: string): { tab: NavTab; param: string | null } {
+  const [segment, param] = pathname.replace(/^\/+/, '').split('/');
+  return {
+    tab: (TABS as string[]).includes(segment) ? (segment as NavTab) : DEFAULT_TAB,
+    param: param ? decodeURIComponent(param) : null,
+  };
 }
 
 /**
@@ -34,22 +37,23 @@ function tabFromPath(pathname: string): NavTab {
  * and the browser's back button left the app entirely. This keeps the URL in
  * sync without pulling in a router dependency.
  */
-export function useRoute(): [NavTab, (tab: NavTab) => void] {
-  const [tab, setTab] = useState<NavTab>(() => tabFromPath(window.location.pathname));
+export function useRoute(): [NavTab, (tab: NavTab, param?: string) => void, string | null] {
+  const [route, setRoute] = useState(() => parsePath(window.location.pathname));
 
   useEffect(() => {
-    const onPopState = () => setTab(tabFromPath(window.location.pathname));
+    const onPopState = () => setRoute(parsePath(window.location.pathname));
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const navigate = useCallback((next: NavTab) => {
-    setTab(next);
-    const path = next === DEFAULT_TAB ? '/' : `/${next}`;
+  const navigate = useCallback((next: NavTab, param?: string) => {
+    setRoute({ tab: next, param: param ?? null });
+    const base = next === DEFAULT_TAB ? '/' : `/${next}`;
+    const path = param ? `${base}/${encodeURIComponent(param)}` : base;
     if (window.location.pathname !== path) {
-      window.history.pushState({ tab: next }, '', path);
+      window.history.pushState({ tab: next, param }, '', path);
     }
   }, []);
 
-  return [tab, navigate];
+  return [route.tab, navigate, route.param];
 }

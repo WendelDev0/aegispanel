@@ -42,13 +42,19 @@ import {
   ArrowLeft,
   Sparkles,
   Cpu,
-  RotateCcw
+  RotateCcw,
+  Globe2,
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { socket } from '../services/socket.js';
 import { AppRecord, DeploymentRecord } from '../types/index.js';
 
-export const AppsPage: React.FC = () => {
+interface AppsPageProps {
+  /** Opens the analytics view already focused on this application. */
+  onOpenAnalytics?: (appId: string) => void;
+}
+
+export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
   const [apps, setApps] = useState<AppRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -864,7 +870,14 @@ export const AppsPage: React.FC = () => {
                     <FileCode2 className="w-3.5 h-3.5" /> GitHub Actions YAML
                   </button>
 
-                  <button
+                                    <button
+                    onClick={() => onOpenAnalytics?.(app.id)}
+                    title="Ver analytics: visitas, países de origem e erros"
+                    className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-emerald-400 transition-colors"
+                  >
+                    <Globe2 className="w-4 h-4" />
+                  </button>
+<button
                     onClick={() => openWebhookModal(app)}
                     title="Copiar URL de Webhook para Auto-Deploy"
                     className="text-cyan-400 hover:underline flex items-center gap-1 font-mono text-[11px]"

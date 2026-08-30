@@ -7,6 +7,16 @@ import { containerNameForApp } from '../utils/naming.js';
 
 const CADDY_CONTAINER = 'aegis-caddy';
 
+/**
+ * Shared access log, inside the Caddy container.
+ *
+ * One file for every site, attributed per host when parsed: Caddy is the only
+ * component that sees every request to every application, so this is the one
+ * place analytics can be collected without touching the applications
+ * themselves or injecting a script into their pages.
+ */
+const ACCESS_LOG_PATH = '/var/log/caddy/access.log';
+
 /** Rejects anything that is not a plausible hostname before it reaches the config. */
 const HOSTNAME = /^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 

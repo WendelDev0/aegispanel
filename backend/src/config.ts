@@ -71,6 +71,10 @@ export const CONFIG = {
   IS_WINDOWS: os.platform() === 'win32',
   DOCKER_SOCKET: process.env.DOCKER_SOCKET || (os.platform() === 'win32' ? '//./pipe/docker_engine' : '/var/run/docker.sock'),
   CADDY_CONFIG_PATH: process.env.CADDY_CONFIG_PATH || path.join(process.cwd(), 'data', 'caddy', 'Caddyfile'),
+  /** Caddy's shared JSON access log, the source for per-application analytics. */
+  ACCESS_LOG_PATH: process.env.ACCESS_LOG_PATH || path.join(process.cwd(), 'data', 'caddy-logs', 'access.log'),
+  /** Sends visitor IPs to ip-api.com to resolve country and city. */
+  GEOIP_ENABLED: process.env.GEOIP_ENABLED !== 'false',
   /** Comma-separated list of allowed browser origins. Empty means same-origin only. */
   CORS_ORIGINS: (process.env.CORS_ORIGINS || '')
     .split(',')
