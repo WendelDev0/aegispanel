@@ -377,14 +377,25 @@ class DockerManager {
     restartPolicy?: string;
     labels?: { [key: string]: string };
     networkName?: string;
+    /**
+     * Interface the published ports bind to. Defaults to all interfaces.
+     *
+     * Passing '127.0.0.1' is the only way to keep a published port off the
+     * internet: Docker writes its rules into the iptables DOCKER chain, which
+     * is evaluated before ufw, so `ufw deny` does not block a published port.
+     * A firewall that looks correct is not enough.
+     */
+    bindIp?: string;
   }): Docker.ContainerCreateOptions {
-    const PortBindings: { [key: string]: Array<{ HostPort: string }> } = {};
+    const PortBindings: { [key: string]: Array<{ HostIp?: string; HostPort: string }> } = {};
     const ExposedPorts: { [key: string]: object } = {};
 
     for (const [intPort, hostPort] of Object.entries(options.ports || {})) {
       const portKey = intPort.includes('/') ? intPort : `${intPort}/tcp`;
       ExposedPorts[portKey] = {};
-      PortBindings[portKey] = [{ HostPort: hostPort.toString() }];
+      PortBindings[portKey] = [
+        { ...(options.bindIp ? { HostIp: options.bindIp } : {}), HostPort: hostPort.toString() },
+      ];
     }
 
     const Binds: string[] = Object.entries(options.volumes || {}).map(
@@ -478,6 +489,8 @@ class DockerManager {
     volumes?: { [hostPath: string]: string };
     restartPolicy?: string;
     labels?: { [key: string]: string };
+    /** '127.0.0.1' keeps the published port off the internet. See buildCreateOptions. */
+    bindIp?: string;
   }): Promise<string> {
     await this.testConnection();
     if (!this.isAvailable) {

@@ -80,3 +80,10 @@ test('the SSH username rejects a server name pasted into the field', () => {
   assert.equal(valid('ubuntu'), true);
   assert.equal(valid('deploy_user-01'), true);
 });
+
+test('databases bind to loopback by default', async () => {
+  const { CONFIG } = await import('../src/config.js');
+  // Docker's iptables rules are evaluated before ufw, so a database published
+  // on 0.0.0.0 sits on the public internet whatever the firewall says.
+  assert.equal(CONFIG.DB_BIND_IP, '127.0.0.1');
+});

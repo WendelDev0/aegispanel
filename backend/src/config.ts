@@ -93,6 +93,16 @@ export const CONFIG = {
 
   /** Escape hatch to send real notifications from a local instance. */
   ALLOW_OUTBOUND_ALERTS: process.env.AEGIS_ALLOW_OUTBOUND_ALERTS === 'true',
+
+  /**
+   * Interface database containers publish their port on.
+   *
+   * Loopback by default: Docker's iptables rules run before ufw, so a database
+   * published on 0.0.0.0 is on the public internet regardless of the firewall.
+   * Set to 0.0.0.0 only if an external client genuinely must reach it directly,
+   * and put a firewall in front of it that Docker cannot bypass.
+   */
+  DB_BIND_IP: process.env.AEGIS_DB_BIND_IP || '127.0.0.1',
   /** Comma-separated list of allowed browser origins. Empty means same-origin only. */
   CORS_ORIGINS: (process.env.CORS_ORIGINS || '')
     .split(',')

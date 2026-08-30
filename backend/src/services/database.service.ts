@@ -236,6 +236,14 @@ export class DatabaseService {
         image,
         env,
         ports,
+        // Databases bind to loopback only. Docker's iptables rules are
+        // evaluated before ufw, so a port published on 0.0.0.0 is reachable
+        // from the internet no matter what the firewall says - and a database
+        // on the public internet is scanned within minutes. Applications reach
+        // it by container name on the shared network, which does not need a
+        // published port at all; this one exists for local tools and for an
+        // SSH tunnel.
+        bindIp: CONFIG.DB_BIND_IP,
         volumes,
         labels: {
           'aegis.type': 'database',
