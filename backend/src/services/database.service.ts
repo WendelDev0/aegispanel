@@ -190,17 +190,24 @@ export class DatabaseService {
       dbPassword: encryptedPassword, // Stored encrypted in JSON file
       dbName,
       status,
-      connectionString: connString,
+      // The password is replaced by a placeholder before the record is written.
+      // Storing the connection string verbatim would keep a cleartext copy of
+      // the very secret the field above is encrypted to protect, in the same
+      // file, defeating the encryption entirely. getCredentials() substitutes
+      // the decrypted value back in on read.
+      connectionString: connString.replace(rawPassword, '***ENCRYPTED***'),
       withGui: dto.withGui,
       createdAt: new Date().toISOString(),
     };
 
     dbStorage.saveDatabase(record);
 
-    // Return decrypted password to caller session
+    // The full credentials are returned once, to the session that created the
+    // database, so the user can copy them.
     return {
       ...record,
       dbPassword: rawPassword,
+      connectionString: connString,
     };
   }
 

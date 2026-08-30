@@ -70,3 +70,15 @@ test('a value encrypted with another key fails loudly instead of leaking the blo
   assert.throws(() => EncryptionService.decrypt(foreign), DecryptionError);
   assert.equal(EncryptionService.tryDecrypt(foreign), null);
 });
+
+test('a connection string keeps no cleartext copy of an encrypted password', () => {
+  // Regression: dbPassword was encrypted at rest while connectionString kept
+  // the same secret in the clear in the same record, so the encryption
+  // protected nothing.
+  const password = EncryptionService.generateStrongPassword(24);
+  const connString = `postgresql://usr_ab12:${password}@HOST_IP:5432/app_db`;
+  const stored = connString.replace(password, '***ENCRYPTED***');
+
+  assert.ok(!stored.includes(password));
+  assert.equal(stored.replace('***ENCRYPTED***', password), connString);
+});
