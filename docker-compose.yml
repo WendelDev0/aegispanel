@@ -78,8 +78,12 @@ services:
       - aegis-net
 
 networks:
+  # Name is left to Compose (aegispanel_aegis-net). Pinning it to "aegis-net"
+  # orphans every application container already attached to the generated name:
+  # Compose then tries to remove the old network, fails because those containers
+  # still hold endpoints on it, and Caddy ends up on a different network from
+  # the apps it proxies.
   aegis-net:
-    name: aegis-net
     driver: bridge
 
 volumes:
