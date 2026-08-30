@@ -7,38 +7,70 @@ import {
   Check,
   Terminal,
   Bell,
-  Sliders,
-  Plus,
   Trash2,
-  Globe,
-  Radio,
   Download,
   Upload,
-  ArrowRight,
-  ShieldCheck,
   Sparkles,
   MessageSquare,
   Send,
   Users,
   UserPlus,
   Lock,
-  Mail,
   Shield,
-  Eye,
   Activity,
   CheckCircle2,
   AlertTriangle,
   Database,
-  Cpu
 } from 'lucide-react';
 import { api } from '../services/api.js';
-import { ServerNode, User } from '../types/index.js';
+import { User } from '../types/index.js';
 
-export const SettingsPage: React.FC = () => {
+/** Placeholder the API sends in place of a stored secret. */
+const SECRET_MASK = '••••••••';
+
+/**
+ * Shown under a secret input whose value is stored on the server but never
+ * sent back. Makes it clear the field being empty does not mean unset.
+ */
+const SecretStatus: React.FC<{ configured: boolean; onClear: () => void }> = ({ configured, onClear }) =>
+  configured ? (
+    <p className="text-[10px] text-slate-500 mt-1 flex items-center gap-1.5">
+      <Lock className="w-3 h-3 text-emerald-400 shrink-0" />
+      Já configurado. Deixe em branco para manter.
+      <button type="button" onClick={onClear} className="text-rose-400 hover:text-rose-300 underline">
+        Remover
+      </button>
+    </p>
+  ) : null;
+
+const ROLE_LEGEND = [
+  {
+    role: 'ADMIN',
+    className: 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300',
+    text: 'Tudo: equipe, terminal do host, tarefas shell, firewall, importar/exportar o painel.',
+  },
+  {
+    role: 'DEVELOPER',
+    className: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300',
+    text: 'Apps, deploys, bancos, domínios, arquivos e terminal de contêineres.',
+  },
+  {
+    role: 'VIEWER',
+    className: 'bg-slate-800/60 border-slate-700 text-slate-300',
+    text: 'Somente leitura. Não altera nada e não abre terminal.',
+  },
+];
+
+interface SettingsPageProps {
+  currentUser: User | null;
+}
+
+export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
+  const isAdmin = currentUser?.role === 'admin';
+
   const [serverName, setServerName] = useState('');
   const [caddyEnabled, setCaddyEnabled] = useState(true);
   const [panelDomain, setPanelDomain] = useState('');
-  const [nodes, setNodes] = useState<ServerNode[]>([]);
   const [teamUsers, setTeamUsers] = useState<User[]>([]);
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -67,52 +99,73 @@ export const SettingsPage: React.FC = () => {
   const [memThreshold, setMemThreshold] = useState(85);
   const [diskThreshold, setDiskThreshold] = useState(90);
 
+  /**
+   * Which secrets already have a value stored on the server.
+   *
+   * The API never sends the values back, so the inputs stay empty and a stored
+   * secret is only overwritten when the user actually types a new one. Showing
+   * the mask inside the input would make it look editable and invite the user
+   * to "fix" a value they cannot see.
+   */
+  const [configuredSecrets, setConfiguredSecrets] = useState<Record<string, boolean>>({});
+
   // Testing status
   const [testingChannel, setTestingChannel] = useState<string | null>(null);
+
+  // Team loading state, so a non-admin gets an explanation instead of an
+  // empty list.
+  const [teamError, setTeamError] = useState<string | null>(null);
+
+  // Change own password
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newOwnPassword, setNewOwnPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
 
   // Team User Modal
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newEmail, setNewEmail] = useState('');
-  const [newRole, setNewRole] = useState<'developer' | 'viewer'>('developer');
+  const [newRole, setNewRole] = useState<'admin' | 'developer' | 'viewer'>('developer');
   const [addingUser, setAddingUser] = useState(false);
-
-  // Add node modal
-  const [showAddNodeModal, setShowAddNodeModal] = useState(false);
-  const [newNodeName, setNewNodeName] = useState('');
-  const [newNodeType, setNewNodeType] = useState<'vps' | 'local' | 'cloud'>('vps');
-  const [newNodeIp, setNewNodeIp] = useState('');
-  const [newNodeLocation, setNewNodeLocation] = useState('');
 
   // Import file ref
   const importFileRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
 
   const fetchSettingsAndNodes = async () => {
-    try {
-      const [resSettings, resNodes, resUsers] = await Promise.all([
-        api.get('/system/settings'),
-        api.get('/nodes'),
-        api.get('/auth/users'),
-      ]);
-      setServerName(resSettings.data.serverName || 'Aegis Node 01');
-      setCaddyEnabled(resSettings.data.caddyEnabled ?? true);
-      setPanelDomain(resSettings.data.panelDomain || '');
-      setNodes(resNodes.data);
-      setTeamUsers(resUsers.data || []);
+    // Settled individually: listing the team requires the admin role, and a
+    // rejection there used to abort the whole load, leaving a developer with a
+    // blank settings page.
+    const [resSettings, resUsers] = await Promise.allSettled([
+      api.get('/system/settings'),
+      api.get('/auth/users'),
+    ]);
 
-      const alertConf = resSettings.data.alertConfig || {};
+    if (resSettings.status === 'fulfilled') {
+      const data = resSettings.value.data;
+      setServerName(data.serverName || 'Aegis Node 01');
+      setCaddyEnabled(data.caddyEnabled ?? true);
+      setPanelDomain(data.panelDomain || '');
+
+      const alertConf = data.alertConfig || {};
       setAlertsEnabled(alertConf.enabled ?? false);
-      setDiscordWebhookUrl(alertConf.discordWebhookUrl || '');
-      setTelegramBotToken(alertConf.telegramBotToken || '');
       setTelegramChatId(alertConf.telegramChatId || '');
 
       setWhatsappEnabled(alertConf.whatsappEnabled ?? false);
       setWhatsappApiUrl(alertConf.whatsappApiUrl || '');
-      setWhatsappApiKey(alertConf.whatsappApiKey || '');
       setWhatsappInstance(alertConf.whatsappInstance || '');
       setWhatsappRecipientNumber(alertConf.whatsappRecipientNumber || '');
+
+      // Masked fields are recorded as "configured" and left blank in the form.
+      setConfiguredSecrets({
+        discordWebhookUrl: alertConf.discordWebhookUrl === SECRET_MASK,
+        telegramBotToken: alertConf.telegramBotToken === SECRET_MASK,
+        whatsappApiKey: alertConf.whatsappApiKey === SECRET_MASK,
+      });
+      setDiscordWebhookUrl(alertConf.discordWebhookUrl === SECRET_MASK ? '' : alertConf.discordWebhookUrl || '');
+      setTelegramBotToken(alertConf.telegramBotToken === SECRET_MASK ? '' : alertConf.telegramBotToken || '');
+      setWhatsappApiKey(alertConf.whatsappApiKey === SECRET_MASK ? '' : alertConf.whatsappApiKey || '');
 
       setNotifyOnDeploySuccess(alertConf.notifyOnDeploySuccess ?? true);
       setNotifyOnDeployFail(alertConf.notifyOnDeployFail ?? true);
@@ -122,14 +175,65 @@ export const SettingsPage: React.FC = () => {
       setCpuThreshold(alertConf.cpuThresholdPercent || 90);
       setMemThreshold(alertConf.memThresholdPercent || 85);
       setDiskThreshold(alertConf.diskThresholdPercent || 90);
-    } catch (err) {
-      console.error('Failed to load settings:', err);
+    } else {
+      console.error('Falha ao carregar configurações:', resSettings.reason);
+    }
+
+    if (resUsers.status === 'fulfilled') {
+      setTeamUsers(resUsers.value.data || []);
+      setTeamError(null);
+    } else {
+      setTeamUsers([]);
+      setTeamError(
+        (resUsers.reason as any)?.response?.status === 403
+          ? 'Somente administradores podem ver e gerenciar a equipe.'
+          : 'Não foi possível carregar a equipe.'
+      );
     }
   };
 
   useEffect(() => {
     fetchSettingsAndNodes();
   }, []);
+
+  /**
+   * Blank + already configured -> send the mask, which the server reads as
+   * "unchanged". Blank + not configured -> send empty. Typed -> send it.
+   */
+  const secretToSend = (field: string, value: string): string => {
+    if (value) return value;
+    return configuredSecrets[field] ? SECRET_MASK : '';
+  };
+
+  const clearSecret = async (field: 'discordWebhookUrl' | 'telegramBotToken' | 'whatsappApiKey') => {
+    if (!confirm('Remover este segredo do painel? A integração para de funcionar até você cadastrar outro.')) return;
+    try {
+      await api.put('/system/settings', { alertConfig: { [field]: '' } });
+      setConfiguredSecrets((prev) => ({ ...prev, [field]: false }));
+      if (field === 'discordWebhookUrl') setDiscordWebhookUrl('');
+      if (field === 'telegramBotToken') setTelegramBotToken('');
+      if (field === 'whatsappApiKey') setWhatsappApiKey('');
+    } catch (err: any) {
+      alert('Erro ao remover: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
+  const handleChangeOwnPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentPassword || !newOwnPassword) return;
+
+    try {
+      setChangingPassword(true);
+      await api.post('/auth/change-password', { currentPassword, newPassword: newOwnPassword });
+      setCurrentPassword('');
+      setNewOwnPassword('');
+      alert('✅ Senha alterada. Ela já vale para os próximos logins.');
+    } catch (err: any) {
+      alert('Erro ao alterar senha: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setChangingPassword(false);
+    }
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,12 +245,15 @@ export const SettingsPage: React.FC = () => {
         panelDomain: panelDomain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '') || undefined,
         alertConfig: {
           enabled: alertsEnabled,
-          discordWebhookUrl,
-          telegramBotToken,
+          // A blank field on a secret that is already stored means "leave it
+          // as is": the mask is sent back so the server keeps the stored
+          // value. Clearing it deliberately requires the "Remover" action.
+          discordWebhookUrl: secretToSend('discordWebhookUrl', discordWebhookUrl),
+          telegramBotToken: secretToSend('telegramBotToken', telegramBotToken),
           telegramChatId,
           whatsappEnabled,
           whatsappApiUrl,
-          whatsappApiKey,
+          whatsappApiKey: secretToSend('whatsappApiKey', whatsappApiKey),
           whatsappInstance,
           whatsappRecipientNumber,
           notifyOnDeploySuccess,
@@ -172,11 +279,13 @@ export const SettingsPage: React.FC = () => {
       setTestingChannel(channel);
       const res = await api.post('/system/test-alert', {
         channel,
-        webhookUrl: discordWebhookUrl,
-        botToken: telegramBotToken,
+        // Blank means "test with what is already stored"; the server
+        // substitutes the saved secret for the mask.
+        webhookUrl: secretToSend('discordWebhookUrl', discordWebhookUrl),
+        botToken: secretToSend('telegramBotToken', telegramBotToken),
         chatId: telegramChatId,
         apiUrl: whatsappApiUrl,
-        apiKey: whatsappApiKey,
+        apiKey: secretToSend('whatsappApiKey', whatsappApiKey),
         instance: whatsappInstance,
         recipientNumber: whatsappRecipientNumber,
       });
@@ -223,37 +332,6 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleAddNode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newNodeName || !newNodeIp) return;
-
-    try {
-      await api.post('/nodes', {
-        name: newNodeName,
-        type: newNodeType,
-        hostIp: newNodeIp,
-        location: newNodeLocation,
-      });
-      setShowAddNodeModal(false);
-      setNewNodeName('');
-      setNewNodeIp('');
-      setNewNodeLocation('');
-      fetchSettingsAndNodes();
-    } catch (err: any) {
-      alert('Erro ao adicionar nó: ' + (err.response?.data?.error || err.message));
-    }
-  };
-
-  const handleDeleteNode = async (id: string, name: string) => {
-    if (!confirm(`Remover o nó de servidor "${name}"?`)) return;
-    try {
-      await api.delete(`/nodes/${id}`);
-      fetchSettingsAndNodes();
-    } catch (err: any) {
-      alert('Erro ao remover nó: ' + (err.response?.data?.error || err.message));
-    }
-  };
-
   const handleExportState = async () => {
     try {
       const res = await api.get('/system/export-state', { responseType: 'blob' });
@@ -283,11 +361,22 @@ export const SettingsPage: React.FC = () => {
       reader.onload = async (event) => {
         try {
           const parsed = JSON.parse(event.target?.result as string);
-          await api.post('/system/import-state', parsed);
-          alert('🎉 Estado completo importado com sucesso! Recarregando a página...');
+          const res = await api.post('/system/import-state', parsed);
+          alert(
+            res.data.warning
+              ? `🎉 ${res.data.message}\n\n⚠️ ${res.data.warning}`
+              : '🎉 Estado importado com sucesso! Recarregando a página...'
+          );
           window.location.reload();
         } catch (err: any) {
-          alert('Arquivo de backup inválido: ' + err.message);
+          // The server validates the payload and returns what is wrong with it.
+          const details: string[] = err.response?.data?.details || [];
+          const reason = err.response?.data?.error || err.message;
+          alert(
+            details.length > 0
+              ? ['Arquivo de backup inválido:', '', ...details.map((d) => `• ${d}`)].join('\n')
+              : 'Arquivo de backup inválido: ' + reason
+          );
           setImporting(false);
         }
       };
@@ -410,10 +499,14 @@ export const SettingsPage: React.FC = () => {
                   </label>
                   <input
                     type="password"
-                    placeholder="Sua chave secreta da Evolution API"
+                    placeholder={configuredSecrets.whatsappApiKey ? 'Manter a chave atual' : 'Sua chave secreta da Evolution API'}
                     value={whatsappApiKey}
                     onChange={(e) => setWhatsappApiKey(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-emerald-500"
+                  />
+                  <SecretStatus
+                    configured={!!configuredSecrets.whatsappApiKey}
+                    onClear={() => clearSecret('whatsappApiKey')}
                   />
                 </div>
 
@@ -493,7 +586,7 @@ export const SettingsPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <input
                   type="text"
-                  placeholder="https://discord.com/api/webhooks/..."
+                  placeholder={configuredSecrets.discordWebhookUrl ? 'Manter o webhook atual' : 'https://discord.com/api/webhooks/...'}
                   value={discordWebhookUrl}
                   onChange={(e) => setDiscordWebhookUrl(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-indigo-500"
@@ -501,12 +594,16 @@ export const SettingsPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleTestAlert('discord')}
-                  disabled={!discordWebhookUrl || testingChannel === 'discord'}
+                  disabled={(!discordWebhookUrl && !configuredSecrets.discordWebhookUrl) || testingChannel === 'discord'}
                   className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs shrink-0 disabled:opacity-40"
                 >
                   Testar
                 </button>
               </div>
+              <SecretStatus
+                configured={!!configuredSecrets.discordWebhookUrl}
+                onClear={() => clearSecret('discordWebhookUrl')}
+              />
             </div>
 
             <div>
@@ -516,7 +613,7 @@ export const SettingsPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <input
                   type="password"
-                  placeholder="Bot Token"
+                  placeholder={configuredSecrets.telegramBotToken ? 'Manter o token atual' : 'Bot Token'}
                   value={telegramBotToken}
                   onChange={(e) => setTelegramBotToken(e.target.value)}
                   className="w-1/2 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-indigo-500"
@@ -531,7 +628,11 @@ export const SettingsPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleTestAlert('telegram')}
-                  disabled={!telegramBotToken || !telegramChatId || testingChannel === 'telegram'}
+                  disabled={
+                    (!telegramBotToken && !configuredSecrets.telegramBotToken) ||
+                    !telegramChatId ||
+                    testingChannel === 'telegram'
+                  }
                   className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs shrink-0 disabled:opacity-40"
                 >
                   Testar
@@ -635,6 +736,16 @@ export const SettingsPage: React.FC = () => {
             </div>
           </div>
 
+              {!isAdmin && (
+            <div className="flex items-start gap-3 p-4 rounded-2xl border border-slate-700 bg-slate-900/60">
+              <Shield className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-slate-400">
+                Você está vendo estas configurações em modo leitura. Alterá-las exige o perfil{' '}
+                <span className="font-mono text-slate-200">admin</span>.
+              </p>
+            </div>
+          )}
+
           {/* Save Button */}
           <div className="flex items-center justify-between pt-3">
             {savedSuccess ? (
@@ -645,8 +756,9 @@ export const SettingsPage: React.FC = () => {
 
             <button
               type="submit"
-              disabled={saving}
-              className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all active:scale-95 disabled:opacity-50"
+              disabled={saving || !isAdmin}
+              title={isAdmin ? undefined : 'Somente administradores podem alterar as configurações do painel.'}
+              className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Save className="w-4 h-4" />
               {saving ? 'Salvando...' : 'Salvar Alterações'}
@@ -655,9 +767,61 @@ export const SettingsPage: React.FC = () => {
         </div>
       </form>
 
+      {/* Change own password: available to every role, including viewers. */}
+      <div className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-sky-500/10 text-sky-400">
+            <Lock className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="font-bold text-white text-base">Minha Senha</h3>
+            <p className="text-xs text-slate-400">
+              Conectado como <span className="text-slate-200 font-semibold">{currentUser?.username || '-'}</span>
+              {currentUser?.role && (
+                <span className="ml-1.5 text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold bg-slate-800 text-slate-300">
+                  {currentUser.role.toUpperCase()}
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={handleChangeOwnPassword} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Senha atual</label>
+            <input
+              type="password"
+              required
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-sky-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Nova senha</label>
+            <input
+              type="password"
+              required
+              minLength={12}
+              placeholder="Mínimo 12 caracteres"
+              value={newOwnPassword}
+              onChange={(e) => setNewOwnPassword(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-sky-500"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={changingPassword}
+            className="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold"
+          >
+            {changingPassword ? 'Alterando...' : 'Alterar senha'}
+          </button>
+        </form>
+      </div>
+
       {/* Team / Multi-User Management Section */}
       <div className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400">
               <Users className="w-5 h-5" />
@@ -670,50 +834,93 @@ export const SettingsPage: React.FC = () => {
             </div>
           </div>
 
-          <button
-            onClick={() => setShowAddUserModal(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-purple-600/30 transition-all"
-          >
-            <UserPlus className="w-3.5 h-3.5" />
-            Adicionar Membro
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {teamUsers.map(user => (
-            <div
-              key={user.id}
-              className="p-4 rounded-2xl bg-slate-950 border border-slate-800/80 flex items-center justify-between"
+          {isAdmin && (
+            <button
+              onClick={() => setShowAddUserModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-purple-600/30 transition-all"
             >
-              <div className="space-y-0.5">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-white text-sm">{user.username}</span>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold ${
-                    user.role === 'admin' ? 'bg-indigo-500/20 text-indigo-300' :
-                    user.role === 'developer' ? 'bg-emerald-500/20 text-emerald-300' :
-                    'bg-slate-800 text-slate-400'
-                  }`}>
-                    {user.role.toUpperCase()}
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-400">{user.email || 'Sem e-mail cadastrado'}</p>
-              </div>
-
-              {user.role !== 'admin' && (
-                <button
-                  onClick={() => handleDeleteUser(user.id, user.username)}
-                  className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-900 transition-colors"
-                  title="Remover usuário da equipe"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-          ))}
+              <UserPlus className="w-3.5 h-3.5" />
+              Adicionar Membro
+            </button>
+          )}
         </div>
+
+        {teamError ? (
+          <div className="flex items-start gap-3 p-4 rounded-2xl border border-slate-700 bg-slate-900/60">
+            <Shield className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
+            <p className="text-xs text-slate-400">{teamError}</p>
+          </div>
+        ) : (
+          <>
+            {/* What each role can do, so the choice is not a guess. */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {ROLE_LEGEND.map((r) => (
+                <div key={r.role} className={`p-3 rounded-xl border ${r.className}`}>
+                  <p className="text-[10px] font-mono font-bold mb-1">{r.role}</p>
+                  <p className="text-[11px] text-slate-400 leading-snug">{r.text}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {teamUsers.map((user) => {
+                const isSelf = user.id === currentUser?.id;
+                const adminCount = teamUsers.filter((u) => u.role === 'admin').length;
+                // Mirrors the server rules, so the button is absent rather than
+                // present and guaranteed to fail.
+                const isLastAdmin = user.role === 'admin' && adminCount <= 1;
+                const canRemove = isAdmin && !isSelf && !isLastAdmin;
+
+                return (
+                  <div
+                    key={user.id}
+                    className="p-4 rounded-2xl bg-slate-950 border border-slate-800/80 flex items-center justify-between gap-2"
+                  >
+                    <div className="space-y-0.5 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-white text-sm truncate">{user.username}</span>
+                        {isSelf && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 font-semibold">
+                            você
+                          </span>
+                        )}
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold ${
+                            user.role === 'admin'
+                              ? 'bg-indigo-500/20 text-indigo-300'
+                              : user.role === 'developer'
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}
+                        >
+                          {user.role.toUpperCase()}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 truncate">{user.email || 'Sem e-mail cadastrado'}</p>
+                      {isLastAdmin && (
+                        <p className="text-[10px] text-amber-400/80">Único administrador — não pode ser removido.</p>
+                      )}
+                    </div>
+
+                    {canRemove && (
+                      <button
+                        onClick={() => handleDeleteUser(user.id, user.username)}
+                        className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-900 transition-colors shrink-0"
+                        title="Remover usuário da equipe"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Migration & Backup Section */}
+      {/* Migration & Backup Section: admin only, mirrors the server rule. */}
+      {isAdmin && (
       <div className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
         <div className="flex items-center gap-2">
           <Sparkles className="w-5 h-5 text-indigo-400" />
@@ -750,6 +957,7 @@ export const SettingsPage: React.FC = () => {
           </button>
         </div>
       </div>
+      )}
 
       {/* VPS 1-Click Installer Script Box */}
       <div className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
@@ -833,9 +1041,17 @@ export const SettingsPage: React.FC = () => {
                   onChange={(e: any) => setNewRole(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"
                 >
-                  <option value="developer">Desenvolvedor (Deploy, Logs e Arquivos)</option>
-                  <option value="viewer">Visualizador (Apenas Acompanhamento)</option>
+                  <option value="viewer">Visualizador — somente leitura</option>
+                  <option value="developer">Desenvolvedor — deploys, apps, bancos, arquivos</option>
+                  <option value="admin">Administrador — controle total do servidor</option>
                 </select>
+                {newRole === 'admin' && (
+                  <p className="text-[11px] text-amber-300/90 mt-1.5 flex items-start gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                    Administradores abrem terminal no host, executam comandos e gerenciam a equipe. Na prática,
+                    é acesso root ao servidor.
+                  </p>
+                )}
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

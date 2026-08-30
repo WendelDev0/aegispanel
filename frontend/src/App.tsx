@@ -150,7 +150,7 @@ export function App() {
       case 'monitor':
         return <SystemMonitorPage realtimeStats={realtimeStats} />;
       case 'settings':
-        return <SettingsPage />;
+        return <SettingsPage currentUser={user} />;
       case 'help':
         return <HelpPage />;
       default:
