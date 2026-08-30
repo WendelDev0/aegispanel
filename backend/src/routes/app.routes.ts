@@ -8,6 +8,7 @@ import { CaddyService } from '../services/caddy.service.js';
 import { dbStorage } from '../db/storage.js';
 import { CONFIG } from '../config.js';
 import { resolveSafePath } from '../utils/safe-path.js';
+import { PortService } from '../services/port.service.js';
 import { authMiddleware, requireWrite, AuthRequest } from '../middleware/auth.js';
 
 export const appRouter = Router();
@@ -18,6 +19,15 @@ appRouter.use(authMiddleware);
 function buildsDirFor(appId: string): string {
   return path.join(CONFIG.DATA_DIR, 'builds', appId);
 }
+
+// Free host port the create form can show as the default.
+appRouter.get('/suggest-port', requireWrite, async (req: Request, res: Response): Promise<void> => {
+  try {
+    res.json({ port: await PortService.allocate() });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 appRouter.get('/', (req: Request, res: Response) => {
   res.json(AppService.getAll().map(AppService.toPublic));
@@ -42,18 +52,21 @@ appRouter.post('/inspect-repo', requireWrite, async (req: Request, res: Response
 appRouter.post('/', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
     const { name, sourceType, gitUrl, branch, imageName, port, internalPort, env, domain, githubToken } = req.body;
-    if (!name || !port) {
-      res.status(400).json({ error: 'Nome e porta são obrigatórios' });
+    if (!name) {
+      res.status(400).json({ error: 'Nome é obrigatório' });
       return;
     }
 
+    // The host port is optional: leaving it out assigns a free one. Traffic
+    // reaches the application through Caddy on the container's internal port,
+    // so there is nothing for the user to coordinate here.
     const created = await AppService.createApp({
       name,
       sourceType: sourceType || 'image',
       gitUrl,
       branch,
       imageName,
-      port: parseInt(port),
+      port: port ? parseInt(port) : undefined,
       internalPort: internalPort ? parseInt(internalPort) : undefined,
       env: env || {},
       domain,
@@ -95,7 +108,24 @@ appRouter.put('/:id', requireWrite, async (req: Request, res: Response): Promise
     const previousBranch = app.branch;
 
     if (name) app.name = name;
-    if (port) app.port = parseInt(port);
+
+    // An empty port field hands the app back to automatic assignment; a value
+    // pins it, and the pin is remembered so a later deploy never moves it.
+    if (port === '' || port === null) {
+      app.autoPort = true;
+      app.port = await PortService.allocate(undefined, app.containerId);
+    } else if (port) {
+      const requested = parseInt(port);
+      if (requested !== app.port) {
+        const conflict = await PortService.describeConflict(requested, app.containerId);
+        if (conflict) {
+          res.status(400).json({ error: conflict });
+          return;
+        }
+      }
+      app.port = requested;
+      app.autoPort = false;
+    }
     if (internalPort) app.internalPort = parseInt(internalPort);
     if (imageName) app.imageName = imageName;
     if (gitUrl) app.gitUrl = gitUrl;

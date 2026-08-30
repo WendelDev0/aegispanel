@@ -39,7 +39,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
   // Form state
   const [dbName, setDbName] = useState('');
   const [dbType, setDbType] = useState<'postgres' | 'mysql' | 'mariadb' | 'redis' | 'mongodb'>('postgres');
-  const [dbPort, setDbPort] = useState('5432');
+  const [dbPort, setDbPort] = useState('');
   const [dbUser, setDbUser] = useState('');
   const [dbPassword, setDbPassword] = useState('');
   const [customDbName, setCustomDbName] = useState('');
@@ -100,14 +100,15 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
 
   const handleCreateDatabase = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!dbName || !dbPort) return;
+    if (!dbName) return;
 
     try {
       setSubmitting(true);
       await api.post('/databases', {
         name: dbName,
         type: dbType,
-        port: parseInt(dbPort),
+        // Omitted when blank, so the server assigns a free host port.
+        port: dbPort ? parseInt(dbPort) : undefined,
         dbUser: dbUser || undefined,
         dbPassword: dbPassword || undefined,
         dbName: customDbName || undefined,
@@ -638,15 +639,18 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Porta no Host *
+                    Porta no Host
                   </label>
                   <input
                     type="number"
-                    required
+                    placeholder="Automática"
                     value={dbPort}
                     onChange={(e) => setDbPort(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500 font-mono"
                   />
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Vazio = o painel escolhe. Suas aplicações conectam pelo nome do contêiner, não por esta porta.
+                  </p>
                 </div>
 
                 <div>

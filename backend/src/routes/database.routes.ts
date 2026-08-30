@@ -31,15 +31,16 @@ databaseRouter.get('/generate-credentials', requireWrite, (req: Request, res: Re
 databaseRouter.post('/', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
     const { name, type, port, dbUser, dbPassword, dbName, withGui } = req.body;
-    if (!name || !type || !port) {
-      res.status(400).json({ error: 'Nome, tipo e porta são obrigatórios' });
+    if (!name || !type) {
+      res.status(400).json({ error: 'Nome e tipo são obrigatórios' });
       return;
     }
 
+    // The host port is optional; omitting it assigns a free one.
     const created = await DatabaseService.createDatabase({
       name,
       type,
-      port: parseInt(port),
+      port: port ? parseInt(port) : undefined,
       dbUser,
       dbPassword,
       dbName,

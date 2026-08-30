@@ -2,6 +2,7 @@ import { dbStorage, AppRecord, DomainRecord } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
 import { CaddyService } from './caddy.service.js';
 import { EncryptionService } from '../utils/crypto.js';
+import { PortService } from './port.service.js';
 import { containerNameForApp, normalizeDomain } from '../utils/naming.js';
 
 export { containerNameForApp, normalizeDomain };
@@ -12,7 +13,8 @@ export interface CreateAppDTO {
   gitUrl?: string;
   branch?: string;
   imageName?: string;
-  port: number;
+  /** Omit to have a free host port assigned automatically. */
+  port?: number;
   internalPort?: number;
   env?: Record<string, string>;
   domain?: string;
@@ -68,6 +70,12 @@ export class AppService {
     const id = `app-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
     const containerName = containerNameForApp(dto.name);
     const internalPort = dto.internalPort || 3000;
+
+    // Picking a free host port is bookkeeping the panel can do itself. Traffic
+    // reaches the application through Caddy on the container's internal port,
+    // so the host port only matters for direct IP:port access.
+    const autoPort = !dto.port;
+    const hostPort = await PortService.allocate(dto.port);
     const envRecord = dto.env || {};
     const envList = Object.entries(envRecord).map(([k, v]) => `${k}=${v}`);
 
@@ -75,7 +83,7 @@ export class AppService {
     let containerId: string | undefined;
     let status: AppRecord['status'] = 'stopped';
 
-    const ports: { [intPort: string]: number } = { [`${internalPort}/tcp`]: dto.port };
+    const ports: { [intPort: string]: number } = { [`${internalPort}/tcp`]: hostPort };
     const cleanDomain = normalizeDomain(dto.domain);
 
     try {
@@ -104,8 +112,9 @@ export class AppService {
       branch: dto.branch || 'main',
       imageName: dto.imageName || image,
       containerId,
-      port: dto.port,
+      port: hostPort,
       internalPort,
+      autoPort,
       env: envRecord,
       domain: cleanDomain,
       // Every app gets a high-entropy webhook secret at creation. Without one
@@ -125,7 +134,7 @@ export class AppService {
         const domRecord: DomainRecord = {
           id: `dom-app-${id}`,
           domain: cleanDomain,
-          targetPort: dto.port,
+          targetPort: hostPort,
           targetContainer: dto.name,
           sslEnabled: true,
           status: 'active',
@@ -133,7 +142,7 @@ export class AppService {
         };
         dbStorage.saveDomain(domRecord);
       } else {
-        existingDomain.targetPort = dto.port;
+        existingDomain.targetPort = hostPort;
         dbStorage.saveDomain(existingDomain);
       }
       await CaddyService.syncCaddyfile();

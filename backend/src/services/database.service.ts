@@ -5,11 +5,13 @@ import { dockerService } from './docker.service.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { CONFIG } from '../config.js';
 import { containerNameForDatabase } from '../utils/naming.js';
+import { PortService } from './port.service.js';
 
 export interface CreateDbDTO {
   name: string;
   type: 'postgres' | 'mysql' | 'mariadb' | 'redis' | 'mongodb';
-  port: number;
+  /** Omit to have a free host port assigned automatically. */
+  port?: number;
   dbUser?: string;
   dbPassword?: string;
   dbName?: string;
@@ -138,6 +140,10 @@ export class DatabaseService {
   static async createDatabase(dto: CreateDbDTO): Promise<DatabaseRecord> {
     const id = `db-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
     const containerName = containerNameForDatabase(dto.name);
+    // Applications reach the database by container name on the internal port,
+    // so the published host port is only needed for external clients and does
+    // not have to be chosen by hand.
+    const hostPort = await PortService.allocate(dto.port);
     const dataPath = path.join(CONFIG.DATA_DIR, 'databases', dto.name);
 
     if (!fs.existsSync(dataPath)) {
@@ -165,7 +171,7 @@ export class DatabaseService {
           `POSTGRES_PASSWORD=${rawPassword}`,
           `POSTGRES_DB=${dbName}`,
         ];
-        connString = `postgresql://${dbUser}:${rawPassword}@HOST_IP:${dto.port}/${dbName}`;
+        connString = `postgresql://${dbUser}:${rawPassword}@HOST_IP:${hostPort}/${dbName}`;
         break;
 
       case 'mysql':
@@ -178,7 +184,7 @@ export class DatabaseService {
           `MYSQL_USER=${dbUser !== 'root' ? dbUser : 'app_user'}`,
           `MYSQL_PASSWORD=${rawPassword}`,
         ];
-        connString = `mysql://${dbUser}:${rawPassword}@HOST_IP:${dto.port}/${dbName}`;
+        connString = `mysql://${dbUser}:${rawPassword}@HOST_IP:${hostPort}/${dbName}`;
         break;
 
       case 'mariadb':
@@ -191,7 +197,7 @@ export class DatabaseService {
           `MARIADB_USER=${dbUser !== 'root' ? dbUser : 'app_user'}`,
           `MARIADB_PASSWORD=${rawPassword}`,
         ];
-        connString = `mysql://${dbUser}:${rawPassword}@HOST_IP:${dto.port}/${dbName}`;
+        connString = `mysql://${dbUser}:${rawPassword}@HOST_IP:${hostPort}/${dbName}`;
         break;
 
       case 'redis':
@@ -199,7 +205,7 @@ export class DatabaseService {
         internalPort = 6379;
         volumeTarget = '/data';
         env = [];
-        connString = `redis://:${rawPassword}@HOST_IP:${dto.port}`;
+        connString = `redis://:${rawPassword}@HOST_IP:${hostPort}`;
         break;
 
       case 'mongodb':
@@ -211,7 +217,7 @@ export class DatabaseService {
           `MONGO_INITDB_ROOT_PASSWORD=${rawPassword}`,
           `MONGO_INITDB_DATABASE=${dbName}`,
         ];
-        connString = `mongodb://${dbUser}:${rawPassword}@HOST_IP:${dto.port}/${dbName}?authSource=admin`;
+        connString = `mongodb://${dbUser}:${rawPassword}@HOST_IP:${hostPort}/${dbName}?authSource=admin`;
         break;
     }
 
@@ -219,7 +225,7 @@ export class DatabaseService {
     volumes[dataPath] = volumeTarget;
 
     const ports: { [intPort: string]: number } = {};
-    ports[`${internalPort}/tcp`] = dto.port;
+    ports[`${internalPort}/tcp`] = hostPort;
 
     let containerId: string | undefined;
     let status: DatabaseRecord['status'] = 'stopped';
@@ -251,7 +257,7 @@ export class DatabaseService {
       name: dto.name,
       type: dto.type,
       containerId,
-      port: dto.port,
+      port: hostPort,
       internalPort,
       dbUser,
       dbPassword: encryptedPassword, // Stored encrypted in JSON file

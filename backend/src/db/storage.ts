@@ -56,6 +56,12 @@ export interface AppRecord {
   containerId?: string;
   port: number;
   internalPort: number;
+  /**
+   * True when the host port was assigned automatically. Such a port may be
+   * reassigned on a later deploy if it has been taken; a port the user chose
+   * explicitly is never moved without telling them.
+   */
+  autoPort?: boolean;
   env: Record<string, string>;
   domain?: string;
   webhookSecret?: string;

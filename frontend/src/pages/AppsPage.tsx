@@ -124,7 +124,7 @@ export const AppsPage: React.FC = () => {
   const [branch, setBranch] = useState('main');
   const [githubToken, setGithubToken] = useState('');
   const [showTokenCreate, setShowTokenCreate] = useState(false);
-  const [port, setPort] = useState('5000');
+  const [port, setPort] = useState('');
   const [internalPort, setInternalPort] = useState('3000');
   const [createDomain, setCreateDomain] = useState('');
   const [createEnvString, setCreateEnvString] = useState('NODE_ENV=production\nPORT=3000');
@@ -244,7 +244,8 @@ export const AppsPage: React.FC = () => {
         gitUrl: sourceType === 'git' ? gitUrl : undefined,
         branch: sourceType === 'git' ? branch : undefined,
         githubToken: sourceType === 'git' && githubToken ? githubToken : undefined,
-        port: parseInt(port),
+        // Omitted when blank, so the server assigns a free host port.
+        port: port ? parseInt(port) : undefined,
         internalPort: parseInt(internalPort),
         domain: createDomain.trim() || undefined,
         env: envObj,
@@ -289,13 +290,15 @@ export const AppsPage: React.FC = () => {
 
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedEditApp || !editPort) return;
+    if (!selectedEditApp) return;
 
     try {
       setSavingEdit(true);
-      await api.put(`/apps/${selectedEditApp.id}`, {
+      // An empty field is sent as '' so the server hands the app back to
+      // automatic assignment, rather than being dropped as "unchanged".
+      const res = await api.put(`/apps/${selectedEditApp.id}`, {
         name: editName,
-        port: parseInt(editPort),
+        port: editPort === '' ? '' : parseInt(editPort),
         internalPort: parseInt(editInternalPort || '3000'),
         imageName: editImageName || undefined,
         gitUrl: editGitUrl || undefined,
@@ -305,7 +308,7 @@ export const AppsPage: React.FC = () => {
 
       setSelectedEditApp(null);
       fetchApps();
-      alert(`🎉 Aplicação atualizada para a porta :${editPort} com sucesso!`);
+      alert(`🎉 Aplicação atualizada. Porta no host: :${res.data?.port ?? editPort}`);
     } catch (err: any) {
       alert('Erro ao atualizar: ' + (err.response?.data?.error || err.message));
     } finally {
@@ -987,18 +990,19 @@ export const AppsPage: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1.5">
-                    Porta no Host *
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Porta no Host
                   </label>
                   <input
                     type="number"
-                    required
-                    placeholder="ex: 5000, 5050, 8080"
+                    placeholder="Automática"
                     value={editPort}
                     onChange={(e) => setEditPort(e.target.value)}
-                    className="w-full bg-slate-950 border border-emerald-500/40 rounded-xl px-3.5 py-2.5 text-emerald-300 font-mono text-sm focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-200 font-mono text-sm focus:outline-none focus:border-indigo-500"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">Use 5000, 5050 ou 8080.</p>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Vazio = automática. Um valor fixa a porta e o painel nunca a move sozinho.
+                  </p>
                 </div>
 
                 <div>
@@ -1645,18 +1649,19 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1.5">
-                    Porta no Host *
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Porta no Host
                   </label>
                   <input
                     type="number"
-                    required
-                    placeholder="5000"
+                    placeholder="Automática"
                     value={port}
                     onChange={(e) => setPort(e.target.value)}
-                    className="w-full bg-slate-950 border border-emerald-500/40 rounded-xl px-3.5 py-2.5 text-emerald-300 text-sm focus:outline-none focus:border-emerald-500 font-mono"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-200 text-sm focus:outline-none focus:border-indigo-500 font-mono"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">Recomendado: 5000, 5050 ou 8080</p>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Deixe vazio: o painel escolhe uma porta livre. Seu site é servido pelo domínio, não por esta porta.
+                  </p>
                 </div>
               </div>
 

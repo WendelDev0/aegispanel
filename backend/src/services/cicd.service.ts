@@ -8,6 +8,7 @@ import { CaddyService } from './caddy.service.js';
 import { ProjectDetector, ProjectInspectionResult } from './project-detector.service.js';
 import { AlertService } from './alert.service.js';
 import { AppService } from './app.service.js';
+import { PortService } from './port.service.js';
 import { containerNameForApp } from '../utils/naming.js';
 import { emit } from '../realtime.js';
 import { CONFIG } from '../config.js';
@@ -283,6 +284,32 @@ export class CicdService {
     const buildImageTag = `${containerName}:latest`;
     const versionedTag = `${containerName}:${deploymentId}`;
     const envList = Object.entries(app.env || {}).map(([k, v]) => `${k}=${v}`);
+
+    // Resolve the host port before building anything.
+    //
+    // An automatically assigned port that has since been taken by another
+    // container is moved to a free one, so a deploy never fails over
+    // bookkeeping the panel can redo itself. A port the user chose explicitly
+    // is left alone: silently moving it would break whatever they pointed at
+    // it, so that case fails with the name of the container holding it.
+    if (!(await PortService.isAvailable(app.port, app.containerId))) {
+      if (app.autoPort !== false) {
+        const previousPort = app.port;
+        app.port = await PortService.allocate(undefined, app.containerId);
+        dbStorage.saveApp(app);
+        log(
+          `[${new Date().toISOString()}] 🔀 Porta :${previousPort} ocupada; a aplicação foi realocada automaticamente para :${app.port}.
+`,
+          { step: 1, stepName: 'Porta realocada', percentage: 15 }
+        );
+      } else {
+        const conflict = await PortService.describeConflict(app.port, app.containerId);
+        throw new Error(
+          `${conflict || `A porta :${app.port} está em uso.`} Escolha outra porta nas configurações da aplicação, ou deixe o campo vazio para atribuição automática.`
+        );
+      }
+    }
+
     const ports: { [intPort: string]: number } = { [`${app.internalPort || 3000}/tcp`]: app.port };
 
     try {
