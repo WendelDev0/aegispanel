@@ -12,14 +12,18 @@ export type ProjectType =
   | 'nestjs'
   | 'static-html'
   | 'dockerfile'
-  | 'generic-node';
+  | 'generic-node'
+  | 'python-flask'
+  | 'python-fastapi'
+  | 'python-django'
+  | 'python-generic';
 
 export interface ProjectInspectionResult {
   type: ProjectType;
   frameworkName: string;
   category: 'spa' | 'ssr' | 'api' | 'static' | 'docker';
   icon: string;
-  packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun';
+  packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun' | 'pip' | 'poetry' | 'pipenv' | 'docker';
   hasDockerfile: boolean;
   hasPackageJson: boolean;
   buildCommand: string;
@@ -40,12 +44,50 @@ export class ProjectDetector {
     let frameworkName = 'Node.js Application';
     let category: 'spa' | 'ssr' | 'api' | 'static' | 'docker' = 'api';
     let icon = 'nodejs';
-    let packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun' = 'npm';
+    let packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun' | 'pip' | 'poetry' | 'pipenv' | 'docker' = 'npm';
     let hasPackageJson = false;
     let hasDockerfile = false;
     let packageJson: any = {};
 
-    // 1. Check Package Manager locks
+    // 1. Check Native Dockerfile (Highest Priority)
+    const dockerfilePath = path.join(buildDir, 'Dockerfile');
+    if (fs.existsSync(dockerfilePath)) {
+      hasDockerfile = true;
+      try {
+        const dockerContent = fs.readFileSync(dockerfilePath, 'utf8');
+        let detectedPort = internalPort;
+        const portMatch = dockerContent.match(/EXPOSE\s+(\d+)/i);
+        if (portMatch && portMatch[1]) {
+          detectedPort = parseInt(portMatch[1], 10);
+        }
+
+        return {
+          type: 'dockerfile',
+          frameworkName: 'Dockerfile Nativo (Custom)',
+          category: 'docker',
+          icon: 'docker',
+          packageManager: 'docker',
+          hasDockerfile: true,
+          hasPackageJson: fs.existsSync(path.join(buildDir, 'package.json')),
+          buildCommand: 'docker build -t app .',
+          outputDir: '.',
+          installCommand: 'docker build',
+          startCommand: 'docker run',
+          recommendedPort: 5000,
+          recommendedInternalPort: detectedPort,
+          suggestedEnv: {
+            PORT: detectedPort.toString(),
+          },
+          dockerfile: dockerContent,
+          runtimeCmd: 'docker-native',
+          log: `🐳 Dockerfile nativo encontrado no repositório. Porta detectada: :${detectedPort}. Compilando conforme configuração do desenvolvedor...`,
+        };
+      } catch (e) {
+        // Continue fallback if read fails
+      }
+    }
+
+    // 2. Check Package Manager locks (Node.js ecosystem)
     if (fs.existsSync(path.join(buildDir, 'pnpm-lock.yaml'))) {
       packageManager = 'pnpm';
     } else if (fs.existsSync(path.join(buildDir, 'yarn.lock'))) {
@@ -54,11 +96,6 @@ export class ProjectDetector {
       packageManager = 'bun';
     } else {
       packageManager = 'npm';
-    }
-
-    // 2. Check Native Dockerfile
-    if (fs.existsSync(path.join(buildDir, 'Dockerfile'))) {
-      hasDockerfile = true;
     }
 
     // 3. Parse package.json
@@ -82,8 +119,202 @@ export class ProjectDetector {
     let startCommand = scripts.start ? `${packageManager} start` : 'node server.js';
     let log = '';
 
+    // Helper for Python files scan
+    let rootFiles: string[] = [];
+    try {
+      rootFiles = fs.readdirSync(buildDir);
+    } catch (e) {}
+
+    const pyFiles = rootFiles.filter(f => f.endsWith('.py'));
+    const hasPythonRequirements = fs.existsSync(path.join(buildDir, 'requirements.txt'));
+    const hasPyproject = fs.existsSync(path.join(buildDir, 'pyproject.toml'));
+    const hasPipfile = fs.existsSync(path.join(buildDir, 'Pipfile'));
+    const isPythonProject = !hasPackageJson && (pyFiles.length > 0 || hasPythonRequirements || hasPyproject || hasPipfile);
+
     // 4. Framework Detection Tree
-    if (checkFiles(['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.cjs'])) {
+    if (isPythonProject) {
+      if (fs.existsSync(path.join(buildDir, 'poetry.lock')) || (hasPyproject && fs.readFileSync(path.join(buildDir, 'pyproject.toml'), 'utf8').includes('tool.poetry'))) {
+        packageManager = 'poetry';
+      } else if (hasPipfile) {
+        packageManager = 'pipenv';
+      } else {
+        packageManager = 'pip';
+      }
+
+      let reqContent = '';
+      if (hasPythonRequirements) {
+        try {
+          reqContent = fs.readFileSync(path.join(buildDir, 'requirements.txt'), 'utf8').toLowerCase();
+        } catch (e) {}
+      }
+
+      const hasDjango = rootFiles.includes('manage.py') || reqContent.includes('django');
+      const hasFastApi = reqContent.includes('fastapi') || rootFiles.includes('main.py') && fs.existsSync(path.join(buildDir, 'main.py')) && fs.readFileSync(path.join(buildDir, 'main.py'), 'utf8').includes('FastAPI');
+      const hasFlask = reqContent.includes('flask') || rootFiles.includes('web_app.py') || rootFiles.includes('app.py');
+
+      if (hasDjango) {
+        type = 'python-django';
+        frameworkName = 'Django (Python Web Framework)';
+        category = 'api';
+        icon = 'django';
+        buildCommand = 'python manage.py collectstatic --noinput';
+        startCommand = 'python manage.py runserver 0.0.0.0:8000';
+        log = `🐍 Framework detectado: Django. Preparando ambiente Python com migrações e servidor WSGI...`;
+        return {
+          type,
+          frameworkName,
+          category,
+          icon,
+          packageManager,
+          hasDockerfile: false,
+          hasPackageJson: false,
+          buildCommand,
+          outputDir: '.',
+          installCommand: 'pip install -r requirements.txt',
+          startCommand,
+          recommendedPort: 8000,
+          recommendedInternalPort: 8000,
+          suggestedEnv: {
+            PYTHONUNBUFFERED: '1',
+            PORT: '8000',
+            DJANGO_SETTINGS_MODULE: 'core.settings',
+          },
+          dockerfile: `FROM python:3.11-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends curl dnsutils gcc libpq-dev && rm -rf /var/lib/apt/lists/*
+COPY requirements*.txt Pipfile* pyproject.toml* ./
+RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else pip install --no-cache-dir django gunicorn; fi
+COPY . .
+ENV PYTHONUNBUFFERED=1
+ENV PORT=8000
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s CMD curl -f http://localhost:8000/ || exit 1
+CMD ["sh", "-c", "python manage.py migrate --noinput && (gunicorn --bind 0.0.0.0:8000 --workers 2 core.wsgi:application || python manage.py runserver 0.0.0.0:8000)"]`,
+          runtimeCmd: startCommand,
+          log,
+        };
+      } else if (hasFastApi) {
+        type = 'python-fastapi';
+        frameworkName = 'FastAPI (Python REST Framework)';
+        category = 'api';
+        icon = 'fastapi';
+        buildCommand = '';
+        startCommand = 'uvicorn main:app --host 0.0.0.0 --port 8000';
+        log = `⚡ Framework detectado: FastAPI. Preparando servidor assíncrono Uvicorn na porta 8000...`;
+        return {
+          type,
+          frameworkName,
+          category,
+          icon,
+          packageManager,
+          hasDockerfile: false,
+          hasPackageJson: false,
+          buildCommand,
+          outputDir: '.',
+          installCommand: 'pip install -r requirements.txt',
+          startCommand,
+          recommendedPort: 8000,
+          recommendedInternalPort: 8000,
+          suggestedEnv: {
+            PYTHONUNBUFFERED: '1',
+            PORT: '8000',
+          },
+          dockerfile: `FROM python:3.11-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends curl dnsutils gcc && rm -rf /var/lib/apt/lists/*
+COPY requirements*.txt Pipfile* pyproject.toml* ./
+RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else pip install --no-cache-dir fastapi uvicorn; fi
+COPY . .
+ENV PYTHONUNBUFFERED=1
+ENV PORT=8000
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s CMD curl -f http://localhost:8000/docs || exit 1
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]`,
+          runtimeCmd: startCommand,
+          log,
+        };
+      } else if (hasFlask) {
+        type = 'python-flask';
+        frameworkName = 'Flask (Python Web HUD & API)';
+        category = 'api';
+        icon = 'flask';
+        buildCommand = '';
+        startCommand = 'python web_app.py';
+        log = `🌶️ Framework detectado: Flask (web_app.py / app.py). Preparando servidor Python HUD na porta 5000...`;
+        return {
+          type,
+          frameworkName,
+          category,
+          icon,
+          packageManager,
+          hasDockerfile: false,
+          hasPackageJson: false,
+          buildCommand,
+          outputDir: '.',
+          installCommand: 'pip install -r requirements.txt',
+          startCommand,
+          recommendedPort: 5000,
+          recommendedInternalPort: 5000,
+          suggestedEnv: {
+            PYTHONUNBUFFERED: '1',
+            PORT: '5000',
+            FLASK_ENV: 'production',
+          },
+          dockerfile: `FROM python:3.11-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends curl dnsutils whois net-tools gcc && rm -rf /var/lib/apt/lists/*
+COPY requirements*.txt Pipfile* pyproject.toml* ./
+RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else pip install --no-cache-dir flask rich dnspython gunicorn; fi
+COPY . .
+ENV PYTHONUNBUFFERED=1
+ENV PORT=5000
+EXPOSE 5000
+HEALTHCHECK --interval=30s --timeout=5s CMD curl -f http://localhost:5000/ || exit 1
+CMD ["sh", "-c", "if [ -f web_app.py ]; then (gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 120 web_app:app || python web_app.py); elif [ -f app.py ]; then (gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 120 app:app || python app.py); else python main.py; fi"]`,
+          runtimeCmd: startCommand,
+          log,
+        };
+      } else {
+        type = 'python-generic';
+        frameworkName = 'Python Application';
+        category = 'api';
+        icon = 'python';
+        buildCommand = '';
+        startCommand = rootFiles.includes('main.py') ? 'python main.py' : 'python app.py';
+        log = `🐍 Aplicação Python detectada. Configurando runtime Python 3.11 com gerenciador PIP...`;
+        return {
+          type,
+          frameworkName,
+          category,
+          icon,
+          packageManager,
+          hasDockerfile: false,
+          hasPackageJson: false,
+          buildCommand,
+          outputDir: '.',
+          installCommand: 'pip install -r requirements.txt',
+          startCommand,
+          recommendedPort: 5000,
+          recommendedInternalPort: 5000,
+          suggestedEnv: {
+            PYTHONUNBUFFERED: '1',
+            PORT: '5000',
+          },
+          dockerfile: `FROM python:3.11-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends curl dnsutils whois net-tools gcc && rm -rf /var/lib/apt/lists/*
+COPY requirements*.txt Pipfile* pyproject.toml* ./
+RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else pip install --no-cache-dir rich dnspython; fi
+COPY . .
+ENV PYTHONUNBUFFERED=1
+ENV PORT=5000
+EXPOSE 5000
+CMD ["sh", "-c", "if [ -f main.py ]; then python main.py; elif [ -f app.py ]; then python app.py; else python -m http.server 5000; fi"]`,
+          runtimeCmd: startCommand,
+          log,
+        };
+      }
+    } else if (checkFiles(['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.cjs'])) {
       type = 'vite';
       frameworkName = 'Vite (React / Vue / Svelte SPA)';
       category = 'spa';
@@ -188,7 +419,7 @@ export class ProjectDetector {
       }
     }
 
-    // 5. Generate Multi-Stage Dockerfile
+    // 5. Generate Multi-Stage Dockerfile for JS/TS/Static
     let dockerfile = '';
     let runtimeCmd = startCommand;
 

@@ -180,6 +180,12 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
         if (res.data.inspection.recommendedInternalPort) {
           setInternalPort(res.data.inspection.recommendedInternalPort.toString());
         }
+        if (res.data.inspection.suggestedEnv && Object.keys(res.data.inspection.suggestedEnv).length > 0) {
+          const envLines = Object.entries(res.data.inspection.suggestedEnv)
+            .map(([k, v]) => `${k}=${v}`)
+            .join('\n');
+          setCreateEnvString(envLines);
+        }
         if (!appName || appName.includes('meu-app')) {
           const cleanName = targetUrl.split('/').pop()?.replace('.git', '') || '';
           if (cleanName) setAppName(cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, '-'));

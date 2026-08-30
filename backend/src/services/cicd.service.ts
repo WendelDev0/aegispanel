@@ -411,10 +411,31 @@ export class CicdService {
           if (detection.type === 'static-html') {
             delete ports[`${internalPort}/tcp`];
             ports['80/tcp'] = app.port;
+          } else if (detection.recommendedInternalPort && detection.recommendedInternalPort !== internalPort && (!app.internalPort || app.internalPort === 3000)) {
+            delete ports[`${internalPort}/tcp`];
+            ports[`${detection.recommendedInternalPort}/tcp`] = app.port;
+            app.internalPort = detection.recommendedInternalPort;
+            dbStorage.saveApp(app);
           }
 
           fs.writeFileSync(dockerfilePath, detection.dockerfile, 'utf-8');
         } else {
+          try {
+            const dockerContent = fs.readFileSync(dockerfilePath, 'utf8');
+            const portMatch = dockerContent.match(/EXPOSE\s+(\d+)/i);
+            if (portMatch && portMatch[1]) {
+              const exposedPort = parseInt(portMatch[1], 10);
+              if (exposedPort && exposedPort !== internalPort && (!app.internalPort || app.internalPort === 3000)) {
+                delete ports[`${internalPort}/tcp`];
+                ports[`${exposedPort}/tcp`] = app.port;
+                app.internalPort = exposedPort;
+                dbStorage.saveApp(app);
+              }
+            }
+          } catch (e) {
+            // ignore
+          }
+
           log(
             `[${new Date().toISOString()}] 🔍 [Step 3/5] Dockerfile nativo do repositório encontrado. Compilando com o Dockerfile do desenvolvedor...\n`,
             { step: 3, stepName: 'Dockerfile Nativo Git', percentage: 50 }
