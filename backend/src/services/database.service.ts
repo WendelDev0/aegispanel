@@ -4,6 +4,7 @@ import { dbStorage, DatabaseRecord } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { CONFIG } from '../config.js';
+import { containerNameForDatabase } from '../utils/naming.js';
 
 export interface CreateDbDTO {
   name: string;
@@ -32,12 +33,59 @@ export class DatabaseService {
     }));
   }
 
+  /**
+   * Builds a connection URI for a given host and port.
+   * Single definition so the host-facing and container-facing strings cannot
+   * drift apart in format.
+   */
+  private static buildUri(
+    db: Pick<DatabaseRecord, 'type' | 'dbUser' | 'dbName'>,
+    host: string,
+    port: number,
+    password: string
+  ): string {
+    const user = encodeURIComponent(db.dbUser);
+    const pass = encodeURIComponent(password);
+
+    switch (db.type) {
+      case 'postgres':
+        return `postgresql://${user}:${pass}@${host}:${port}/${db.dbName}`;
+      case 'mysql':
+      case 'mariadb':
+        return `mysql://${user}:${pass}@${host}:${port}/${db.dbName}`;
+      case 'redis':
+        return `redis://:${pass}@${host}:${port}`;
+      case 'mongodb':
+        return `mongodb://${user}:${pass}@${host}:${port}/${db.dbName}?authSource=admin`;
+      default:
+        return `${db.type}://${user}:${pass}@${host}:${port}/${db.dbName}`;
+    }
+  }
+
+  /** Conventional environment variable name for each engine. */
+  private static envVarName(type: DatabaseRecord['type']): string {
+    switch (type) {
+      case 'redis':
+        return 'REDIS_URL';
+      case 'mongodb':
+        return 'MONGODB_URI';
+      default:
+        return 'DATABASE_URL';
+    }
+  }
+
   /** Returns the decrypted credentials for a single database. */
   static getCredentials(id: string): {
     dbUser: string;
     dbPassword: string;
     dbName: string;
+    containerName: string;
+    internalPort: number;
+    hostPort: number;
     connectionString: string;
+    internalConnectionString: string;
+    envVarName: string;
+    envLine: string;
   } {
     const db = dbStorage.getDatabaseById(id);
     if (!db) throw new Error('Banco de dados não encontrado');
@@ -49,13 +97,32 @@ export class DatabaseService {
       );
     }
 
+    const containerName = containerNameForDatabase(db.name);
+    const envVarName = this.envVarName(db.type);
+
+    // Container-to-container URI. Applications deployed by the panel share the
+    // aegis network with their databases, so addressing the container by name
+    // on its internal port keeps the traffic off the host and stays correct if
+    // the published host port is ever changed.
+    const internalConnectionString = this.buildUri(db, containerName, db.internalPort, password);
+
+    // Host-facing URI, for connecting from outside Docker (a local client, a
+    // migration run from a laptop). HOST_IP is substituted by the frontend.
+    const connectionString = db.connectionString.includes('***ENCRYPTED***')
+      ? db.connectionString.replace('***ENCRYPTED***', password)
+      : this.buildUri(db, 'HOST_IP', db.port, password);
+
     return {
       dbUser: db.dbUser,
       dbPassword: password,
       dbName: db.dbName,
-      connectionString: db.connectionString.includes('***ENCRYPTED***')
-        ? db.connectionString.replace('***ENCRYPTED***', password)
-        : db.connectionString,
+      containerName,
+      internalPort: db.internalPort,
+      hostPort: db.port,
+      connectionString,
+      internalConnectionString,
+      envVarName,
+      envLine: `${envVarName}=${internalConnectionString}`,
     };
   }
 
@@ -70,7 +137,7 @@ export class DatabaseService {
 
   static async createDatabase(dto: CreateDbDTO): Promise<DatabaseRecord> {
     const id = `db-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
-    const containerName = `aegis-db-${dto.name.toLowerCase().replace(/[^a-z0-9_-]/g, '')}`;
+    const containerName = containerNameForDatabase(dto.name);
     const dataPath = path.join(CONFIG.DATA_DIR, 'databases', dto.name);
 
     if (!fs.existsSync(dataPath)) {

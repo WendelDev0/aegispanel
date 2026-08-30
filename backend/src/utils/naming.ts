@@ -16,3 +16,7 @@ export function normalizeDomain(domain?: string): string | undefined {
   const clean = domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   return clean || undefined;
 }
+
+export function containerNameForDatabase(dbName: string): string {
+  return `aegis-db-${dbName.toLowerCase().replace(/[^a-z0-9_-]/g, '')}`;
+}

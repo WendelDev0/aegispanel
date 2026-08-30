@@ -31,6 +31,8 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedEnvId, setCopiedEnvId] = useState<string | null>(null);
+  const [showEnvMap, setShowEnvMap] = useState<Record<string, boolean>>({});
   const [backupSuccessId, setBackupSuccessId] = useState<string | null>(null);
   const [showPasswordMap, setShowPasswordMap] = useState<Record<string, boolean>>({});
 
@@ -175,15 +177,27 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
    * only when the user explicitly asks to see or copy it, and is kept in
    * component state rather than being refetched on every render.
    */
-  const [credentialsMap, setCredentialsMap] = useState<Record<string, string>>({});
+  interface DbCredentials {
+    dbUser: string;
+    dbPassword: string;
+    dbName: string;
+    containerName: string;
+    internalPort: number;
+    hostPort: number;
+    connectionString: string;
+    internalConnectionString: string;
+    envVarName: string;
+    envLine: string;
+  }
 
-  const fetchConnectionString = async (id: string): Promise<string | null> => {
+  const [credentialsMap, setCredentialsMap] = useState<Record<string, DbCredentials>>({});
+
+  const fetchCredentials = async (id: string): Promise<DbCredentials | null> => {
     if (credentialsMap[id]) return credentialsMap[id];
     try {
       const res = await api.get(`/databases/${id}/credentials`);
-      const conn: string = res.data.connectionString;
-      setCredentialsMap(prev => ({ ...prev, [id]: conn }));
-      return conn;
+      setCredentialsMap(prev => ({ ...prev, [id]: res.data }));
+      return res.data as DbCredentials;
     } catch (err: any) {
       alert('Não foi possível obter as credenciais: ' + (err.response?.data?.error || err.message));
       return null;
@@ -191,21 +205,40 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
   };
 
   const copyConnectionString = async (id: string) => {
-    const conn = await fetchConnectionString(id);
-    if (!conn) return;
+    const creds = await fetchCredentials(id);
+    if (!creds) return;
     const host = window.location.hostname || 'localhost';
-    navigator.clipboard.writeText(conn.replace('HOST_IP', host));
+    navigator.clipboard.writeText(creds.connectionString.replace('HOST_IP', host));
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  /**
+   * Copies the line to paste straight into an application's .env, already
+   * addressed to the database container on the shared Docker network.
+   */
+  const copyEnvLine = async (id: string) => {
+    const creds = await fetchCredentials(id);
+    if (!creds) return;
+    navigator.clipboard.writeText(creds.envLine);
+    setCopiedEnvId(id);
+    setTimeout(() => setCopiedEnvId(null), 2000);
   };
 
   const togglePasswordVisibility = async (id: string) => {
     const willShow = !showPasswordMap[id];
     if (willShow && !credentialsMap[id]) {
-      const conn = await fetchConnectionString(id);
-      if (!conn) return;
+      if (!(await fetchCredentials(id))) return;
     }
     setShowPasswordMap(prev => ({ ...prev, [id]: willShow }));
+  };
+
+  const toggleEnvBlock = async (id: string) => {
+    const willShow = !showEnvMap[id];
+    if (willShow && !credentialsMap[id]) {
+      if (!(await fetchCredentials(id))) return;
+    }
+    setShowEnvMap(prev => ({ ...prev, [id]: willShow }));
   };
 
   // Password strength calculation
@@ -296,9 +329,11 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
             const isPassVisible = showPasswordMap[db.id] || false;
             // The listing carries a masked string; the revealed value comes
             // from the credentials endpoint.
+            const creds = credentialsMap[db.id];
             const displayConn = (
-              isPassVisible && credentialsMap[db.id] ? credentialsMap[db.id] : db.connectionString
+              isPassVisible && creds ? creds.connectionString : db.connectionString
             ).replace('HOST_IP', host);
+            const isEnvVisible = showEnvMap[db.id] || false;
 
             return (
               <div
@@ -380,6 +415,55 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                         )}
                       </button>
                     </div>
+                    <p className="text-[10px] text-slate-500">
+                      Use esta string para conectar de fora do Docker (cliente local, migration na sua máquina).
+                    </p>
+                  </div>
+
+                  {/* Ready-to-paste .env line, addressed to the container on the shared network */}
+                  <div className="space-y-2 mb-4">
+                    <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                      <span>Para colar no .env da aplicação</span>
+                      <button
+                        onClick={() => toggleEnvBlock(db.id)}
+                        className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-sans capitalize text-[11px]"
+                      >
+                        {isEnvVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        {isEnvVisible ? 'Ocultar' : 'Revelar'}
+                      </button>
+                    </div>
+
+                    <div className="flex items-start gap-2 bg-slate-950 p-2.5 rounded-xl border border-indigo-500/30 font-mono text-xs text-indigo-200">
+                      <span className="flex-1 break-all select-all">
+                        {isEnvVisible && creds
+                          ? creds.envLine
+                          : `${creds?.envVarName || 'DATABASE_URL'}=••••••••••••••••••••••••`}
+                      </span>
+                      <button
+                        onClick={() => copyEnvLine(db.id)}
+                        className="p-1.5 rounded-lg bg-indigo-600/80 hover:bg-indigo-500 text-white transition-colors shrink-0 flex items-center gap-1 text-[11px] font-sans font-semibold"
+                        title="Copiar a linha pronta para o .env da aplicação"
+                      >
+                        {copiedEnvId === db.id ? (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Copiado</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copiar</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <p className="text-[10px] text-slate-500">
+                      Aponta para o contêiner <span className="font-mono text-slate-400">{creds?.containerName || `aegis-db-${db.name.toLowerCase().replace(/[^a-z0-9_-]/g, '')}`}</span>{' '}
+                      na porta interna {creds?.internalPort || db.internalPort}. Suas aplicações estão na mesma rede
+                      Docker, então o tráfego não passa pelo host e a string continua válida se a porta pública mudar.
+                      Cole em <strong>Aplicações &rarr; variáveis .env</strong>.
+                    </p>
                   </div>
 
                   {/* Metadata Credentials Info */}
