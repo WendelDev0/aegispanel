@@ -598,10 +598,10 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Layers className="w-6 h-6 text-indigo-400" />
+            <Layers className="w-6 h-6 text-primary" />
             Aplicações & CI/CD — Experiência Cloud Profissional (Aegis Style)
           </h2>
-          <p className="text-sm text-slate-400 mt-1">
+          <p className="text-sm text-on-surface-variant mt-1">
             Controle de ponta a ponta dos seus projetos com deploy em tempo real, rollback instantâneo, repositórios públicos e privados do GitHub e domínios com SSL.
           </p>
         </div>
@@ -610,7 +610,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
           <button
             onClick={() => setShowAiHelpModal(true)}
             title="Copie o prompt para a sua IA (ChatGPT, Claude, Cursor, v0) preparar o projeto para o AegisPanel"
-            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 font-semibold text-xs border border-purple-500/40 shadow-lg shadow-purple-600/10 transition-all active:scale-95 shrink-0"
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 font-semibold text-xs border border-purple-500/40 transition-all active:scale-95 shrink-0"
           >
             <Sparkles className="w-4 h-4 text-purple-400" />
             <span>Prompt para IA ✨</span>
@@ -619,7 +619,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
           <button
             onClick={() => setShowCreateModal(true)}
             title="Fazer deploy de um novo projeto do GitHub (Público ou Privado) ou Imagem Docker"
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all active:scale-95 shrink-0"
+            className="flex items-center gap-2 px-4 py-2.5 rounded bg-primary-container hover:bg-primary text-white font-semibold text-sm transition-all active:scale-95 shrink-0"
           >
             <Plus className="w-4 h-4" />
             Novo Deploy / Projeto
@@ -630,22 +630,22 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       {/* Search & Stats Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-on-surface-variant absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             placeholder="Buscar por nome do app, domínio, branch ou porta..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-[#0f172a] border border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+            className="w-full bg-surface-container border border-outline-variant rounded-lg pl-10 pr-4 py-2.5 text-xs text-white placeholder-on-surface-variant/50 focus:outline-none focus:border-primary transition-colors"
           />
         </div>
 
-        <div className="flex items-center gap-3 text-xs font-mono text-slate-400">
-          <span className="bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl flex items-center gap-2">
+        <div className="flex items-center gap-3 text-xs font-mono text-on-surface-variant">
+          <span className="bg-surface-container-low border border-outline-variant px-3 py-1.5 rounded flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
             Online: <strong className="text-white">{apps.filter(a => a.status === 'running').length}</strong>
           </span>
-          <span className="bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl">
+          <span className="bg-surface-container-low border border-outline-variant px-3 py-1.5 rounded">
             Total Apps: <strong className="text-white">{apps.length}</strong>
           </span>
         </div>
@@ -653,21 +653,21 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
       {/* Apps Grid */}
       {loading ? (
-        <div className="flex items-center justify-center p-16 text-slate-400">
-          <RefreshCw className="w-6 h-6 animate-spin text-indigo-400" />
+        <div className="flex items-center justify-center p-16 text-on-surface-variant">
+          <RefreshCw className="w-6 h-6 animate-spin text-primary" />
         </div>
       ) : filteredApps.length === 0 ? (
-        <div className="bg-[#0f172a]/60 rounded-3xl p-12 border border-slate-800 text-center">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mx-auto mb-4">
+        <div className="bg-surface-container rounded-lg p-12 border border-outline-variant text-center">
+          <div className="w-12 h-12 rounded-lg bg-primary/10 text-primary flex items-center justify-center mx-auto mb-4">
             <Layers className="w-6 h-6" />
           </div>
           <h3 className="text-lg font-bold text-white mb-1">Nenhuma aplicação encontrada</h3>
-          <p className="text-sm text-slate-400 max-w-md mx-auto mb-6">
+          <p className="text-sm text-on-surface-variant max-w-md mx-auto mb-6">
             Conecte seu repositório do GitHub ou escolha uma imagem Docker para fazer seu primeiro deploy.
           </p>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm inline-flex items-center gap-2 shadow-lg shadow-indigo-600/30"
+            className="px-5 py-2.5 rounded bg-primary-container hover:bg-primary text-white font-semibold text-sm inline-flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
             Criar Primeiro Deploy
@@ -678,13 +678,13 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
           {filteredApps.map((app) => (
             <div
               key={app.id}
-              className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 hover:border-indigo-500/50 transition-all flex flex-col justify-between shadow-xl space-y-4"
+              className="bg-surface-container rounded-lg p-6 border border-outline-variant hover:border-primary/50 transition-all flex flex-col justify-between space-y-4"
             >
               <div>
                 {/* Header: Title + Status + Branch */}
                 <div className="flex items-start justify-between gap-3 mb-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center font-bold shadow-inner">
+                    <div className="w-12 h-12 rounded-lg bg-primary/10 text-primary border border-primary/25 flex items-center justify-center font-bold">
                       <Code className="w-6 h-6" />
                     </div>
                     <div>
@@ -693,21 +693,21 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                           {app.name}
                         </h3>
                         {app.sourceType === 'git' ? (
-                          <span className="text-[10px] font-mono text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded-md flex items-center gap-1 border border-indigo-500/30">
+                          <span className="text-[10px] font-mono text-primary bg-primary/20 px-2 py-0.5 rounded-md flex items-center gap-1 border border-primary/30">
                             <GitBranch className="w-3 h-3" /> {app.branch || 'main'}
                             {app.hasGithubToken && (
                               <span title="Repositório Privado com Token">
-                                <Lock className="w-2.5 h-2.5 text-amber-400" />
+                                <Lock className="w-2.5 h-2.5 text-warn" />
                               </span>
                             )}
                           </span>
                         ) : (
-                          <span className="text-[10px] font-mono text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
+                          <span className="text-[10px] font-mono text-warn bg-warn/10 px-2 py-0.5 rounded-md border border-warn/30">
                             Docker Image
                           </span>
                         )}
                       </div>
-                      <p className="text-xs font-mono text-slate-400 truncate max-w-xs mt-0.5">
+                      <p className="text-xs font-mono text-on-surface-variant truncate max-w-xs mt-0.5">
                         {app.gitUrl || app.imageName}
                       </p>
                     </div>
@@ -716,13 +716,13 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   <span
                     className={`text-xs px-3 py-1 rounded-full font-semibold flex items-center gap-1.5 shrink-0 ${
                       app.status === 'running'
-                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                        : 'bg-slate-800 text-slate-400 border border-slate-700'
+                        ? 'bg-ok/10 text-ok border border-ok/30'
+                        : 'bg-surface-container-high text-on-surface-variant border border-outline-variant'
                     }`}
                   >
                     <span
                       className={`w-2 h-2 rounded-full ${
-                        app.status === 'running' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                        app.status === 'running' ? 'bg-emerald-400 animate-pulse' : 'bg-outline'
                       }`}
                     ></span>
                     {app.status === 'running' ? 'Online' : 'Parado'}
@@ -732,21 +732,21 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                 {/* Direct VPS IP + Port Access Banner */}
                 <div className="mb-4">
                   {(() => {
-                    const currentHost = window.location.hostname || '13.140.41.82';
+                    const currentHost = window.location.hostname || 'localhost';
                     const directUrl = `http://${currentHost}:${app.port}`;
                     return (
                       <a
                         href={directUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl bg-emerald-950/40 hover:bg-emerald-950/60 text-emerald-300 border border-emerald-500/30 transition-all group shadow-lg"
+                        className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg bg-emerald-950/40 hover:bg-emerald-950/60 text-ok border border-ok/30 transition-all group"
                       >
                         <div className="flex items-center gap-2 text-xs font-mono font-bold">
                           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                          <span className="text-emerald-400">🌐 Acesso Direto (IP:Porta):</span>
+                          <span className="text-ok">🌐 Acesso Direto (IP:Porta):</span>
                           <span className="text-white underline underline-offset-2">{directUrl}</span>
                         </div>
-                        <span className="text-xs flex items-center gap-1 font-sans font-semibold text-emerald-400 group-hover:translate-x-0.5 transition-transform">
+                        <span className="text-xs flex items-center gap-1 font-sans font-semibold text-ok group-hover:translate-x-0.5 transition-transform">
                           Abrir Site &rarr;
                         </span>
                       </a>
@@ -755,11 +755,11 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                 </div>
 
                 {/* Domain & Network Section */}
-                <div className="bg-slate-950/80 rounded-2xl p-4 border border-slate-800/80 space-y-2.5 text-xs font-mono mb-4">
+                <div className="bg-surface-container-lowest/80 rounded-lg p-4 border border-outline-variant space-y-2.5 text-xs font-mono mb-4">
                   {/* Assigned Domain */}
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-400 flex items-center gap-1.5">
-                      <Globe className="w-3.5 h-3.5 text-indigo-400" /> Domínio Hostinger / SSL:
+                    <span className="text-on-surface-variant flex items-center gap-1.5">
+                      <Globe className="w-3.5 h-3.5 text-primary" /> Domínio Hostinger / SSL:
                     </span>
                     {app.domain ? (
                       <div className="flex items-center gap-2">
@@ -767,16 +767,16 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                           href={`https://${app.domain}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="text-emerald-400 hover:underline flex items-center gap-1 font-bold"
+                          className="text-ok hover:underline flex items-center gap-1 font-bold"
                         >
-                          <Lock className="w-3 h-3 text-emerald-400" />
+                          <Lock className="w-3 h-3 text-ok" />
                           {app.domain}
                           <ExternalLink className="w-3 h-3" />
                         </a>
                         <button
                           onClick={() => openDomainModal(app)}
                           title="Alterar domínio ou subdomínio"
-                          className="text-[10px] text-slate-500 hover:text-white"
+                          className="text-[10px] text-on-surface-variant/70 hover:text-white"
                         >
                           (Editar)
                         </button>
@@ -784,7 +784,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                     ) : (
                       <button
                         onClick={() => openDomainModal(app)}
-                        className="text-indigo-400 hover:text-indigo-300 hover:underline font-sans text-xs flex items-center gap-1"
+                        className="text-primary hover:text-primary hover:underline font-sans text-xs flex items-center gap-1"
                       >
                         + Vincular Domínio Hostinger
                       </button>
@@ -792,16 +792,16 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   </div>
 
                   {/* Port Mapping with Edit shortcut */}
-                  <div className="flex items-center justify-between text-slate-400">
+                  <div className="flex items-center justify-between text-on-surface-variant">
                     <span>Mapeamento de Portas:</span>
                     <div className="flex items-center gap-2">
-                      <span className="text-slate-200 font-semibold select-all">
-                        Host <strong className="text-emerald-400">:{app.port}</strong> &rarr; Container :{app.internalPort}
+                      <span className="text-on-surface font-semibold select-all">
+                        Host <strong className="text-ok">:{app.port}</strong> &rarr; Container :{app.internalPort}
                       </span>
                       <button
                         onClick={() => openEditModal(app)}
                         title="Mudar porta do host (ex: 5000, 8080)"
-                        className="text-[11px] text-indigo-400 hover:underline font-sans"
+                        className="text-[11px] text-primary hover:underline font-sans"
                       >
                         (Mudar Porta)
                       </button>
@@ -809,13 +809,13 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   </div>
 
                   {/* Environment Variables Count */}
-                  <div className="flex items-center justify-between text-slate-400 pt-1 border-t border-slate-800/60">
+                  <div className="flex items-center justify-between text-on-surface-variant pt-1 border-t border-outline-variant">
                     <span className="flex items-center gap-1">
-                      <Sliders className="w-3.5 h-3.5 text-amber-400" /> Variáveis de Ambiente:
+                      <Sliders className="w-3.5 h-3.5 text-warn" /> Variáveis de Ambiente:
                     </span>
                     <button
                       onClick={() => openEnvModal(app)}
-                      className="text-amber-400 hover:underline font-sans text-xs font-semibold flex items-center gap-1"
+                      className="text-warn hover:underline font-sans text-xs font-semibold flex items-center gap-1"
                     >
                       {Object.keys(app.env || {}).length} variável(is) .env &rarr; Editar
                     </button>
@@ -824,28 +824,28 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
                 {/* Vercel-Style Git Commit & Deploy Status Card */}
                 {app.sourceType === 'git' && (
-                  <div className="bg-slate-950/90 rounded-2xl p-3.5 border border-indigo-500/20 space-y-2 mb-4">
+                  <div className="bg-surface-container-lowest/90 rounded-lg p-3.5 border border-primary/25 space-y-2 mb-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5 text-xs">
-                        <GitCommit className="w-4 h-4 text-indigo-400" />
+                        <GitCommit className="w-4 h-4 text-primary" />
                         <span className="font-bold text-white">Último Commit Real:</span>
                       </div>
                       {app.lastCommitHash && (
-                        <span className="text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/30">
+                        <span className="text-[10px] font-mono font-bold bg-primary/20 text-primary px-2 py-0.5 rounded border border-primary/30">
                           #{app.lastCommitHash}
                         </span>
                       )}
                     </div>
                     
-                    <div className="text-xs text-slate-200 font-medium line-clamp-2 pl-5 border-l-2 border-indigo-500/40">
+                    <div className="text-xs text-on-surface font-medium line-clamp-2 pl-5 border-l-2 border-primary/40">
                       "{app.lastCommitMessage || 'Deploy inicial realizado com sucesso'}"
                     </div>
                     
-                    <div className="flex items-center justify-between text-[11px] text-slate-400 pl-5 pt-0.5">
+                    <div className="flex items-center justify-between text-[11px] text-on-surface-variant pl-5 pt-0.5">
                       <span className="flex items-center gap-1">
-                        <User className="w-3 h-3 text-slate-500" /> {app.lastCommitAuthor || 'Wendel Dev'}
+                        <User className="w-3 h-3 text-on-surface-variant/70" /> {app.lastCommitAuthor || 'Wendel Dev'}
                       </span>
-                      <span className="text-[10px] text-slate-500 font-mono">
+                      <span className="text-[10px] text-on-surface-variant/70 font-mono">
                         {app.lastDeployAt ? new Date(app.lastDeployAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'Recente'}
                       </span>
                     </div>
@@ -857,7 +857,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   <button
                     onClick={() => openDeploymentsHistory(app)}
                     title="Ver histórico de todos os builds e deploys anteriores"
-                    className="text-emerald-400 hover:underline flex items-center gap-1 font-mono text-[11px]"
+                    className="text-ok hover:underline flex items-center gap-1 font-mono text-[11px]"
                   >
                     <Clock className="w-3.5 h-3.5" /> Histórico de Builds
                   </button>
@@ -865,7 +865,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   <button
                     onClick={() => openWorkflowModal(app)}
                     title="Ver arquivo de configuração do GitHub Actions"
-                    className="text-indigo-400 hover:underline flex items-center gap-1 font-mono text-[11px]"
+                    className="text-primary hover:underline flex items-center gap-1 font-mono text-[11px]"
                   >
                     <FileCode2 className="w-3.5 h-3.5" /> GitHub Actions YAML
                   </button>
@@ -873,14 +873,14 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                                     <button
                     onClick={() => onOpenAnalytics?.(app.id)}
                     title="Ver analytics: visitas, países de origem e erros"
-                    className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-emerald-400 transition-colors"
+                    className="p-2 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-ok transition-colors"
                   >
                     <Globe2 className="w-4 h-4" />
                   </button>
 <button
                     onClick={() => openWebhookModal(app)}
                     title="Copiar URL de Webhook para Auto-Deploy"
-                    className="text-cyan-400 hover:underline flex items-center gap-1 font-mono text-[11px]"
+                    className="text-tertiary hover:underline flex items-center gap-1 font-mono text-[11px]"
                   >
                     <Webhook className="w-3.5 h-3.5" /> Webhook URL
                   </button>
@@ -888,14 +888,14 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
               </div>
 
               {/* Action Buttons Row */}
-              <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between gap-2">
+              <div className="pt-4 border-t border-outline-variant flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 flex-wrap">
                   {/* Deploy Button */}
                   <button
                     onClick={() => handleTriggerDeploy(app)}
                     disabled={deployingId === app.id}
                     title="Disparar novo deploy agora (Git Pull & Rebuild)"
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 transition-all active:scale-95 disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded bg-primary-container hover:bg-primary text-white text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
                   >
                     <Zap className={`w-3.5 h-3.5 ${deployingId === app.id ? 'animate-bounce' : ''}`} />
                     <span>{deployingId === app.id ? 'Buildando...' : 'Deploy'}</span>
@@ -905,7 +905,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   <button
                     onClick={() => openEditModal(app)}
                     title="Editar configurações (Porta, Nome, Imagem, Token GitHub)"
-                    className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"
+                    className="p-2 rounded bg-surface-container-high text-on-surface-variant hover:text-white hover:bg-surface-container-highest transition-colors"
                   >
                     <Settings2 className="w-4 h-4" />
                   </button>
@@ -914,9 +914,9 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   <button
                     onClick={() => openFilesModal(app)}
                     title="Explorar e editar arquivos do código-fonte da aplicação"
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-semibold border border-outline-variant transition-colors"
                   >
-                    <FolderTree className="w-3.5 h-3.5 text-amber-400" />
+                    <FolderTree className="w-3.5 h-3.5 text-warn" />
                     <span>Arquivos</span>
                   </button>
 
@@ -925,7 +925,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                     <button
                       onClick={() => handleStop(app.id)}
                       title="Parar aplicação"
-                      className="p-2 rounded-xl bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors"
+                      className="p-2 rounded bg-warn/10 text-warn hover:bg-warn/15 transition-colors"
                     >
                       <Square className="w-4 h-4" />
                     </button>
@@ -933,7 +933,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                     <button
                       onClick={() => handleStart(app.id)}
                       title="Iniciar aplicação"
-                      className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                      className="p-2 rounded bg-ok/10 text-ok hover:bg-ok/15 transition-colors"
                     >
                       <Play className="w-4 h-4" />
                     </button>
@@ -943,7 +943,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   <button
                     onClick={() => handleRestart(app.id)}
                     title="Reiniciar contêiner da aplicação"
-                    className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
+                    className="p-2 rounded bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest transition-colors"
                   >
                     <RefreshCw className="w-4 h-4" />
                   </button>
@@ -952,9 +952,9 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   <button
                     onClick={() => openLogs(app)}
                     title="Visualizar logs em tempo real da aplicação"
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-white text-xs font-medium transition-colors"
                   >
-                    <FileText className="w-3.5 h-3.5 text-indigo-400" />
+                    <FileText className="w-3.5 h-3.5 text-primary" />
                     Logs
                   </button>
                 </div>
@@ -963,7 +963,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                 <button
                   onClick={() => handleDelete(app.id, app.name)}
                   title="Deletar aplicação permanentemente"
-                  className="p-2 rounded-xl text-rose-400 hover:bg-rose-500/10 transition-colors"
+                  className="p-2 rounded text-crit hover:bg-crit/10 transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -976,20 +976,20 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       {/* Modal: Editar Configurações & Porta da Aplicação */}
       {selectedEditApp && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-lg overflow-hidden shadow-2xl p-6 space-y-4 max-h-[85vh] overflow-y-auto custom-scrollbar">
+          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-lg overflow-hidden p-6 space-y-4 max-h-[85vh] overflow-y-auto custom-scrollbar">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Settings2 className="w-5 h-5 text-indigo-400" />
+                <Settings2 className="w-5 h-5 text-primary" />
                 <h3 className="font-bold text-white text-base">Configurações: {selectedEditApp.name}</h3>
               </div>
-              <button onClick={() => setSelectedEditApp(null)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setSelectedEditApp(null)} className="text-on-surface-variant hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSaveEdit} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                   Nome da Aplicação *
                 </label>
                 <input
@@ -997,13 +997,13 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   required
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                     Porta no Host
                   </label>
                   <input
@@ -1011,15 +1011,15 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                     placeholder="Automática"
                     value={editPort}
                     onChange={(e) => setEditPort(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-200 font-mono text-sm focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3.5 py-2.5 text-on-surface font-mono text-sm focus:outline-none focus:border-primary"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">
+                  <p className="text-[10px] text-on-surface-variant/70 mt-1">
                     Vazio = automática. Um valor fixa a porta e o painel nunca a move sozinho.
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                     Porta Interna
                   </label>
                   <input
@@ -1027,7 +1027,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                     required
                     value={editInternalPort}
                     onChange={(e) => setEditInternalPort(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-primary"
                   />
                 </div>
               </div>
@@ -1035,7 +1035,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
               {selectedEditApp.sourceType === 'git' && (
                 <>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                       URL do Repositório GitHub
                     </label>
                     <input
@@ -1043,19 +1043,19 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                       required
                       value={editGitUrl}
                       onChange={(e) => setEditGitUrl(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
+                      className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-primary"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                    <label className="block text-xs font-semibold text-warn uppercase tracking-wider mb-1.5 flex items-center justify-between">
                       <span className="flex items-center gap-1.5">
                         <Lock className="w-3.5 h-3.5" /> GitHub Token (PAT para Repositórios Privados)
                       </span>
                       <button
                         type="button"
                         onClick={() => setShowTokenEdit(!showTokenEdit)}
-                        className="text-[10px] text-slate-400 hover:text-white"
+                        className="text-[10px] text-on-surface-variant hover:text-white"
                       >
                         {showTokenEdit ? 'Ocultar' : 'Mostrar'}
                       </button>
@@ -1065,15 +1065,15 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                       placeholder="ghp_seu_token_aqui (necessário para repos privados)"
                       value={editGithubToken}
                       onChange={(e) => setEditGithubToken(e.target.value)}
-                      className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-3.5 py-2.5 text-amber-300 font-mono text-xs focus:outline-none focus:border-amber-500"
+                      className="w-full bg-surface-container-lowest border border-warn/30 rounded px-3.5 py-2.5 text-warn font-mono text-xs focus:outline-none focus:border-amber-500"
                     />
-                    <p className="text-[10px] text-slate-500 mt-1">
+                    <p className="text-[10px] text-on-surface-variant/70 mt-1">
                       💡 Para repositórios privados, crie um token em GitHub &rarr; Settings &rarr; Developer Settings &rarr; Personal Access Tokens (classic) com permissão <code>repo</code>.
                     </p>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                       Branch de Deploy
                     </label>
                     <input
@@ -1081,7 +1081,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                       required
                       value={editBranch}
                       onChange={(e) => setEditBranch(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
+                      className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-primary"
                     />
                   </div>
                 </>
@@ -1089,7 +1089,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
               {selectedEditApp.sourceType === 'image' && (
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                     Imagem Docker *
                   </label>
                   <input
@@ -1097,7 +1097,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                     required
                     value={editImageName}
                     onChange={(e) => setEditImageName(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-primary"
                   />
                 </div>
               )}
@@ -1106,14 +1106,14 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                 <button
                   type="button"
                   onClick={() => setSelectedEditApp(null)}
-                  className="px-4 py-2 text-slate-400 hover:text-white text-xs font-medium"
+                  className="px-4 py-2 text-on-surface-variant hover:text-white text-xs font-medium"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={savingEdit}
-                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/30 transition-all active:scale-95 disabled:opacity-50"
+                  className="px-5 py-2.5 bg-ok/90 hover:bg-ok text-white rounded text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
                 >
                   {savingEdit ? 'Salvando & Aplicando...' : 'Salvar & Fazer Deploy'}
                 </button>
@@ -1126,19 +1126,19 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       {/* Modal: Editar Variáveis de Ambiente (.env) */}
       {selectedEnvApp && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-lg overflow-hidden shadow-2xl p-6 space-y-4">
+          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-lg overflow-hidden p-6 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Sliders className="w-5 h-5 text-amber-400" />
+                <Sliders className="w-5 h-5 text-warn" />
                 <h3 className="font-bold text-white text-base">Variáveis de Ambiente (.env): {selectedEnvApp.name}</h3>
               </div>
-              <button onClick={() => setSelectedEnvApp(null)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setSelectedEnvApp(null)} className="text-on-surface-variant hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <p className="text-xs text-slate-300">
-              Edite as chaves e valores no formato <code className="text-amber-300 font-mono">CHAVE=VALOR</code> (uma por linha):
+            <p className="text-xs text-on-surface-variant">
+              Edite as chaves e valores no formato <code className="text-warn font-mono">CHAVE=VALOR</code> (uma por linha):
             </p>
 
             <textarea
@@ -1146,21 +1146,21 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
               value={envString}
               onChange={(e) => setEnvString(e.target.value)}
               placeholder="DATABASE_URL=postgresql://...&#10;JWT_SECRET=...&#10;NODE_ENV=production"
-              className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs font-mono text-emerald-300 focus:outline-none focus:border-indigo-500 leading-relaxed"
+              className="w-full bg-surface-container-lowest border border-outline-variant rounded-lg p-4 text-xs font-mono text-ok focus:outline-none focus:border-primary leading-relaxed"
             />
 
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setSelectedEnvApp(null)}
-                className="px-4 py-2 text-slate-400 hover:text-white text-xs font-medium"
+                className="px-4 py-2 text-on-surface-variant hover:text-white text-xs font-medium"
               >
                 Cancelar
               </button>
               <button
                 onClick={() => handleSaveEnv(true)}
                 disabled={savingEnv}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/30 transition-all active:scale-95 disabled:opacity-50"
+                className="px-5 py-2.5 bg-primary-container hover:bg-primary text-white rounded text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
               >
                 {savingEnv ? 'Salvando & Reiniciando...' : 'Salvar & Aplicar (.env)'}
               </button>
@@ -1172,23 +1172,23 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       {/* Modal: Vincular Domínio & Subdomínio */}
       {selectedDomainApp && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-md overflow-hidden shadow-2xl p-6 space-y-4">
+          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-md overflow-hidden p-6 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Globe className="w-5 h-5 text-indigo-400" />
+                <Globe className="w-5 h-5 text-primary" />
                 <h3 className="font-bold text-white text-base">Domínio / Subdomínio (Hostinger)</h3>
               </div>
-              <button onClick={() => setSelectedDomainApp(null)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setSelectedDomainApp(null)} className="text-on-surface-variant hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <p className="text-xs text-slate-300">
-              Digite o domínio ou subdomínio que deseja apontar para este app (ex: <code className="text-indigo-300">api.meusite.com.br</code> ou <code className="text-indigo-300">meusite.com</code>):
+            <p className="text-xs text-on-surface-variant">
+              Digite o domínio ou subdomínio que deseja apontar para este app (ex: <code className="text-primary">api.meusite.com.br</code> ou <code className="text-primary">meusite.com</code>):
             </p>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase mb-1.5">
+              <label className="block text-xs font-semibold text-on-surface-variant uppercase mb-1.5">
                 Nome do Domínio *
               </label>
               <input
@@ -1197,9 +1197,9 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                 placeholder="ex: app.meusite.com.br"
                 value={domainInput}
                 onChange={(e) => setDomainInput(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-indigo-500"
+                className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-primary"
               />
-              <p className="text-[10px] text-slate-400 mt-1">
+              <p className="text-[10px] text-on-surface-variant mt-1">
                 🔒 O Caddy emitirá o certificado SSL (HTTPS com cadeado) automaticamente.
               </p>
             </div>
@@ -1208,14 +1208,14 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
               <button
                 type="button"
                 onClick={() => setSelectedDomainApp(null)}
-                className="px-4 py-2 text-slate-400 hover:text-white text-xs font-medium"
+                className="px-4 py-2 text-on-surface-variant hover:text-white text-xs font-medium"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleSaveDomain}
                 disabled={savingDomain}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/30 transition-all active:scale-95 disabled:opacity-50"
+                className="px-5 py-2.5 bg-primary-container hover:bg-primary text-white rounded text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
               >
                 {savingDomain ? 'Configurando SSL...' : 'Salvar Domínio'}
               </button>
@@ -1227,43 +1227,43 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       {/* Modal: Histórico de Deploys */}
       {selectedDeploymentsApp && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="p-5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-5 bg-surface-container-low/90 border-b border-outline-variant flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Clock className="w-5 h-5 text-emerald-400" />
+                <Clock className="w-5 h-5 text-ok" />
                 <span className="font-bold text-white text-sm">Histórico de Deploys: {selectedDeploymentsApp.name}</span>
               </div>
-              <button onClick={() => setSelectedDeploymentsApp(null)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setSelectedDeploymentsApp(null)} className="text-on-surface-variant hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="p-4 flex-1 overflow-y-auto space-y-3 custom-scrollbar">
               {deploymentsList.length === 0 ? (
-                <div className="text-center py-8 text-slate-500 text-xs">
+                <div className="text-center py-8 text-on-surface-variant/70 text-xs">
                   Nenhum registro de build anterior encontrado.
                 </div>
               ) : (
                 deploymentsList.map((dep) => (
                   <div
                     key={dep.id}
-                    className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between hover:border-slate-700 transition-colors"
+                    className="p-4 rounded-lg bg-surface-container-low border border-outline-variant flex items-center justify-between hover:border-outline-variant transition-colors"
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         {dep.status === 'success' ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          <CheckCircle2 className="w-4 h-4 text-ok" />
                         ) : dep.status === 'building' ? (
-                          <RefreshCw className="w-4 h-4 text-amber-400 animate-spin" />
+                          <RefreshCw className="w-4 h-4 text-warn animate-spin" />
                         ) : (
-                          <AlertCircle className="w-4 h-4 text-rose-400" />
+                          <AlertCircle className="w-4 h-4 text-crit" />
                         )}
-                        <span className="font-bold text-slate-200 text-xs">{dep.commitMessage || 'Deploy'}</span>
-                        <span className="text-[10px] font-mono text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded">
+                        <span className="font-bold text-on-surface text-xs">{dep.commitMessage || 'Deploy'}</span>
+                        <span className="text-[10px] font-mono text-primary bg-primary/20 px-2 py-0.5 rounded">
                           {dep.branch}
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-400 font-mono">
+                      <p className="text-[11px] text-on-surface-variant font-mono">
                         Por {dep.authorName} • {new Date(dep.createdAt).toLocaleString('pt-BR')} • {dep.durationSeconds}s
                       </p>
                     </div>
@@ -1272,7 +1272,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                       <button
                         onClick={() => setSelectedBuildLogs(dep)}
                         title="Ver saída de logs deste build"
-                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-semibold transition-colors"
+                        className="px-3 py-1.5 rounded bg-surface-container-high hover:bg-surface-container-highest text-primary text-xs font-semibold transition-colors"
                       >
                         Ver Logs
                       </button>
@@ -1282,7 +1282,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                           onClick={() => handleRollback(selectedDeploymentsApp.id, dep.id)}
                           disabled={rollingBackId === dep.id}
                           title="Reverter a aplicação para este commit/versão instantaneamente em 2 segundos"
-                          className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold transition-colors flex items-center gap-1 active:scale-95 disabled:opacity-50"
+                          className="px-3 py-1.5 rounded bg-warn/10 hover:bg-warn/15 text-warn border border-warn/30 text-xs font-semibold transition-colors flex items-center gap-1 active:scale-95 disabled:opacity-50"
                         >
                           <Clock className={`w-3.5 h-3.5 ${rollingBackId === dep.id ? 'animate-spin' : ''}`} />
                           <span>{rollingBackId === dep.id ? 'Revertendo...' : '⏪ Rollback'}</span>
@@ -1300,32 +1300,32 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       {/* Modal: GitHub Actions Workflow YAML */}
       {selectedWorkflowApp && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="p-5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-5 bg-surface-container-low/90 border-b border-outline-variant flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <FileCode2 className="w-5 h-5 text-indigo-400" />
+                <FileCode2 className="w-5 h-5 text-primary" />
                 <span className="font-bold text-white text-sm">GitHub Actions CI/CD Workflow</span>
               </div>
-              <button onClick={() => setSelectedWorkflowApp(null)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setSelectedWorkflowApp(null)} className="text-on-surface-variant hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="p-5 space-y-3">
-              <p className="text-xs text-slate-300">
-                Salve este código no seu repositório GitHub dentro de <code className="text-indigo-300 bg-slate-900 px-1.5 py-0.5 rounded font-mono">.github/workflows/deploy.yml</code>:
+              <p className="text-xs text-on-surface-variant">
+                Salve este código no seu repositório GitHub dentro de <code className="text-primary bg-surface-container-low px-1.5 py-0.5 rounded font-mono">.github/workflows/deploy.yml</code>:
               </p>
 
-              <div className="relative bg-slate-950 p-4 rounded-2xl border border-slate-800 font-mono text-xs text-emerald-400 overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-72">
+              <div className="relative bg-surface-container-lowest p-4 rounded-lg border border-outline-variant font-mono text-xs text-ok overflow-x-auto whitespace-pre-wrap leading-relaxed max-h-72">
                 {workflowYaml}
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   onClick={copyWorkflowYaml}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow transition-all active:scale-95"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-primary-container hover:bg-primary text-white rounded text-xs font-semibold shadow transition-all active:scale-95"
                 >
-                  {copiedWorkflow ? <Check className="w-4 h-4 text-emerald-300" /> : <Copy className="w-4 h-4" />}
+                  {copiedWorkflow ? <Check className="w-4 h-4 text-ok" /> : <Copy className="w-4 h-4" />}
                   <span>{copiedWorkflow ? 'Código Copiado!' : 'Copiar YAML'}</span>
                 </button>
               </div>
@@ -1337,18 +1337,18 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       {/* Modal: Build Logs Output */}
       {selectedBuildLogs && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0a0f1c] rounded-3xl border border-slate-800 w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="p-4 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+          <div className="bg-[#0a0f1c] rounded-lg border border-outline-variant w-full max-w-3xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-4 bg-surface-container-low/90 border-b border-outline-variant flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Terminal className="w-5 h-5 text-emerald-400" />
+                <Terminal className="w-5 h-5 text-ok" />
                 <span className="font-bold text-white text-sm">Build Output: {selectedBuildLogs.appName}</span>
               </div>
-              <button onClick={() => setSelectedBuildLogs(null)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setSelectedBuildLogs(null)} className="text-on-surface-variant hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-5 flex-1 overflow-auto font-mono text-xs text-emerald-300 bg-black/90 whitespace-pre-wrap leading-relaxed">
+            <div className="p-5 flex-1 overflow-auto font-mono text-xs text-ok bg-black/90 whitespace-pre-wrap leading-relaxed">
               {selectedBuildLogs.buildLogs || 'Nenhum log gravado para este build.'}
             </div>
           </div>
@@ -1358,18 +1358,18 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       {/* Modal: AI Prompt Generator (Vercel to AegisPanel) */}
       {showAiHelpModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-3xl border border-purple-500/40 w-full max-w-2xl overflow-hidden shadow-2xl p-6 space-y-4">
+          <div className="bg-surface-container rounded-lg border border-purple-500/40 w-full max-w-2xl overflow-hidden p-6 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-purple-500/20 text-purple-400">
+                <div className="p-2 rounded bg-purple-500/20 text-purple-400">
                   <Sparkles className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="font-bold text-white text-base">Prompt Mágico para IAs (Vercel ➔ AegisPanel)</h3>
-                  <p className="text-xs text-slate-400">Envie este prompt para sua IA (ChatGPT, Claude, Cursor, v0) preparar seu código.</p>
+                  <p className="text-xs text-on-surface-variant">Envie este prompt para sua IA (ChatGPT, Claude, Cursor, v0) preparar seu código.</p>
                 </div>
               </div>
-              <button onClick={() => setShowAiHelpModal(false)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setShowAiHelpModal(false)} className="text-on-surface-variant hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1377,7 +1377,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
             <textarea
               readOnly
               rows={10}
-              className="w-full bg-slate-950/90 border border-slate-800 rounded-2xl p-4 text-xs font-mono text-slate-200 focus:outline-none select-all custom-scrollbar leading-relaxed"
+              className="w-full bg-surface-container-lowest/90 border border-outline-variant rounded-lg p-4 text-xs font-mono text-on-surface focus:outline-none select-all custom-scrollbar leading-relaxed"
               value={`Estou hospedando meu projeto no painel AegisPanel (uma plataforma Cloud PaaS que roda em VPS Linux com Docker e Caddy).
 A maioria dos meus projetos foi inicialmente desenvolvida para a Vercel, mas agora preciso que você adapte e prepare todo o código para rodar no AegisPanel sem nenhum erro de build ou deploy:
 
@@ -1398,14 +1398,14 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
             />
 
             <div className="flex items-center justify-between pt-1">
-              <span className="text-[11px] text-slate-400 flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="text-[11px] text-on-surface-variant flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-primary" />
                 <span>Compatível com ChatGPT, Claude 3.5, Cursor e v0.</span>
               </span>
               <div className="flex gap-2">
                 <button
                   onClick={() => setShowAiHelpModal(false)}
-                  className="px-4 py-2 text-slate-400 hover:text-white text-xs font-semibold"
+                  className="px-4 py-2 text-on-surface-variant hover:text-white text-xs font-semibold"
                 >
                   Fechar
                 </button>
@@ -1431,9 +1431,9 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                     setCopiedAiPrompt(true);
                     setTimeout(() => setCopiedAiPrompt(false), 2000);
                   }}
-                  className="flex items-center gap-1.5 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-purple-600/30 transition-all active:scale-95"
+                  className="flex items-center gap-1.5 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded text-xs font-semibold transition-all active:scale-95"
                 >
-                  {copiedAiPrompt ? <Check className="w-4 h-4 text-emerald-300" /> : <Copy className="w-4 h-4" />}
+                  {copiedAiPrompt ? <Check className="w-4 h-4 text-ok" /> : <Copy className="w-4 h-4" />}
                   <span>{copiedAiPrompt ? 'Copiado com Sucesso!' : 'Copiar Prompt para Minha IA'}</span>
                 </button>
               </div>
@@ -1445,38 +1445,38 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
       {/* Modal: Webhook Info */}
       {selectedWebhookApp && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-lg overflow-hidden shadow-2xl p-6">
+          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-lg overflow-hidden p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-white text-base flex items-center gap-2">
-                <Webhook className="w-5 h-5 text-indigo-400" />
+                <Webhook className="w-5 h-5 text-primary" />
                 Webhook de Auto-Deploy do GitHub
               </h3>
-              <button onClick={() => setSelectedWebhookApp(null)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setSelectedWebhookApp(null)} className="text-on-surface-variant hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <p className="text-xs text-slate-300 mb-4">
+            <p className="text-xs text-on-surface-variant mb-4">
               No seu repositório GitHub, vá em <strong>Settings &rarr; Webhooks &rarr; Add Webhook</strong> e cole a Payload URL abaixo:
             </p>
 
             <div className="space-y-2 mb-4">
-              <label className="text-[11px] font-semibold text-slate-400 uppercase">Payload URL</label>
-              <div className="flex items-center gap-2 bg-slate-950 p-3 rounded-xl border border-slate-800 font-mono text-xs text-indigo-300">
+              <label className="text-[11px] font-semibold text-on-surface-variant uppercase">Payload URL</label>
+              <div className="flex items-center gap-2 bg-surface-container-lowest p-3 rounded border border-outline-variant font-mono text-xs text-primary">
                 <span className="truncate flex-1 select-all">
                   {webhookLoading ? 'Carregando...' : webhookUrl || 'Indisponível'}
                 </span>
                 <button
                   onClick={copyWebhookUrl}
                   title="Copiar URL do Webhook"
-                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                  className="p-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface"
                 >
-                  {copiedWebhook ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                  {copiedWebhook ? <Check className="w-4 h-4 text-ok" /> : <Copy className="w-4 h-4" />}
                 </button>
               </div>
             </div>
 
-            <p className="text-[11px] text-slate-400 mb-4">
+            <p className="text-[11px] text-on-surface-variant mb-4">
               Trate esta URL como uma senha: quem a possui pode disparar deploys desta aplicação.
               Se ela vazar, gere um novo segredo e atualize o webhook no GitHub.
             </p>
@@ -1485,13 +1485,13 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
               <button
                 onClick={() => rotateWebhookSecret(selectedWebhookApp)}
                 disabled={webhookLoading}
-                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 rounded-xl text-xs font-semibold"
+                className="px-4 py-2.5 bg-surface-container-high hover:bg-surface-container-highest disabled:opacity-50 text-on-surface rounded text-xs font-semibold"
               >
                 Gerar novo segredo
               </button>
               <button
                 onClick={() => setSelectedWebhookApp(null)}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold"
+                className="px-5 py-2.5 bg-primary-container hover:bg-primary text-white rounded text-xs font-semibold"
               >
                 Concluído
               </button>
@@ -1503,14 +1503,14 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
       {/* Modal: Live Deploy Streaming Progress Tracker (Aegis Style) */}
       {liveDeployModal && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#090d16] rounded-3xl border border-indigo-500/40 w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+          <div className="bg-surface-container-lowest rounded-lg border border-primary/40 w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* Header */}
-            <div className="p-5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+            <div className="p-5 bg-surface-container-low/90 border-b border-outline-variant flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-xl ${
-                  liveDeployModal.status === 'success' ? 'bg-emerald-500/20 text-emerald-400' :
-                  liveDeployModal.status === 'failed' ? 'bg-rose-500/20 text-rose-400' :
-                  'bg-indigo-500/20 text-indigo-400'
+                <div className={`p-2 rounded ${
+                  liveDeployModal.status === 'success' ? 'bg-ok/15 text-ok' :
+                  liveDeployModal.status === 'failed' ? 'bg-crit/15 text-crit' :
+                  'bg-primary/20 text-primary'
                 }`}>
                   <Zap className="w-5 h-5" />
                 </div>
@@ -1518,14 +1518,14 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                   <h3 className="font-bold text-white text-base flex items-center gap-2">
                     <span>Deploy em Tempo Real: {liveDeployModal.app.name}</span>
                     <span className={`text-xs px-2.5 py-0.5 rounded-full font-mono font-semibold ${
-                      liveDeployModal.status === 'success' ? 'bg-emerald-500/20 text-emerald-300' :
-                      liveDeployModal.status === 'failed' ? 'bg-rose-500/20 text-rose-300' :
-                      'bg-indigo-500/20 text-indigo-300 animate-pulse'
+                      liveDeployModal.status === 'success' ? 'bg-ok/15 text-ok' :
+                      liveDeployModal.status === 'failed' ? 'bg-crit/15 text-crit' :
+                      'bg-primary/20 text-primary animate-pulse'
                     }`}>
                       {liveDeployModal.status.toUpperCase()}
                     </span>
                   </h3>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-on-surface-variant">
                     Step {liveDeployModal.step}/5: {liveDeployModal.stepName}
                   </p>
                 </div>
@@ -1533,26 +1533,26 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
 
               <button
                 onClick={() => setLiveDeployModal(null)}
-                className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-colors"
+                className="text-on-surface-variant hover:text-white p-2 rounded hover:bg-surface-container-high transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Progress Bar */}
-            <div className="w-full bg-slate-950 h-2">
+            <div className="w-full bg-surface-container-lowest h-2">
               <div
                 className={`h-full transition-all duration-300 ${
-                  liveDeployModal.status === 'failed' ? 'bg-rose-500' :
-                  liveDeployModal.status === 'success' ? 'bg-emerald-500' :
-                  'bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-500'
+                  liveDeployModal.status === 'failed' ? 'bg-crit' :
+                  liveDeployModal.status === 'success' ? 'bg-ok' :
+                  'bg-primary-container'
                 }`}
                 style={{ width: `${liveDeployModal.percentage}%` }}
               />
             </div>
 
             {/* 5-Step Visual Stepper */}
-            <div className="p-4 bg-slate-950/80 border-b border-slate-800/80 grid grid-cols-5 gap-2 text-center text-[11px]">
+            <div className="p-4 bg-surface-container-lowest/80 border-b border-outline-variant grid grid-cols-5 gap-2 text-center text-[11px]">
               {[
                 { num: 1, label: 'Auth & Repo' },
                 { num: 2, label: 'Git Clone' },
@@ -1565,10 +1565,10 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                 return (
                   <div
                     key={st.num}
-                    className={`p-2 rounded-xl border transition-all ${
-                      isPassed ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 font-semibold' :
-                      isCurrent ? 'bg-indigo-500/20 border-indigo-500 text-white font-bold animate-pulse' :
-                      'bg-slate-900/40 border-slate-800/60 text-slate-500'
+                    className={`p-2 rounded border transition-all ${
+                      isPassed ? 'bg-ok/10 border-ok/30 text-ok font-semibold' :
+                      isCurrent ? 'bg-primary/20 border-primary text-white font-bold animate-pulse' :
+                      'bg-surface-container-low/40 border-outline-variant text-on-surface-variant/70'
                     }`}
                   >
                     <div className="text-[10px] font-mono mb-0.5">PASSO {st.num}</div>
@@ -1579,33 +1579,33 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
             </div>
 
             {/* Live Streaming Logs Terminal */}
-            <div className="p-4 bg-black/95 flex-1 overflow-y-auto font-mono text-xs text-emerald-300 leading-relaxed custom-scrollbar whitespace-pre-wrap min-h-[250px] max-h-[350px]">
+            <div className="p-4 bg-black/95 flex-1 overflow-y-auto font-mono text-xs text-ok leading-relaxed custom-scrollbar whitespace-pre-wrap min-h-[250px] max-h-[350px]">
               {liveDeployModal.logs || 'Aguardando saída de build do servidor...'}
             </div>
 
             {/* Footer */}
-            <div className="p-4 bg-slate-900/90 border-t border-slate-800 flex items-center justify-between">
-              <span className="text-xs text-slate-300 flex items-center gap-2">
+            <div className="p-4 bg-surface-container-low/90 border-t border-outline-variant flex items-center justify-between">
+              <span className="text-xs text-on-surface-variant flex items-center gap-2">
                 {liveDeployModal.status === 'running' ? (
                   <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-primary" />
                     <span>Compilando contêiner isolado...</span>
                   </>
                 ) : liveDeployModal.status === 'success' ? (
                   <>
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <CheckCircle2 className="w-3.5 h-3.5 text-ok" />
                     <span>Aplicação compilada e online com sucesso!</span>
                   </>
                 ) : (
                   <>
-                    <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                    <AlertCircle className="w-3.5 h-3.5 text-crit" />
                     <span>O processo de build foi interrompido com erro.</span>
                   </>
                 )}
               </span>
               <button
                 onClick={() => setLiveDeployModal(null)}
-                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-lg transition-all"
+                className="px-5 py-2 rounded bg-primary-container hover:bg-primary text-white font-semibold text-xs transition-all"
               >
                 {liveDeployModal.status === 'running' ? 'Minimizar' : 'Fechar'}
               </button>
@@ -1617,15 +1617,15 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
       {/* Modal: Novo Deploy */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-lg overflow-hidden shadow-2xl">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
+          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-lg overflow-hidden">
+            <div className="p-5 border-b border-outline-variant flex items-center justify-between bg-surface-container-low">
               <h3 className="font-bold text-white text-lg flex items-center gap-2">
-                <Plus className="w-5 h-5 text-indigo-400" />
+                <Plus className="w-5 h-5 text-primary" />
                 Novo Deploy de Aplicação
               </h3>
               <button
                 onClick={() => setShowCreateModal(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg"
+                className="text-on-surface-variant hover:text-white p-1 rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1633,7 +1633,7 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
 
             <form onSubmit={handleCreateApp} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                   Nome da Aplicação *
                 </label>
                 <input
@@ -1642,19 +1642,19 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                   placeholder="ex: minha-api-node ou frontend-react"
                   value={appName}
                   onChange={(e) => setAppName(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                     Origem do Projeto
                   </label>
                   <select
                     value={sourceType}
                     onChange={(e: any) => setSourceType(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary"
                   >
                     <option value="git">GitHub / Repositório Git</option>
                     <option value="image">Imagem Docker / Hub</option>
@@ -1662,7 +1662,7 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                     Porta no Host
                   </label>
                   <input
@@ -1670,9 +1670,9 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                     placeholder="Automática"
                     value={port}
                     onChange={(e) => setPort(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-200 text-sm focus:outline-none focus:border-indigo-500 font-mono"
+                    className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3.5 py-2.5 text-on-surface text-sm focus:outline-none focus:border-primary font-mono"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">
+                  <p className="text-[10px] text-on-surface-variant/70 mt-1">
                     Deixe vazio: o painel escolhe uma porta livre. Seu site é servido pelo domínio, não por esta porta.
                   </p>
                 </div>
@@ -1682,14 +1682,14 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                 <div className="space-y-3">
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                      <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
                         URL do Repositório GitHub *
                       </label>
                       <button
                         type="button"
                         onClick={() => handleInspectRepo()}
                         disabled={inspectingRepo || !gitUrl || gitUrl.includes('usuario/meu-app')}
-                        className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-40"
+                        className="text-[11px] text-primary hover:text-primary font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-40"
                       >
                         <Cpu className={`w-3.5 h-3.5 ${inspectingRepo ? 'animate-spin' : ''}`} />
                         <span>{inspectingRepo ? 'Inspecionando...' : 'Auto-Detectar Stack'}</span>
@@ -1702,45 +1702,45 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                       value={gitUrl}
                       onChange={(e) => setGitUrl(e.target.value)}
                       onBlur={() => handleInspectRepo()}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
+                      className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary font-mono"
                     />
                   </div>
 
                   {/* Framework Auto-Detection Preview Card (Aegis Style) */}
                   {inspectingRepo ? (
-                    <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center gap-3 animate-pulse text-xs text-indigo-300">
-                      <RefreshCw className="w-4 h-4 animate-spin text-indigo-400 shrink-0" />
+                    <div className="p-4 rounded-lg bg-primary/10 border border-primary/30 flex items-center gap-3 animate-pulse text-xs text-primary">
+                      <RefreshCw className="w-4 h-4 animate-spin text-primary shrink-0" />
                       <span>Inspecionando arquivos do repositório e identificando framework...</span>
                     </div>
                   ) : inspectionResult ? (
-                    <div className="p-4 rounded-2xl bg-slate-950 border border-indigo-500/40 shadow-inner space-y-3">
+                    <div className="p-4 rounded-lg bg-surface-container-lowest border border-primary/40 space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <Sparkles className="w-4 h-4 text-amber-400" />
+                          <Sparkles className="w-4 h-4 text-warn" />
                           <span className="text-xs font-bold text-white uppercase tracking-wider">Framework Detectado</span>
                         </div>
-                        <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-[11px] font-bold font-mono">
+                        <span className="px-2.5 py-0.5 rounded-full bg-primary/20 border border-primary/40 text-primary text-[11px] font-bold font-mono">
                           {inspectionResult.inspection.frameworkName}
                         </span>
                       </div>
 
                       {inspectionResult.commit && (
-                        <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-[11px] font-mono text-slate-300 space-y-1">
-                          <div className="text-slate-400 flex items-center justify-between">
+                        <div className="p-2.5 rounded bg-surface-container-low border border-outline-variant text-[11px] font-mono text-on-surface-variant space-y-1">
+                          <div className="text-on-surface-variant flex items-center justify-between">
                             <span>Último commit ({inspectionResult.commit.hash}):</span>
                             <span>{inspectionResult.commit.author}</span>
                           </div>
-                          <div className="text-emerald-400 font-semibold truncate">"{inspectionResult.commit.message}"</div>
+                          <div className="text-ok font-semibold truncate">"{inspectionResult.commit.message}"</div>
                         </div>
                       )}
 
-                      <div className="grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-400">
-                        <div className="p-2 rounded-xl bg-slate-900/50 border border-slate-800/80">
-                          <span className="text-slate-500 block text-[10px] uppercase">Package Manager</span>
+                      <div className="grid grid-cols-2 gap-2 text-[11px] font-mono text-on-surface-variant">
+                        <div className="p-2 rounded bg-surface-container-low border border-outline-variant">
+                          <span className="text-on-surface-variant/70 block text-[10px] uppercase">Package Manager</span>
                           <span className="text-white font-bold">{inspectionResult.inspection.packageManager.toUpperCase()}</span>
                         </div>
-                        <div className="p-2 rounded-xl bg-slate-900/50 border border-slate-800/80">
-                          <span className="text-slate-500 block text-[10px] uppercase">Comando de Build</span>
+                        <div className="p-2 rounded bg-surface-container-low border border-outline-variant">
+                          <span className="text-on-surface-variant/70 block text-[10px] uppercase">Comando de Build</span>
                           <span className="text-white font-bold truncate">{inspectionResult.inspection.buildCommand || 'N/A'}</span>
                         </div>
                       </div>
@@ -1748,14 +1748,14 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                   ) : null}
 
                   <div>
-                    <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                    <label className="block text-xs font-semibold text-warn uppercase tracking-wider mb-1.5 flex items-center justify-between">
                       <span className="flex items-center gap-1.5">
                         <Lock className="w-3.5 h-3.5" /> GitHub Token (Para Repositórios Privados)
                       </span>
                       <button
                         type="button"
                         onClick={() => setShowTokenCreate(!showTokenCreate)}
-                        className="text-[10px] text-slate-400 hover:text-white"
+                        className="text-[10px] text-on-surface-variant hover:text-white"
                       >
                         {showTokenCreate ? 'Ocultar' : 'Mostrar'}
                       </button>
@@ -1765,16 +1765,16 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                       placeholder="ghp_seu_token_aqui (apenas se o repositório for PRIVADO)"
                       value={githubToken}
                       onChange={(e) => setGithubToken(e.target.value)}
-                      className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-3.5 py-2.5 text-amber-300 font-mono text-xs focus:outline-none focus:border-amber-500"
+                      className="w-full bg-surface-container-lowest border border-warn/30 rounded px-3.5 py-2.5 text-warn font-mono text-xs focus:outline-none focus:border-amber-500"
                     />
-                    <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
-                      <ShieldCheck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <p className="text-[10px] text-on-surface-variant mt-1 flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5 text-warn shrink-0" />
                       <span>Para repositórios privados, informe seu Personal Access Token (PAT).</span>
                     </p>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                       Branch de Deploy
                     </label>
                     <input
@@ -1782,13 +1782,13 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                       placeholder="main"
                       value={branch}
                       onChange={(e) => setBranch(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
+                      className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary font-mono"
                     />
                   </div>
                 </div>
               ) : (
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                     Imagem Docker *
                   </label>
                   <input
@@ -1797,13 +1797,13 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                     placeholder="nginx:alpine ou node:20-alpine"
                     value={imageName}
                     onChange={(e) => setImageName(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary font-mono"
                   />
                 </div>
               )}
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                   Domínio ou Subdomínio (Opcional)
                 </label>
                 <input
@@ -1811,16 +1811,16 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                   placeholder="ex: app.meusite.com.br (pode deixar vazio e vincular depois)"
                   value={createDomain}
                   onChange={(e) => setCreateDomain(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary font-mono"
                 />
-                <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
-                  <Globe className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <p className="text-[11px] text-on-surface-variant/70 mt-1 flex items-center gap-1">
+                  <Globe className="w-3.5 h-3.5 text-primary shrink-0" />
                   <span>O domínio é opcional. Você pode testar pelo IP:Porta e vincular o domínio Hostinger depois.</span>
                 </p>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                   Variáveis de Ambiente Iniciais (.env)
                 </label>
                 <textarea
@@ -1828,7 +1828,7 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                   placeholder="CHAVE=VALOR&#10;PORT=3000"
                   value={createEnvString}
                   onChange={(e) => setCreateEnvString(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white text-xs font-mono focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded p-3 text-white text-xs font-mono focus:outline-none focus:border-primary"
                 ></textarea>
               </div>
 
@@ -1836,14 +1836,14 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2.5 rounded-xl text-slate-400 hover:text-white text-sm font-medium"
+                  className="px-4 py-2.5 rounded text-on-surface-variant hover:text-white text-sm font-medium"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all disabled:opacity-50"
+                  className="px-5 py-2.5 rounded bg-primary-container hover:bg-primary text-white font-semibold text-sm transition-all disabled:opacity-50"
                 >
                   {submitting ? 'Criando pipeline...' : 'Iniciar Deploy'}
                 </button>
@@ -1856,30 +1856,30 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
       {/* Modal: Live Logs */}
       {selectedLogsApp && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0a0f1c] rounded-3xl border border-slate-800 w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="p-4 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+          <div className="bg-[#0a0f1c] rounded-lg border border-outline-variant w-full max-w-3xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-4 bg-surface-container-low/90 border-b border-outline-variant flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-indigo-400" />
+                <FileText className="w-5 h-5 text-primary" />
                 <span className="font-bold text-white text-sm">Logs da Aplicação: {selectedLogsApp.name}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => openLogs(selectedLogsApp)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700"
+                  className="p-1.5 rounded-lg text-on-surface-variant hover:text-white bg-surface-container-high hover:bg-surface-container-highest"
                   title="Atualizar logs"
                 >
                   <RefreshCw className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => setSelectedLogsApp(null)}
-                  className="text-slate-400 hover:text-white p-1"
+                  className="text-on-surface-variant hover:text-white p-1"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
 
-            <div className="p-5 flex-1 overflow-auto font-mono text-xs text-emerald-300 bg-black/90 whitespace-pre-wrap leading-relaxed custom-scrollbar">
+            <div className="p-5 flex-1 overflow-auto font-mono text-xs text-ok bg-black/90 whitespace-pre-wrap leading-relaxed custom-scrollbar">
               {logsLoading ? 'Carregando logs...' : logsText}
             </div>
           </div>
@@ -1889,22 +1889,22 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
       {/* Modal: Application File Explorer & Code Editor */}
       {selectedFileApp && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#0b0f19] rounded-3xl border border-slate-800 w-full max-w-5xl h-[85vh] overflow-hidden shadow-2xl flex flex-col">
+          <div className="bg-surface rounded-lg border border-outline-variant w-full max-w-5xl h-[85vh] overflow-hidden flex flex-col">
             {/* Header */}
-            <div className="p-4 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+            <div className="p-4 bg-surface-container-low/90 border-b border-outline-variant flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400">
+                <div className="p-2 rounded bg-warn/10 text-warn">
                   <FolderTree className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="font-bold text-white text-base flex items-center gap-2">
                     <span>Arquivos da Aplicação: {selectedFileApp.name}</span>
-                    <span className="text-[10px] font-mono text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded border border-indigo-500/30">
+                    <span className="text-[10px] font-mono text-primary bg-primary/20 px-2 py-0.5 rounded border border-primary/30">
                       {selectedFileApp.branch || 'main'}
                     </span>
                   </h3>
                   {/* Breadcrumbs */}
-                  <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono mt-0.5">
+                  <div className="flex items-center gap-1.5 text-xs text-on-surface-variant font-mono mt-0.5">
                     <button
                       onClick={() => openFilesModal(selectedFileApp, '')}
                       className="hover:text-white underline"
@@ -1916,7 +1916,7 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                         const sub = arr.slice(0, idx + 1).join('/');
                         return (
                           <React.Fragment key={sub}>
-                            <ChevronRight className="w-3 h-3 text-slate-600" />
+                            <ChevronRight className="w-3 h-3 text-outline" />
                             <button
                               onClick={() => openFilesModal(selectedFileApp, sub)}
                               className="hover:text-white underline"
@@ -1934,13 +1934,13 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                 <button
                   onClick={() => openFilesModal(selectedFileApp, currentSubPath)}
                   title="Atualizar lista de arquivos"
-                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                  className="p-2 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant transition-colors"
                 >
-                  <RefreshCw className={`w-4 h-4 ${loadingFiles ? 'animate-spin text-amber-400' : ''}`} />
+                  <RefreshCw className={`w-4 h-4 ${loadingFiles ? 'animate-spin text-warn' : ''}`} />
                 </button>
                 <button
                   onClick={() => setSelectedFileApp(null)}
-                  className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                  className="p-2 rounded text-on-surface-variant hover:text-white hover:bg-surface-container-high transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1950,17 +1950,17 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
             {/* Split Pane: Sidebar File Tree & Main Code Editor */}
             <div className="flex-1 flex overflow-hidden">
               {/* Left Column: Files & Directories */}
-              <div className="w-72 bg-slate-950/90 border-r border-slate-800 flex flex-col">
+              <div className="w-72 bg-surface-container-lowest/90 border-r border-outline-variant flex flex-col">
                 {/* Search in files */}
-                <div className="p-3 border-b border-slate-800/80">
+                <div className="p-3 border-b border-outline-variant">
                   <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/70" />
                     <input
                       type="text"
                       placeholder="Buscar arquivo..."
                       value={fileFilterSearch}
                       onChange={(e) => setFileFilterSearch(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500 font-mono"
+                      className="w-full bg-surface-container-low border border-outline-variant rounded pl-8 pr-3 py-1.5 text-xs text-on-surface focus:outline-none focus:border-amber-500 font-mono"
                     />
                   </div>
                 </div>
@@ -1972,7 +1972,7 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                       const parent = currentSubPath.split('/').slice(0, -1).join('/');
                       openFilesModal(selectedFileApp, parent);
                     }}
-                    className="flex items-center gap-2 px-4 py-2.5 text-xs font-mono text-amber-400 hover:bg-slate-900 border-b border-slate-800/60 transition-colors text-left"
+                    className="flex items-center gap-2 px-4 py-2.5 text-xs font-mono text-warn hover:bg-surface-container-low border-b border-outline-variant transition-colors text-left"
                   >
                     <ArrowLeft className="w-3.5 h-3.5" /> .. (Voltar pasta)
                   </button>
@@ -1981,12 +1981,12 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                 {/* File list */}
                 <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
                   {loadingFiles && appFiles.length === 0 ? (
-                    <div className="p-6 text-center text-xs text-slate-500">
-                      <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-2 text-amber-400" />
+                    <div className="p-6 text-center text-xs text-on-surface-variant/70">
+                      <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-2 text-warn" />
                       Carregando arquivos...
                     </div>
                   ) : appFiles.length === 0 ? (
-                    <div className="p-6 text-center text-xs text-slate-500">
+                    <div className="p-6 text-center text-xs text-on-surface-variant/70">
                       Nenhum arquivo encontrado após o deploy.
                     </div>
                   ) : (
@@ -2004,24 +2004,24 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                                 handleOpenFileContent(selectedFileApp, f.path);
                               }
                             }}
-                            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-mono cursor-pointer transition-all ${
+                            className={`flex items-center justify-between px-3 py-2 rounded text-xs font-mono cursor-pointer transition-all ${
                               isSelected
-                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold'
+                                ? 'bg-warn/15 text-warn border border-warn/30 font-bold'
                                 : f.isDirectory
-                                ? 'text-slate-200 hover:bg-slate-900 hover:text-white'
-                                : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                                ? 'text-on-surface hover:bg-surface-container-low hover:text-white'
+                                : 'text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface'
                             }`}
                           >
                             <div className="flex items-center gap-2 truncate">
                               {f.isDirectory ? (
-                                <Folder className="w-4 h-4 text-amber-400 shrink-0" />
+                                <Folder className="w-4 h-4 text-warn shrink-0" />
                               ) : (
-                                <File className="w-4 h-4 text-indigo-400 shrink-0" />
+                                <File className="w-4 h-4 text-primary shrink-0" />
                               )}
                               <span className="truncate">{f.name}</span>
                             </div>
                             {!f.isDirectory && f.sizeBytes > 0 && (
-                              <span className="text-[10px] text-slate-600 shrink-0 ml-1">
+                              <span className="text-[10px] text-outline shrink-0 ml-1">
                                 {(f.sizeBytes / 1024).toFixed(1)}k
                               </span>
                             )}
@@ -2033,15 +2033,15 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
               </div>
 
               {/* Right Column: Code Viewer / Editor */}
-              <div className="flex-1 bg-[#090d16] flex flex-col overflow-hidden">
+              <div className="flex-1 bg-surface-container-lowest flex flex-col overflow-hidden">
                 {selectedFileContent ? (
                   <>
                     {/* Toolbar */}
-                    <div className="p-3 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-xs font-mono text-slate-300 truncate">
-                        <File className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <div className="p-3 bg-surface-container-lowest/80 border-b border-outline-variant flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-mono text-on-surface-variant truncate">
+                        <File className="w-4 h-4 text-primary shrink-0" />
                         <span className="font-bold text-white">{selectedFileContent.path}</span>
-                        <span className="text-[11px] text-slate-500">
+                        <span className="text-[11px] text-on-surface-variant/70">
                           ({(selectedFileContent.sizeBytes / 1024).toFixed(2)} KB)
                         </span>
                       </div>
@@ -2049,16 +2049,16 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                       <div className="flex items-center gap-2 shrink-0">
                         <button
                           onClick={handleCopyFileCode}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono transition-colors"
+                          className="flex items-center gap-1 px-3 py-1.5 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-mono transition-colors"
                         >
-                          {copiedFileCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          {copiedFileCode ? <Check className="w-3.5 h-3.5 text-ok" /> : <Copy className="w-3.5 h-3.5" />}
                           <span>{copiedFileCode ? 'Copiado!' : 'Copiar'}</span>
                         </button>
 
                         <button
                           onClick={handleSaveFileContent}
                           disabled={savingFile}
-                          className="flex items-center gap-1 px-4 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 transition-all disabled:opacity-50"
+                          className="flex items-center gap-1 px-4 py-1.5 rounded bg-warn hover:bg-amber-400 text-surface font-bold text-xs transition-all disabled:opacity-50"
                         >
                           <Save className="w-3.5 h-3.5" />
                           <span>{savingFile ? 'Salvando...' : 'Salvar Alterações'}</span>
@@ -2072,15 +2072,15 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                         value={fileContentDraft}
                         onChange={(e) => setFileContentDraft(e.target.value)}
                         spellCheck={false}
-                        className="w-full h-full bg-transparent text-emerald-300 font-mono text-xs leading-relaxed focus:outline-none resize-none selection:bg-indigo-500/40 custom-scrollbar"
+                        className="w-full h-full bg-transparent text-ok font-mono text-xs leading-relaxed focus:outline-none resize-none selection:bg-primary-container/40 custom-scrollbar"
                       />
                     </div>
                   </>
                 ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-500">
-                    <FolderTree className="w-12 h-12 text-slate-700 mb-3" />
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-on-surface-variant/70">
+                    <FolderTree className="w-12 h-12 text-outline-variant mb-3" />
                     <h4 className="font-bold text-white text-sm mb-1">Nenhum arquivo selecionado</h4>
-                    <p className="text-xs text-slate-400 max-w-sm">
+                    <p className="text-xs text-on-surface-variant max-w-sm">
                       Navegue pelas pastas à esquerda e clique em qualquer arquivo de código-fonte (HTML, JS, TS, JSON, .env) para visualizar e editar.
                     </p>
                   </div>

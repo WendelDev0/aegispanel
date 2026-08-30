@@ -122,7 +122,7 @@ export const GlobeView: React.FC<GlobeViewProps> = ({ markers, emptyMessage }) =
 
       {markers.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <p className="text-xs text-slate-400 text-center max-w-[220px] bg-slate-950/70 backdrop-blur px-4 py-3 rounded-xl border border-slate-800">
+          <p className="text-xs text-on-surface-variant text-center max-w-[220px] bg-surface-container-lowest/80 backdrop-blur px-4 py-3 rounded-xl border border-outline-variant">
             {emptyMessage || 'Nenhum acesso localizado ainda.'}
           </p>
         </div>

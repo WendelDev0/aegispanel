@@ -244,7 +244,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
 
   // Password strength calculation
   const getPasswordStrength = (pass: string) => {
-    if (!pass) return { label: 'Vazia', color: 'bg-slate-700', percent: 0 };
+    if (!pass) return { label: 'Vazia', color: 'bg-surface-container-highest', percent: 0 };
     let score = 0;
     if (pass.length >= 8) score += 20;
     if (pass.length >= 16) score += 30;
@@ -252,10 +252,10 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
     if (/[0-9]/.test(pass)) score += 15;
     if (/[^A-Za-z0-9]/.test(pass)) score += 20;
 
-    if (score >= 85) return { label: 'Ultra-Segura (AES-256 Ready)', color: 'bg-emerald-500', percent: 100 };
-    if (score >= 60) return { label: 'Forte', color: 'bg-indigo-500', percent: 75 };
-    if (score >= 40) return { label: 'Média', color: 'bg-amber-500', percent: 50 };
-    return { label: 'Fraca', color: 'bg-rose-500', percent: 25 };
+    if (score >= 85) return { label: 'Ultra-Segura (AES-256 Ready)', color: 'bg-ok', percent: 100 };
+    if (score >= 60) return { label: 'Forte', color: 'bg-primary-container', percent: 75 };
+    if (score >= 40) return { label: 'Média', color: 'bg-warn', percent: 50 };
+    return { label: 'Fraca', color: 'bg-crit', percent: 25 };
   };
 
   const passStrength = getPasswordStrength(dbPassword);
@@ -266,10 +266,10 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Database className="w-6 h-6 text-emerald-400" />
+            <Database className="w-6 h-6 text-ok" />
             Bancos de Dados com Criptografia de Ponta (AES-256)
           </h2>
-          <p className="text-sm text-slate-400 mt-1">
+          <p className="text-sm text-on-surface-variant mt-1">
             Gere senhas e usuários criptograficamente fortes sem risco de vazamento, com persistência total em disco.
           </p>
         </div>
@@ -277,7 +277,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
         <button
           onClick={handleOpenCreateModal}
           title="Criar uma nova instância de banco de dados com credenciais fortes geradas automaticamente"
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-lg shadow-emerald-600/30 transition-all active:scale-95 shrink-0"
+          className="flex items-center gap-2 px-4 py-2.5 rounded bg-ok/90 hover:bg-ok text-white font-semibold text-sm transition-all active:scale-95 shrink-0"
         >
           <Plus className="w-4 h-4" />
           Novo Banco Seguro
@@ -303,21 +303,21 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
 
       {/* Databases List */}
       {loading ? (
-        <div className="flex items-center justify-center p-12 text-slate-400">
-          <RefreshCw className="w-6 h-6 animate-spin text-emerald-400" />
+        <div className="flex items-center justify-center p-12 text-on-surface-variant">
+          <RefreshCw className="w-6 h-6 animate-spin text-ok" />
         </div>
       ) : databases.length === 0 ? (
-        <div className="bg-[#0f172a]/60 rounded-2xl p-12 border border-slate-800 text-center">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mx-auto mb-4">
+        <div className="bg-surface-container rounded-lg p-12 border border-outline-variant text-center">
+          <div className="w-12 h-12 rounded-lg bg-ok/10 text-ok flex items-center justify-center mx-auto mb-4">
             <Database className="w-6 h-6" />
           </div>
           <h3 className="text-lg font-bold text-white mb-1">Nenhum banco de dados criado</h3>
-          <p className="text-sm text-slate-400 max-w-md mx-auto mb-6">
+          <p className="text-sm text-on-surface-variant max-w-md mx-auto mb-6">
             Livre-se de limites de provedores externos criando seu próprio banco PostgreSQL ou MySQL protegido com AES-256.
           </p>
           <button
             onClick={handleOpenCreateModal}
-            className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm inline-flex items-center gap-2 shadow-lg shadow-emerald-600/30"
+            className="px-5 py-2.5 rounded bg-ok/90 hover:bg-ok text-white font-semibold text-sm inline-flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
             Criar Banco PostgreSQL Seguro
@@ -398,7 +398,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                       <span>String de Conexão (DATABASE_URL)</span>
                       <button
                         onClick={() => togglePasswordVisibility(db.id)}
-                        className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-sans capitalize text-[11px]"
+                        className="text-primary hover:text-primary flex items-center gap-1 font-sans capitalize text-[11px]"
                       >
                         {isPassVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                         {isPassVisible ? 'Ocultar Senha' : 'Ver Senha'}
@@ -411,13 +411,13 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                       </span>
                       <button
                         onClick={() => copyConnectionString(db.id)}
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors shrink-0 flex items-center gap-1 text-[11px]"
+                        className="p-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-white transition-colors shrink-0 flex items-center gap-1 text-[11px]"
                         title="Copiar URL de conexão para colar no .env do seu projeto"
                       >
                         {copiedId === db.id ? (
                           <>
-                            <Check className="w-3.5 h-3.5 text-emerald-400" />
-                            <span className="text-emerald-400 font-semibold">Copiado</span>
+                            <Check className="w-3.5 h-3.5 text-ok" />
+                            <span className="text-ok font-semibold">Copiado</span>
                           </>
                         ) : (
                           <>
@@ -427,7 +427,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                         )}
                       </button>
                     </div>
-                    <p className="text-[10px] text-slate-500">
+                    <p className="text-[10px] text-on-surface-variant/70">
                       Use esta string para conectar de fora do Docker (cliente local, migration na sua máquina).
                     </p>
                   </div>
@@ -438,7 +438,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                       <span>Para colar no .env da aplicação</span>
                       <button
                         onClick={() => toggleEnvBlock(db.id)}
-                        className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-sans capitalize text-[11px]"
+                        className="text-primary hover:text-primary flex items-center gap-1 font-sans capitalize text-[11px]"
                       >
                         {isEnvVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                         {isEnvVisible ? 'Ocultar' : 'Revelar'}
@@ -453,7 +453,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                       </span>
                       <button
                         onClick={() => copyEnvLine(db.id)}
-                        className="p-1.5 rounded-lg bg-indigo-600/80 hover:bg-indigo-500 text-white transition-colors shrink-0 flex items-center gap-1 text-[11px] font-sans font-semibold"
+                        className="p-1.5 rounded-lg bg-primary-container/80 hover:bg-primary text-white transition-colors shrink-0 flex items-center gap-1 text-[11px] font-sans font-semibold"
                         title="Copiar a linha pronta para o .env da aplicação"
                       >
                         {copiedEnvId === db.id ? (
@@ -470,8 +470,8 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                       </button>
                     </div>
 
-                    <p className="text-[10px] text-slate-500">
-                      Aponta para o contêiner <span className="font-mono text-slate-400">{creds?.containerName || `aegis-db-${db.name.toLowerCase().replace(/[^a-z0-9_-]/g, '')}`}</span>{' '}
+                    <p className="text-[10px] text-on-surface-variant/70">
+                      Aponta para o contêiner <span className="font-mono text-on-surface-variant">{creds?.containerName || `aegis-db-${db.name.toLowerCase().replace(/[^a-z0-9_-]/g, '')}`}</span>{' '}
                       na porta interna {creds?.internalPort || db.internalPort}. Suas aplicações estão na mesma rede
                       Docker, então o tráfego não passa pelo host e a string continua válida se a porta pública mudar.
                       Cole em <strong>Aplicações &rarr; variáveis .env</strong>.
@@ -498,7 +498,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                       <button
                         onClick={() => handleStop(db.id)}
                         title="Parar banco de dados (Stop Instance)"
-                        className="p-2 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors"
+                        className="p-2 rounded-lg bg-warn/10 text-warn hover:bg-warn/15 transition-colors"
                       >
                         <Square className="w-4 h-4" />
                       </button>
@@ -506,7 +506,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                       <button
                         onClick={() => handleStart(db.id)}
                         title="Iniciar banco de dados (Start Instance)"
-                        className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                        className="p-2 rounded-lg bg-ok/10 text-ok hover:bg-ok/15 transition-colors"
                       >
                         <Play className="w-4 h-4" />
                       </button>
@@ -515,7 +515,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                     <button
                       onClick={() => handleRestart(db.id)}
                       title="Reiniciar instância de banco"
-                      className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
+                      className="p-2 rounded-lg bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest transition-colors"
                     >
                       <RefreshCw className="w-4 h-4" />
                     </button>
@@ -523,16 +523,16 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                     <button
                       onClick={() => handleBackupNow(db.id)}
                       title="Gerar cópia de segurança (Dump SQL) agora"
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant text-xs font-medium transition-colors"
                     >
                       {backupSuccessId === db.id ? (
                         <>
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          <span className="text-emerald-400">Salvo!</span>
+                          <Check className="w-3.5 h-3.5 text-ok" />
+                          <span className="text-ok">Salvo!</span>
                         </>
                       ) : (
                         <>
-                          <HardDriveDownload className="w-3.5 h-3.5 text-emerald-400" />
+                          <HardDriveDownload className="w-3.5 h-3.5 text-ok" />
                           <span>Backup</span>
                         </>
                       )}
@@ -542,7 +542,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                       <button
                         onClick={() => setActiveTab('querystudio')}
                         title="Abrir no Database Studio para executar SQL e ver tabelas"
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-xs font-medium transition-colors border border-indigo-500/30"
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary-container/20 hover:bg-primary-container/30 text-primary text-xs font-medium transition-colors border border-primary/30"
                       >
                         <Code2 className="w-3.5 h-3.5" />
                         <span>SQL Studio</span>
@@ -553,7 +553,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                   <button
                     onClick={() => handleDelete(db.id, db.name)}
                     title="Remover instância de banco"
-                    className="p-2 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors"
+                    className="p-2 rounded-lg text-crit hover:bg-crit/10 transition-colors"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -567,21 +567,21 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
       {/* Modal: Novo Banco Seguro */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-2xl border border-slate-800 w-full max-w-lg overflow-hidden shadow-2xl">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-lg overflow-hidden">
+            <div className="p-5 border-b border-outline-variant flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400">
+                <div className="p-1.5 rounded-lg bg-ok/10 text-ok">
                   <Database className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="font-bold text-white text-base">Criar Banco Seguro 1-Clique</h3>
-                  <p className="text-[11px] text-slate-400">Credenciais criptografadas com AES-256-GCM</p>
+                  <p className="text-[11px] text-on-surface-variant">Credenciais criptografadas com AES-256-GCM</p>
                 </div>
               </div>
 
               <button
                 onClick={() => setShowCreateModal(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg"
+                className="text-on-surface-variant hover:text-white p-1 rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -590,7 +590,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
             <form onSubmit={handleCreateDatabase} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
               {/* Type Selection */}
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-2">
                   Motor de Banco de Dados *
                 </label>
                 <div className="grid grid-cols-3 gap-2 text-xs font-semibold">
@@ -605,10 +605,10 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                       key={t.id}
                       type="button"
                       onClick={() => handleTypeChange(t.id as any)}
-                      className={`p-3 rounded-xl border text-center transition-all ${
+                      className={`p-3 rounded border text-center transition-all ${
                         dbType === t.id
-                          ? 'bg-emerald-600/20 text-emerald-300 border-emerald-500 shadow-sm'
-                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200'
+                          ? 'bg-emerald-600/20 text-ok border-emerald-500'
+                          : 'bg-surface-container-low text-on-surface-variant border-outline-variant hover:border-outline-variant hover:text-on-surface'
                       }`}
                     >
                       {t.label}
@@ -618,23 +618,23 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
               </div>
 
               {/* 1-Click Credential Generator banner */}
-              <div className="bg-indigo-950/40 p-3 rounded-xl border border-indigo-500/30 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs text-indigo-300">
-                  <Sparkles className="w-4 h-4 text-amber-400" />
+              <div className="bg-primary/10 p-3 rounded border border-primary/30 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs text-primary">
+                  <Sparkles className="w-4 h-4 text-warn" />
                   <span>Gerador Criptográfico Automático</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => generateCredentials(dbType)}
                   title="Gerar novas credenciais aleatórias ultra-fortes"
-                  className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow transition-all active:scale-95"
+                  className="flex items-center gap-1 px-2.5 py-1 bg-primary-container hover:bg-primary text-white rounded-lg text-xs font-semibold shadow transition-all active:scale-95"
                 >
                   <RefreshCw className="w-3 h-3" /> Gerar Novas
                 </button>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                   Identificador / Nome da Instância *
                 </label>
                 <input
@@ -643,13 +643,13 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                   placeholder="ex: banco-producao ou ecommerce-db"
                   value={dbName}
                   onChange={(e) => setDbName(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-ok"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                     Porta no Host
                   </label>
                   <input
@@ -657,22 +657,22 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                     placeholder="Automática"
                     value={dbPort}
                     onChange={(e) => setDbPort(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500 font-mono"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-ok font-mono"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">
+                  <p className="text-[10px] text-on-surface-variant/70 mt-1">
                     Vazio = o painel escolhe. Suas aplicações conectam pelo nome do contêiner, não por esta porta.
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                     Nome do Database Inicial
                   </label>
                   <input
                     type="text"
                     value={customDbName}
                     onChange={(e) => setCustomDbName(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500 font-mono"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-ok font-mono"
                   />
                 </div>
               </div>
@@ -681,13 +681,13 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
               <div className="space-y-3">
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
                       Usuário do Banco (Gerado Forte)
                     </label>
                     <button
                       type="button"
                       onClick={() => generateCredentials(dbType)}
-                      className="text-[11px] text-indigo-400 hover:underline"
+                      className="text-[11px] text-primary hover:underline"
                     >
                       Regerar
                     </button>
@@ -696,19 +696,19 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                     type="text"
                     value={dbUser}
                     onChange={(e) => setDbUser(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500 font-mono"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-ok font-mono"
                   />
                 </div>
 
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
                       Senha Criptograficamente Forte (24 Chars)
                     </label>
                     <button
                       type="button"
                       onClick={() => setShowFormPassword(!showFormPassword)}
-                      className="text-[11px] text-indigo-400 hover:underline flex items-center gap-1"
+                      className="text-[11px] text-primary hover:underline flex items-center gap-1"
                     >
                       {showFormPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                       {showFormPassword ? 'Ocultar' : 'Exibir'}
@@ -720,20 +720,20 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                       value={dbPassword}
                       onChange={(e) => setDbPassword(e.target.value)}
                       placeholder="Senha ultra-segura"
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500 font-mono"
+                      className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-ok font-mono"
                     />
                   </div>
 
                   {/* Password Strength Indicator */}
                   <div className="mt-2 space-y-1">
-                    <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                    <div className="w-full bg-surface-container-high h-1.5 rounded-full overflow-hidden">
                       <div
                         className={`h-full ${passStrength.color} transition-all duration-300`}
                         style={{ width: `${passStrength.percent}%` }}
                       ></div>
                     </div>
-                    <div className="flex justify-between text-[10px] text-slate-400">
-                      <span>Segurança: <strong className="text-slate-200">{passStrength.label}</strong></span>
+                    <div className="flex justify-between text-[10px] text-on-surface-variant">
+                      <span>Segurança: <strong className="text-on-surface">{passStrength.label}</strong></span>
                       <span>Protegido com AES-256</span>
                     </div>
                   </div>
@@ -744,14 +744,14 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2.5 rounded-xl text-slate-400 hover:text-white text-sm font-medium"
+                  className="px-4 py-2.5 rounded text-on-surface-variant hover:text-white text-sm font-medium"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-lg shadow-emerald-600/30 transition-all active:scale-95 disabled:opacity-50"
+                  className="px-5 py-2.5 rounded bg-ok/90 hover:bg-ok text-white font-semibold text-sm transition-all active:scale-95 disabled:opacity-50"
                 >
                   {submitting ? 'Criando banco...' : 'Criar Banco Seguro'}
                 </button>

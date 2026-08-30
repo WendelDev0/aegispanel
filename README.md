@@ -22,6 +22,8 @@ Um painel completo, moderno e **100% self-hosted e open-source** para transforma
 - 🖥️ **Terminal Web Interativo**: Terminal no navegador com `xterm.js`, no shell do host ou dentro de contêineres.
 - 🔔 **Alertas Discord / Telegram / WhatsApp**: Notificações quando CPU, memória **ou disco** ultrapassam os limites configurados.
 
+> 🚧 **Em desenvolvimento — Cluster Multi-Servidor**: a API para registrar nós já existe (`/api/nodes`), mas ainda **não há interface** e o painel administra apenas o Docker da máquina onde roda. Não conte com esse recurso ainda.
+
 ---
 
 ## ⚡ Instalação na VPS (Ubuntu 22.04 / 24.04)

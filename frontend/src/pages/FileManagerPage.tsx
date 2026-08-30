@@ -182,13 +182,13 @@ export const FileManagerPage: React.FC = () => {
       />
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#0f172a]/90 p-4 rounded-2xl border border-slate-800 shrink-0">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-surface-container p-4 rounded-lg border border-outline-variant shrink-0">
         <div>
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <FolderTree className="w-5 h-5 text-indigo-400" />
+            <FolderTree className="w-5 h-5 text-primary" />
             Gerenciador de Arquivos, Uploads & .env
           </h2>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-on-surface-variant">
             Navegue pelas pastas da VPS, faça upload de arquivos e edite scripts de configuração.
           </p>
         </div>
@@ -197,7 +197,7 @@ export const FileManagerPage: React.FC = () => {
           <button
             onClick={() => fileInputRef.current?.click()}
             title="Fazer upload de arquivo para a pasta atual"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-xs font-semibold border border-indigo-500/30 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary-container/20 hover:bg-primary-container/30 text-primary text-xs font-semibold border border-primary/30 transition-colors"
           >
             <Upload className="w-3.5 h-3.5" />
             Upload Arquivo
@@ -206,25 +206,25 @@ export const FileManagerPage: React.FC = () => {
           <button
             onClick={() => setShowNewFileModal(true)}
             title="Criar um novo arquivo neste diretório"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-semibold border border-outline-variant transition-colors"
           >
-            <Plus className="w-3.5 h-3.5 text-indigo-400" />
+            <Plus className="w-3.5 h-3.5 text-primary" />
             Novo Arquivo
           </button>
 
           <button
             onClick={() => setShowNewFolderModal(true)}
             title="Criar uma nova pasta neste diretório"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-semibold border border-outline-variant transition-colors"
           >
-            <Plus className="w-3.5 h-3.5 text-emerald-400" />
+            <Plus className="w-3.5 h-3.5 text-ok" />
             Nova Pasta
           </button>
 
           <button
             onClick={() => fetchFiles(currentPath)}
             title="Recarregar lista de arquivos"
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+            className="p-2 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-white transition-colors"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           </button>
@@ -234,45 +234,45 @@ export const FileManagerPage: React.FC = () => {
       {/* Main split view: File list on left, editor on right */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0">
         {/* Left Column: Explorer */}
-        <div className="lg:col-span-5 bg-[#0f172a]/80 rounded-2xl border border-slate-800 flex flex-col overflow-hidden">
+        <div className="lg:col-span-5 bg-surface-container rounded-lg border border-outline-variant flex flex-col overflow-hidden">
           {/* Breadcrumb path bar */}
-          <div className="p-3 bg-slate-900/80 border-b border-slate-800 flex items-center gap-2 text-xs font-mono">
+          <div className="p-3 bg-surface-container-low border-b border-outline-variant flex items-center gap-2 text-xs font-mono">
             {currentPath && (
               <button
                 onClick={navigateUp}
                 title="Voltar para a pasta anterior"
-                className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                className="p-1 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant transition-colors"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
               </button>
             )}
-            <span className="text-slate-500">/data/{currentPath}</span>
+            <span className="text-on-surface-variant/70">/data/{currentPath}</span>
           </div>
 
           {/* Files List */}
-          <div className="flex-1 overflow-y-auto divide-y divide-slate-800/50">
+          <div className="flex-1 overflow-y-auto divide-y divide-outline-variant/50">
             {files.length === 0 ? (
-              <div className="text-center py-12 text-slate-500 text-xs">
+              <div className="text-center py-12 text-on-surface-variant/70 text-xs">
                 Nenhum arquivo ou pasta encontrado neste diretório.
               </div>
             ) : (
               files.map((file) => (
                 <div
                   key={file.path}
-                  className={`flex items-center justify-between px-3.5 py-2.5 hover:bg-slate-800/40 transition-colors cursor-pointer group ${
-                    selectedFile?.path === file.path ? 'bg-indigo-600/15 border-l-2 border-indigo-500' : ''
+                  className={`flex items-center justify-between px-3.5 py-2.5 hover:bg-surface-container-high transition-colors cursor-pointer group ${
+                    selectedFile?.path === file.path ? 'bg-primary-container/15 border-l-2 border-primary' : ''
                   }`}
                   onClick={() => handleOpenItem(file)}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     {file.isDirectory ? (
-                      <Folder className="w-4 h-4 text-indigo-400 shrink-0" />
+                      <Folder className="w-4 h-4 text-primary shrink-0" />
                     ) : file.extension === 'env' || file.name.startsWith('.env') ? (
-                      <Code className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <Code className="w-4 h-4 text-ok shrink-0" />
                     ) : (
-                      <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                      <FileText className="w-4 h-4 text-on-surface-variant shrink-0" />
                     )}
-                    <span className={`text-xs truncate ${file.isDirectory ? 'font-semibold text-slate-200' : 'text-slate-300 font-mono'}`}>
+                    <span className={`text-xs truncate ${file.isDirectory ? 'font-semibold text-on-surface' : 'text-on-surface-variant font-mono'}`}>
                       {file.name}
                     </span>
                   </div>
@@ -280,14 +280,14 @@ export const FileManagerPage: React.FC = () => {
                   <div className="flex items-center gap-2 shrink-0">
                     {!file.isDirectory && (
                       <>
-                        <span className="text-[10px] font-mono text-slate-500">{formatBytes(file.sizeBytes)}</span>
+                        <span className="text-[10px] font-mono text-on-surface-variant/70">{formatBytes(file.sizeBytes)}</span>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             handleDownloadItem(file);
                           }}
                           title="Baixar este arquivo"
-                          className="p-1 rounded text-slate-500 hover:text-indigo-300 opacity-0 group-hover:opacity-100 transition-all"
+                          className="p-1 rounded text-on-surface-variant/70 hover:text-primary opacity-0 group-hover:opacity-100 transition-all"
                         >
                           <Download className="w-3.5 h-3.5" />
                         </button>
@@ -299,7 +299,7 @@ export const FileManagerPage: React.FC = () => {
                         handleDeleteItem(file);
                       }}
                       title="Deletar este item"
-                      className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100 transition-all"
+                      className="p-1 rounded text-on-surface-variant/70 hover:text-crit hover:bg-crit/10 opacity-0 group-hover:opacity-100 transition-all"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -311,20 +311,20 @@ export const FileManagerPage: React.FC = () => {
         </div>
 
         {/* Right Column: Code Editor */}
-        <div className="lg:col-span-7 bg-[#090d16] rounded-2xl border border-slate-800 flex flex-col overflow-hidden">
+        <div className="lg:col-span-7 bg-surface-container-lowest rounded-lg border border-outline-variant flex flex-col overflow-hidden">
           {selectedFile ? (
             <>
               {/* Editor toolbar */}
-              <div className="p-3 bg-[#0d1322] border-b border-slate-800 flex items-center justify-between shrink-0">
+              <div className="p-3 bg-[#0d1322] border-b border-outline-variant flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2">
-                  <FileCode className="w-4 h-4 text-indigo-400" />
+                  <FileCode className="w-4 h-4 text-primary" />
                   <span className="font-mono text-xs font-bold text-white">{selectedFile.name}</span>
-                  <span className="text-[10px] text-slate-500 font-mono">({formatBytes(selectedFile.sizeBytes)})</span>
+                  <span className="text-[10px] text-on-surface-variant/70 font-mono">({formatBytes(selectedFile.sizeBytes)})</span>
                 </div>
 
                 <div className="flex items-center gap-2">
                   {saveSuccess && (
-                    <span className="text-emerald-400 text-xs font-semibold flex items-center gap-1">
+                    <span className="text-ok text-xs font-semibold flex items-center gap-1">
                       <Check className="w-3.5 h-3.5" /> Salvo!
                     </span>
                   )}
@@ -333,7 +333,7 @@ export const FileManagerPage: React.FC = () => {
                     onClick={handleSaveFile}
                     disabled={savingFile}
                     title="Salvar alterações no arquivo (Ctrl+S)"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow transition-all active:scale-95 disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-container hover:bg-primary text-white text-xs font-semibold shadow transition-all active:scale-95 disabled:opacity-50"
                   >
                     <Save className="w-3.5 h-3.5" />
                     {savingFile ? 'Salvando...' : 'Salvar Arquivo'}
@@ -346,15 +346,15 @@ export const FileManagerPage: React.FC = () => {
                 value={fileContent}
                 onChange={(e) => setFileContent(e.target.value)}
                 placeholder="Conteúdo do arquivo..."
-                className="flex-1 w-full bg-transparent p-4 font-mono text-xs text-slate-200 leading-relaxed resize-none focus:outline-none selection:bg-indigo-500/30"
+                className="flex-1 w-full bg-transparent p-4 font-mono text-xs text-on-surface leading-relaxed resize-none focus:outline-none selection:bg-primary/25"
                 spellCheck={false}
               />
             </>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-xs p-8 text-center">
-              <FileCode className="w-10 h-10 text-slate-600 mb-3" />
-              <h4 className="font-bold text-slate-300 text-sm mb-1">Nenhum arquivo selecionado</h4>
-              <p className="max-w-xs text-slate-500">
+            <div className="flex-1 flex flex-col items-center justify-center text-on-surface-variant/70 text-xs p-8 text-center">
+              <FileCode className="w-10 h-10 text-outline mb-3" />
+              <h4 className="font-bold text-on-surface-variant text-sm mb-1">Nenhum arquivo selecionado</h4>
+              <p className="max-w-xs text-on-surface-variant/70">
                 Clique em qualquer arquivo da lista à esquerda para visualizá-lo e editá-lo diretamente aqui.
               </p>
             </div>
@@ -365,7 +365,7 @@ export const FileManagerPage: React.FC = () => {
       {/* Modal: Nova Pasta */}
       {showNewFolderModal && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-2xl border border-slate-800 w-full max-w-sm overflow-hidden shadow-2xl p-5">
+          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-sm overflow-hidden p-5">
             <h3 className="font-bold text-white text-base mb-3">Criar Nova Pasta</h3>
             <form onSubmit={handleCreateFolder} className="space-y-4">
               <input
@@ -374,19 +374,19 @@ export const FileManagerPage: React.FC = () => {
                 placeholder="nome-da-pasta"
                 value={newFolderName}
                 onChange={(e) => setNewFolderName(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2 text-white text-sm focus:outline-none focus:border-primary"
               />
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setShowNewFolderModal(false)}
-                  className="px-3.5 py-2 text-slate-400 hover:text-white text-xs font-medium"
+                  className="px-3.5 py-2 text-on-surface-variant hover:text-white text-xs font-medium"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold"
+                  className="px-4 py-2 bg-primary-container hover:bg-primary text-white rounded text-xs font-semibold"
                 >
                   Criar
                 </button>
@@ -399,7 +399,7 @@ export const FileManagerPage: React.FC = () => {
       {/* Modal: Novo Arquivo */}
       {showNewFileModal && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-2xl border border-slate-800 w-full max-w-sm overflow-hidden shadow-2xl p-5">
+          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-sm overflow-hidden p-5">
             <h3 className="font-bold text-white text-base mb-3">Criar Novo Arquivo</h3>
             <form onSubmit={handleCreateFile} className="space-y-4">
               <input
@@ -408,19 +408,19 @@ export const FileManagerPage: React.FC = () => {
                 placeholder="ex: .env.production ou config.json"
                 value={newFileName}
                 onChange={(e) => setNewFileName(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
+                className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2 text-white text-sm focus:outline-none focus:border-primary font-mono"
               />
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setShowNewFileModal(false)}
-                  className="px-3.5 py-2 text-slate-400 hover:text-white text-xs font-medium"
+                  className="px-3.5 py-2 text-on-surface-variant hover:text-white text-xs font-medium"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold"
+                  className="px-4 py-2 bg-primary-container hover:bg-primary text-white rounded text-xs font-semibold"
                 >
                   Criar Arquivo
                 </button>

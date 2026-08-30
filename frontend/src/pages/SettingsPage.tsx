@@ -34,10 +34,10 @@ const SECRET_MASK = '••••••••';
  */
 const SecretStatus: React.FC<{ configured: boolean; onClear: () => void }> = ({ configured, onClear }) =>
   configured ? (
-    <p className="text-[10px] text-slate-500 mt-1 flex items-center gap-1.5">
-      <Lock className="w-3 h-3 text-emerald-400 shrink-0" />
+    <p className="text-[10px] text-on-surface-variant/70 mt-1 flex items-center gap-1.5">
+      <Lock className="w-3 h-3 text-ok shrink-0" />
       Já configurado. Deixe em branco para manter.
-      <button type="button" onClick={onClear} className="text-rose-400 hover:text-rose-300 underline">
+      <button type="button" onClick={onClear} className="text-crit hover:text-crit underline">
         Remover
       </button>
     </p>
@@ -46,17 +46,17 @@ const SecretStatus: React.FC<{ configured: boolean; onClear: () => void }> = ({ 
 const ROLE_LEGEND = [
   {
     role: 'ADMIN',
-    className: 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300',
+    className: 'bg-primary/10 border-primary/30 text-primary',
     text: 'Tudo: equipe, terminal do host, tarefas shell, firewall, importar/exportar o painel.',
   },
   {
     role: 'DEVELOPER',
-    className: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300',
+    className: 'bg-ok/10 border-ok/30 text-ok',
     text: 'Apps, deploys, bancos, domínios, arquivos e terminal de contêineres.',
   },
   {
     role: 'VIEWER',
-    className: 'bg-slate-800/60 border-slate-700 text-slate-300',
+    className: 'bg-surface-container-high border-outline-variant text-on-surface-variant',
     text: 'Somente leitura. Não altera nada e não abre terminal.',
   },
 ];
@@ -399,10 +399,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
       {/* Header */}
       <div>
         <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-          <Settings className="w-6 h-6 text-indigo-400" />
+          <Settings className="w-6 h-6 text-primary" />
           Configurações do Servidor & Plataforma
         </h2>
-        <p className="text-sm text-slate-400 mt-1">
+        <p className="text-sm text-on-surface-variant mt-1">
           Gerencie alertas no WhatsApp/Telegram, equipe, domínio próprio do painel e nós de computação.
         </p>
       </div>
@@ -410,15 +410,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
       {/* Main Settings Form */}
       <form onSubmit={handleSave} className="space-y-6">
         {/* Identificação do Servidor & Domínio Próprio */}
-        <div className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 shadow-xl space-y-5">
+        <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-5">
           <h3 className="font-bold text-white text-base flex items-center gap-2">
-            <Server className="w-5 h-5 text-indigo-400" />
+            <Server className="w-5 h-5 text-primary" />
             Identificação & Domínio Próprio do Painel
           </h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                 Nome de Exibição do Servidor
               </label>
               <input
@@ -426,12 +426,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                 required
                 value={serverName}
                 onChange={(e) => setServerName(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500"
+                className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                 Domínio Próprio do Painel (SSL Nativo)
               </label>
               <input
@@ -439,9 +439,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                 placeholder="ex: painel.seudominio.com"
                 value={panelDomain}
                 onChange={(e) => setPanelDomain(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-indigo-500"
+                className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-primary"
               />
-              <p className="text-[10px] text-slate-400 mt-1">
+              <p className="text-[10px] text-on-surface-variant mt-1">
                 Acesse o dashboard via HTTPS diretamente pelo seu subdomínio.
               </p>
             </div>
@@ -449,18 +449,18 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
         </div>
 
         {/* WhatsApp Notifications (Evolution API) */}
-        <div className="bg-[#0f172a]/90 rounded-3xl p-6 border border-emerald-500/30 shadow-xl space-y-5">
+        <div className="bg-surface-container rounded-lg p-6 border border-ok/30 space-y-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+              <div className="p-2 rounded bg-ok/10 text-ok">
                 <MessageSquare className="w-5 h-5" />
               </div>
               <div>
                 <h3 className="font-bold text-white text-base flex items-center gap-2">
                   <span>Notificações no WhatsApp (Evolution API)</span>
-                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-mono">Pro</span>
+                  <span className="text-[10px] bg-ok/15 text-ok px-2 py-0.5 rounded-full font-mono">Pro</span>
                 </h3>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-on-surface-variant">
                   Receba avisos instantâneos de deploys e incidentes direto no seu WhatsApp.
                 </p>
               </div>
@@ -473,15 +473,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                 onChange={(e) => setWhatsappEnabled(e.target.checked)}
                 className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
               />
-              <span className="text-slate-200">Ativar WhatsApp</span>
+              <span className="text-on-surface">Ativar WhatsApp</span>
             </label>
           </div>
 
           {whatsappEnabled && (
-            <div className="space-y-4 pt-2 border-t border-slate-800">
+            <div className="space-y-4 pt-2 border-t border-outline-variant">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1">
                     Evolution API URL (Instância)
                   </label>
                   <input
@@ -489,12 +489,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                     placeholder="https://evolution.seudominio.com ou http://localhost:8080"
                     value={whatsappApiUrl}
                     onChange={(e) => setWhatsappApiUrl(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-ok"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1">
                     API Key (Chave Global de Autenticação)
                   </label>
                   <input
@@ -502,7 +502,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                     placeholder={configuredSecrets.whatsappApiKey ? 'Manter a chave atual' : 'Sua chave secreta da Evolution API'}
                     value={whatsappApiKey}
                     onChange={(e) => setWhatsappApiKey(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-ok"
                   />
                   <SecretStatus
                     configured={!!configuredSecrets.whatsappApiKey}
@@ -511,7 +511,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1">
                     Nome da Instância WhatsApp
                   </label>
                   <input
@@ -519,12 +519,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                     placeholder="ex: principal ou selva-vps"
                     value={whatsappInstance}
                     onChange={(e) => setWhatsappInstance(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-ok"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1">
                     Número do Seu WhatsApp (com DDI e DDD)
                   </label>
                   <input
@@ -532,7 +532,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                     placeholder="ex: 5511999998888"
                     value={whatsappRecipientNumber}
                     onChange={(e) => setWhatsappRecipientNumber(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-ok"
                   />
                 </div>
               </div>
@@ -542,7 +542,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                   type="button"
                   onClick={() => handleTestAlert('whatsapp')}
                   disabled={testingChannel === 'whatsapp' || !whatsappApiUrl || !whatsappRecipientNumber}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-semibold transition-all disabled:opacity-40"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-ok border border-ok/30 rounded text-xs font-semibold transition-all disabled:opacity-40"
                 >
                   <Send className="w-3.5 h-3.5" />
                   <span>{testingChannel === 'whatsapp' ? 'Enviando...' : 'Enviar Teste (WhatsApp)'}</span>
@@ -553,15 +553,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
         </div>
 
         {/* Telegram & Discord Notifications */}
-        <div className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 shadow-xl space-y-5">
+        <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400">
+              <div className="p-2 rounded bg-primary/10 text-primary">
                 <Bell className="w-5 h-5" />
               </div>
               <div>
                 <h3 className="font-bold text-white text-base">Alertas no Telegram & Discord</h3>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-on-surface-variant">
                   Integrações adicionais de monitoramento de infraestrutura.
                 </p>
               </div>
@@ -572,15 +572,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                 type="checkbox"
                 checked={alertsEnabled}
                 onChange={(e) => setAlertsEnabled(e.target.checked)}
-                className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
+                className="w-4 h-4 rounded text-primary focus:ring-primary"
               />
-              <span className="text-slate-200">Ativar Notificações</span>
+              <span className="text-on-surface">Ativar Notificações</span>
             </label>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-800">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-outline-variant">
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
+              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
                 Discord Webhook URL
               </label>
               <div className="flex items-center gap-2">
@@ -589,13 +589,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                   placeholder={configuredSecrets.discordWebhookUrl ? 'Manter o webhook atual' : 'https://discord.com/api/webhooks/...'}
                   value={discordWebhookUrl}
                   onChange={(e) => setDiscordWebhookUrl(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
                 />
                 <button
                   type="button"
                   onClick={() => handleTestAlert('discord')}
                   disabled={(!discordWebhookUrl && !configuredSecrets.discordWebhookUrl) || testingChannel === 'discord'}
-                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs shrink-0 disabled:opacity-40"
+                  className="px-3 py-2 bg-surface-container-high hover:bg-surface-container-highest text-on-surface rounded text-xs shrink-0 disabled:opacity-40"
                 >
                   Testar
                 </button>
@@ -607,7 +607,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
+              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
                 Telegram (Bot Token e Chat ID)
               </label>
               <div className="flex items-center gap-2">
@@ -616,14 +616,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                   placeholder={configuredSecrets.telegramBotToken ? 'Manter o token atual' : 'Bot Token'}
                   value={telegramBotToken}
                   onChange={(e) => setTelegramBotToken(e.target.value)}
-                  className="w-1/2 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-indigo-500"
+                  className="w-1/2 bg-surface-container-low border border-outline-variant rounded px-3 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
                 />
                 <input
                   type="text"
                   placeholder="Chat ID"
                   value={telegramChatId}
                   onChange={(e) => setTelegramChatId(e.target.value)}
-                  className="w-1/2 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-indigo-500"
+                  className="w-1/2 bg-surface-container-low border border-outline-variant rounded px-3 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
                 />
                 <button
                   type="button"
@@ -633,7 +633,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                     !telegramChatId ||
                     testingChannel === 'telegram'
                   }
-                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs shrink-0 disabled:opacity-40"
+                  className="px-3 py-2 bg-surface-container-high hover:bg-surface-container-highest text-on-surface rounded text-xs shrink-0 disabled:opacity-40"
                 >
                   Testar
                 </button>
@@ -642,60 +642,60 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
           </div>
 
           {/* Trigger Preferences */}
-          <div className="pt-3 border-t border-slate-800 space-y-3">
-            <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Gatilhos de Notificação</h4>
+          <div className="pt-3 border-t border-outline-variant space-y-3">
+            <h4 className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Gatilhos de Notificação</h4>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-              <label className="flex items-center gap-2 cursor-pointer bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors">
+              <label className="flex items-center gap-2 cursor-pointer bg-surface-container-low p-2.5 rounded border border-outline-variant hover:border-outline-variant transition-colors">
                 <input
                   type="checkbox"
                   checked={notifyOnDeploySuccess}
                   onChange={(e) => setNotifyOnDeploySuccess(e.target.checked)}
-                  className="rounded text-indigo-600 focus:ring-0"
+                  className="rounded text-primary focus:ring-0"
                 />
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span className="text-slate-300">Deploy Sucesso</span>
+                <CheckCircle2 className="w-3.5 h-3.5 text-ok shrink-0" />
+                <span className="text-on-surface-variant">Deploy Sucesso</span>
               </label>
 
-              <label className="flex items-center gap-2 cursor-pointer bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors">
+              <label className="flex items-center gap-2 cursor-pointer bg-surface-container-low p-2.5 rounded border border-outline-variant hover:border-outline-variant transition-colors">
                 <input
                   type="checkbox"
                   checked={notifyOnDeployFail}
                   onChange={(e) => setNotifyOnDeployFail(e.target.checked)}
-                  className="rounded text-indigo-600 focus:ring-0"
+                  className="rounded text-primary focus:ring-0"
                 />
-                <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                <span className="text-slate-300">Deploy Falhou</span>
+                <AlertTriangle className="w-3.5 h-3.5 text-crit shrink-0" />
+                <span className="text-on-surface-variant">Deploy Falhou</span>
               </label>
 
-              <label className="flex items-center gap-2 cursor-pointer bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors">
+              <label className="flex items-center gap-2 cursor-pointer bg-surface-container-low p-2.5 rounded border border-outline-variant hover:border-outline-variant transition-colors">
                 <input
                   type="checkbox"
                   checked={notifyOnHighResource}
                   onChange={(e) => setNotifyOnHighResource(e.target.checked)}
-                  className="rounded text-indigo-600 focus:ring-0"
+                  className="rounded text-primary focus:ring-0"
                 />
-                <Activity className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span className="text-slate-300">CPU / RAM &gt; 90%</span>
+                <Activity className="w-3.5 h-3.5 text-warn shrink-0" />
+                <span className="text-on-surface-variant">CPU / RAM &gt; 90%</span>
               </label>
 
-              <label className="flex items-center gap-2 cursor-pointer bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors">
+              <label className="flex items-center gap-2 cursor-pointer bg-surface-container-low p-2.5 rounded border border-outline-variant hover:border-outline-variant transition-colors">
                 <input
                   type="checkbox"
                   checked={notifyOnBackup}
                   onChange={(e) => setNotifyOnBackup(e.target.checked)}
-                  className="rounded text-indigo-600 focus:ring-0"
+                  className="rounded text-primary focus:ring-0"
                 />
-                <Database className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                <span className="text-slate-300">Backup Banco</span>
+                <Database className="w-3.5 h-3.5 text-primary shrink-0" />
+                <span className="text-on-surface-variant">Backup Banco</span>
               </label>
             </div>
           </div>
 
           {/* Threshold Sliders */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3 border-t border-slate-800">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3 border-t border-outline-variant">
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Limite Alerta CPU: <span className="text-indigo-400 font-bold">{cpuThreshold}%</span>
+              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                Limite Alerta CPU: <span className="text-primary font-bold">{cpuThreshold}%</span>
               </label>
               <input
                 type="range"
@@ -703,13 +703,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                 max="98"
                 value={cpuThreshold}
                 onChange={(e) => setCpuThreshold(parseInt(e.target.value))}
-                className="w-full accent-indigo-500"
+                className="w-full accent-[#4d8eff]"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Limite Alerta Memória: <span className="text-emerald-400 font-bold">{memThreshold}%</span>
+              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                Limite Alerta Memória: <span className="text-ok font-bold">{memThreshold}%</span>
               </label>
               <input
                 type="range"
@@ -722,8 +722,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Limite Alerta Disco: <span className="text-amber-400 font-bold">{diskThreshold}%</span>
+              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                Limite Alerta Disco: <span className="text-warn font-bold">{diskThreshold}%</span>
               </label>
               <input
                 type="range"
@@ -737,11 +737,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
           </div>
 
               {!isAdmin && (
-            <div className="flex items-start gap-3 p-4 rounded-2xl border border-slate-700 bg-slate-900/60">
-              <Shield className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-slate-400">
+            <div className="flex items-start gap-3 p-4 rounded-lg border border-outline-variant bg-surface-container-low">
+              <Shield className="w-5 h-5 text-on-surface-variant shrink-0 mt-0.5" />
+              <p className="text-xs text-on-surface-variant">
                 Você está vendo estas configurações em modo leitura. Alterá-las exige o perfil{' '}
-                <span className="font-mono text-slate-200">admin</span>.
+                <span className="font-mono text-on-surface">admin</span>.
               </p>
             </div>
           )}
@@ -749,7 +749,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
           {/* Save Button */}
           <div className="flex items-center justify-between pt-3">
             {savedSuccess ? (
-              <span className="text-emerald-400 text-xs font-semibold flex items-center gap-1">
+              <span className="text-ok text-xs font-semibold flex items-center gap-1">
                 <Check className="w-4 h-4" /> Configurações salvas com sucesso!
               </span>
             ) : <span></span>}
@@ -758,7 +758,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
               type="submit"
               disabled={saving || !isAdmin}
               title={isAdmin ? undefined : 'Somente administradores podem alterar as configurações do painel.'}
-              className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 px-6 py-2.5 rounded bg-primary-container hover:bg-primary text-white font-semibold text-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Save className="w-4 h-4" />
               {saving ? 'Salvando...' : 'Salvar Alterações'}
@@ -768,17 +768,17 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
       </form>
 
       {/* Change own password: available to every role, including viewers. */}
-      <div className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
+      <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-xl bg-sky-500/10 text-sky-400">
+          <div className="p-2 rounded bg-sky-500/10 text-sky-400">
             <Lock className="w-5 h-5" />
           </div>
           <div>
             <h3 className="font-bold text-white text-base">Minha Senha</h3>
-            <p className="text-xs text-slate-400">
-              Conectado como <span className="text-slate-200 font-semibold">{currentUser?.username || '-'}</span>
+            <p className="text-xs text-on-surface-variant">
+              Conectado como <span className="text-on-surface font-semibold">{currentUser?.username || '-'}</span>
               {currentUser?.role && (
-                <span className="ml-1.5 text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold bg-slate-800 text-slate-300">
+                <span className="ml-1.5 text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold bg-surface-container-high text-on-surface-variant">
                   {currentUser.role.toUpperCase()}
                 </span>
               )}
@@ -788,17 +788,17 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
 
         <form onSubmit={handleChangeOwnPassword} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Senha atual</label>
+            <label className="block text-xs font-semibold text-on-surface-variant mb-1">Senha atual</label>
             <input
               type="password"
               required
               value={currentPassword}
               onChange={(e) => setCurrentPassword(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-sky-500"
+              className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-sky-500"
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Nova senha</label>
+            <label className="block text-xs font-semibold text-on-surface-variant mb-1">Nova senha</label>
             <input
               type="password"
               required
@@ -806,13 +806,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
               placeholder="Mínimo 12 caracteres"
               value={newOwnPassword}
               onChange={(e) => setNewOwnPassword(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-sky-500"
+              className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-sky-500"
             />
           </div>
           <button
             type="submit"
             disabled={changingPassword}
-            className="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold"
+            className="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded text-xs font-semibold"
           >
             {changingPassword ? 'Alterando...' : 'Alterar senha'}
           </button>
@@ -820,15 +820,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
       </div>
 
       {/* Team / Multi-User Management Section */}
-      <div className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
+      <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400">
+            <div className="p-2 rounded bg-purple-500/10 text-purple-400">
               <Users className="w-5 h-5" />
             </div>
             <div>
               <h3 className="font-bold text-white text-base">Equipe & Controle de Permissões</h3>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-on-surface-variant">
                 Convide desenvolvedores e operadores com permissões granulares.
               </p>
             </div>
@@ -837,7 +837,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
           {isAdmin && (
             <button
               onClick={() => setShowAddUserModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-purple-600/30 transition-all"
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs font-semibold transition-all"
             >
               <UserPlus className="w-3.5 h-3.5" />
               Adicionar Membro
@@ -846,18 +846,18 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
         </div>
 
         {teamError ? (
-          <div className="flex items-start gap-3 p-4 rounded-2xl border border-slate-700 bg-slate-900/60">
-            <Shield className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
-            <p className="text-xs text-slate-400">{teamError}</p>
+          <div className="flex items-start gap-3 p-4 rounded-lg border border-outline-variant bg-surface-container-low">
+            <Shield className="w-5 h-5 text-on-surface-variant shrink-0 mt-0.5" />
+            <p className="text-xs text-on-surface-variant">{teamError}</p>
           </div>
         ) : (
           <>
             {/* What each role can do, so the choice is not a guess. */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               {ROLE_LEGEND.map((r) => (
-                <div key={r.role} className={`p-3 rounded-xl border ${r.className}`}>
+                <div key={r.role} className={`p-3 rounded border ${r.className}`}>
                   <p className="text-[10px] font-mono font-bold mb-1">{r.role}</p>
-                  <p className="text-[11px] text-slate-400 leading-snug">{r.text}</p>
+                  <p className="text-[11px] text-on-surface-variant leading-snug">{r.text}</p>
                 </div>
               ))}
             </div>
@@ -874,38 +874,38 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                 return (
                   <div
                     key={user.id}
-                    className="p-4 rounded-2xl bg-slate-950 border border-slate-800/80 flex items-center justify-between gap-2"
+                    className="p-4 rounded-lg bg-surface-container-lowest border border-outline-variant flex items-center justify-between gap-2"
                   >
                     <div className="space-y-0.5 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-white text-sm truncate">{user.username}</span>
                         {isSelf && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 font-semibold">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/20 text-tertiary font-semibold">
                             você
                           </span>
                         )}
                         <span
                           className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold ${
                             user.role === 'admin'
-                              ? 'bg-indigo-500/20 text-indigo-300'
+                              ? 'bg-primary/20 text-primary'
                               : user.role === 'developer'
-                              ? 'bg-emerald-500/20 text-emerald-300'
-                              : 'bg-slate-800 text-slate-400'
+                              ? 'bg-ok/15 text-ok'
+                              : 'bg-surface-container-high text-on-surface-variant'
                           }`}
                         >
                           {user.role.toUpperCase()}
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-400 truncate">{user.email || 'Sem e-mail cadastrado'}</p>
+                      <p className="text-[11px] text-on-surface-variant truncate">{user.email || 'Sem e-mail cadastrado'}</p>
                       {isLastAdmin && (
-                        <p className="text-[10px] text-amber-400/80">Único administrador — não pode ser removido.</p>
+                        <p className="text-[10px] text-warn/80">Único administrador — não pode ser removido.</p>
                       )}
                     </div>
 
                     {canRemove && (
                       <button
                         onClick={() => handleDeleteUser(user.id, user.username)}
-                        className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-900 transition-colors shrink-0"
+                        className="p-1.5 text-on-surface-variant/70 hover:text-crit rounded-lg hover:bg-surface-container-low transition-colors shrink-0"
                         title="Remover usuário da equipe"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -921,19 +921,19 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
 
       {/* Migration & Backup Section: admin only, mirrors the server rule. */}
       {isAdmin && (
-      <div className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
+      <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
         <div className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-indigo-400" />
+          <Sparkles className="w-5 h-5 text-primary" />
           <h3 className="font-bold text-white text-base">Migração & Backup Global do Painel</h3>
         </div>
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-on-surface-variant">
           Exporte todo o estado do AegisPanel (Bancos, Aplicações, Cron Jobs, Domínios e Configurações) em um único arquivo JSON para restauração instantânea.
         </p>
 
         <div className="flex flex-wrap items-center gap-3 pt-2">
           <button
             onClick={handleExportState}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 text-xs font-semibold border border-indigo-500/30 transition-all active:scale-95"
+            className="flex items-center gap-2 px-4 py-2.5 rounded bg-surface-container-high hover:bg-surface-container-highest text-primary text-xs font-semibold border border-primary/30 transition-all active:scale-95"
           >
             <Download className="w-4 h-4" />
             <span>Exportar Backup Completo (.JSON)</span>
@@ -950,7 +950,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
           <button
             onClick={() => importFileRef.current?.click()}
             disabled={importing}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 text-xs font-semibold border border-emerald-500/30 transition-all active:scale-95 disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2.5 rounded bg-surface-container-high hover:bg-surface-container-highest text-ok text-xs font-semibold border border-ok/30 transition-all active:scale-95 disabled:opacity-50"
           >
             <Upload className="w-4 h-4" />
             <span>{importing ? 'Importando...' : 'Restaurar / Importar Backup'}</span>
@@ -960,20 +960,20 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
       )}
 
       {/* VPS 1-Click Installer Script Box */}
-      <div className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
+      <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-emerald-400" />
+            <Terminal className="w-4 h-4 text-ok" />
             <h3 className="font-bold text-white text-base">Script Oficial de Instalação em VPS Linux</h3>
           </div>
           <button
             onClick={copyInstallScript}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-medium border border-outline-variant transition-colors"
           >
             {copiedScript ? (
               <>
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-emerald-400">Copiado</span>
+                <Check className="w-3.5 h-3.5 text-ok" />
+                <span className="text-ok">Copiado</span>
               </>
             ) : (
               <>
@@ -983,7 +983,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
             )}
           </button>
         </div>
-        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-xs text-emerald-400 select-all">
+        <div className="bg-surface-container-lowest p-4 rounded border border-outline-variant font-mono text-xs text-ok select-all">
           curl -fsSL https://raw.githubusercontent.com/WendelDev0/aegispanel/main/install.sh | bash
         </div>
       </div>
@@ -991,7 +991,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
       {/* Add Team User Modal */}
       {showAddUserModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-md overflow-hidden shadow-2xl p-6 space-y-5">
+          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-md overflow-hidden p-6 space-y-5">
             <h3 className="font-bold text-white text-lg flex items-center gap-2">
               <UserPlus className="w-5 h-5 text-purple-400" />
               Novo Membro da Equipe
@@ -999,19 +999,19 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
 
             <form onSubmit={handleAddUser} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Nome de Usuário *</label>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1">Nome de Usuário *</label>
                 <input
                   type="text"
                   required
                   placeholder="ex: dev_selva"
                   value={newUsername}
                   onChange={(e) => setNewUsername(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Senha de Acesso *</label>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1">Senha de Acesso *</label>
                 <input
                   type="password"
                   required
@@ -1019,34 +1019,34 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                   placeholder="Mínimo 12 caracteres"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">E-mail (Opcional)</label>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1">E-mail (Opcional)</label>
                 <input
                   type="email"
                   placeholder="voce@seudominio.com"
                   value={newEmail}
                   onChange={(e) => setNewEmail(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Função / Permissão</label>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1">Função / Permissão</label>
                 <select
                   value={newRole}
                   onChange={(e: any) => setNewRole(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"
                 >
                   <option value="viewer">Visualizador — somente leitura</option>
                   <option value="developer">Desenvolvedor — deploys, apps, bancos, arquivos</option>
                   <option value="admin">Administrador — controle total do servidor</option>
                 </select>
                 {newRole === 'admin' && (
-                  <p className="text-[11px] text-amber-300/90 mt-1.5 flex items-start gap-1.5">
+                  <p className="text-[11px] text-warn/90 mt-1.5 flex items-start gap-1.5">
                     <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
                     Administradores abrem terminal no host, executam comandos e gerenciam a equipe. Na prática,
                     é acesso root ao servidor.
@@ -1058,14 +1058,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
                 <button
                   type="button"
                   onClick={() => setShowAddUserModal(false)}
-                  className="px-4 py-2 text-slate-400 hover:text-white text-xs font-semibold"
+                  className="px-4 py-2 text-on-surface-variant hover:text-white text-xs font-semibold"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={addingUser}
-                  className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-purple-600/30 transition-all active:scale-95 disabled:opacity-50"
+                  className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
                 >
                   {addingUser ? 'Criando...' : 'Salvar Membro'}
                 </button>

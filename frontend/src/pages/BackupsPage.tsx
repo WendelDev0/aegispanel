@@ -108,10 +108,10 @@ export const BackupsPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-            <HardDriveDownload className="w-6 h-6 text-emerald-400" />
+            <HardDriveDownload className="w-6 h-6 text-ok" />
             Backups & Restauração 1-Clique
           </h2>
-          <p className="text-sm text-slate-400 mt-1">
+          <p className="text-sm text-on-surface-variant mt-1">
             Gere dumps SQL completos dos seus bancos de dados e restaure instâncias em segundos sem perda de dados.
           </p>
         </div>
@@ -119,7 +119,7 @@ export const BackupsPage: React.FC = () => {
         <button
           onClick={() => setShowCreateModal(true)}
           title="Fazer backup imediato de um banco de dados"
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-lg shadow-emerald-600/30 transition-all active:scale-95 shrink-0"
+          className="flex items-center gap-2 px-4 py-2.5 rounded bg-ok/90 hover:bg-ok text-white font-semibold text-sm transition-all active:scale-95 shrink-0"
         >
           <Plus className="w-4 h-4" />
           Fazer Backup Agora
@@ -128,31 +128,31 @@ export const BackupsPage: React.FC = () => {
 
       {/* Backups List */}
       {loading ? (
-        <div className="flex items-center justify-center p-12 text-slate-400">
-          <RefreshCw className="w-6 h-6 animate-spin text-emerald-400" />
+        <div className="flex items-center justify-center p-12 text-on-surface-variant">
+          <RefreshCw className="w-6 h-6 animate-spin text-ok" />
         </div>
       ) : backups.length === 0 ? (
-        <div className="bg-[#0f172a]/60 rounded-2xl p-12 border border-slate-800 text-center">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mx-auto mb-4">
+        <div className="bg-surface-container rounded-lg p-12 border border-outline-variant text-center">
+          <div className="w-12 h-12 rounded-lg bg-ok/10 text-ok flex items-center justify-center mx-auto mb-4">
             <HardDriveDownload className="w-6 h-6" />
           </div>
           <h3 className="text-lg font-bold text-white mb-1">Nenhum backup gerado ainda</h3>
-          <p className="text-sm text-slate-400 max-w-md mx-auto mb-6">
+          <p className="text-sm text-on-surface-variant max-w-md mx-auto mb-6">
             Mantenha seus dados seguros gerando cópias de segurança periódicas dos seus bancos de dados.
           </p>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm inline-flex items-center gap-2 shadow-lg shadow-emerald-600/30"
+            className="px-5 py-2.5 rounded bg-ok/90 hover:bg-ok text-white font-semibold text-sm inline-flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
             Criar Primeiro Backup
           </button>
         </div>
       ) : (
-        <div className="bg-[#0f172a]/80 rounded-2xl border border-slate-800 overflow-hidden">
+        <div className="bg-surface-container rounded-lg border border-outline-variant overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs font-mono">
-              <thead className="bg-slate-900/90 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-800">
+              <thead className="bg-surface-container-low/90 text-on-surface-variant font-semibold uppercase tracking-wider border-b border-outline-variant">
                 <tr>
                   <th className="py-3.5 px-4 font-sans">Alvo / Database</th>
                   <th className="py-3.5 px-4">Arquivo Dump</th>
@@ -161,16 +161,16 @@ export const BackupsPage: React.FC = () => {
                   <th className="py-3.5 px-4 text-right font-sans">Ações</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60">
+              <tbody className="divide-y divide-outline-variant/60">
                 {backups.map((b) => (
-                  <tr key={b.id} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="py-3.5 px-4 font-sans font-bold text-slate-200 flex items-center gap-2">
-                      <Database className="w-4 h-4 text-emerald-400" />
+                  <tr key={b.id} className="hover:bg-surface-container-high/30 transition-colors">
+                    <td className="py-3.5 px-4 font-sans font-bold text-on-surface flex items-center gap-2">
+                      <Database className="w-4 h-4 text-ok" />
                       {b.targetName}
                     </td>
-                    <td className="py-3.5 px-4 text-slate-300 truncate max-w-xs">{b.filename}</td>
-                    <td className="py-3.5 px-4 text-slate-400">{formatBytes(b.sizeBytes)}</td>
-                    <td className="py-3.5 px-4 font-sans text-slate-400">
+                    <td className="py-3.5 px-4 text-on-surface-variant truncate max-w-xs">{b.filename}</td>
+                    <td className="py-3.5 px-4 text-on-surface-variant">{formatBytes(b.sizeBytes)}</td>
+                    <td className="py-3.5 px-4 font-sans text-on-surface-variant">
                       {new Date(b.createdAt).toLocaleString('pt-BR')}
                     </td>
                     <td className="py-3.5 px-4 text-right font-sans">
@@ -179,7 +179,7 @@ export const BackupsPage: React.FC = () => {
                           onClick={() => handleRestoreBackup(b)}
                           disabled={restoringId === b.id}
                           title="Restaurar este backup no banco de dados ativo"
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30 border border-emerald-500/30 text-xs font-semibold transition-colors"
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600/20 text-ok hover:bg-emerald-600/30 border border-ok/30 text-xs font-semibold transition-colors"
                         >
                           <RotateCcw className={`w-3.5 h-3.5 ${restoringId === b.id ? 'animate-spin' : ''}`} />
                           <span>{restoringId === b.id ? 'Restaurando...' : 'Restaurar'}</span>
@@ -188,7 +188,7 @@ export const BackupsPage: React.FC = () => {
                         <button
                           onClick={() => handleDownload(b.filename)}
                           title="Baixar arquivo de backup para seu computador"
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30 border border-indigo-500/30 text-xs font-medium transition-colors"
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary-container/20 text-primary hover:bg-primary-container/30 border border-primary/30 text-xs font-medium transition-colors"
                         >
                           <Download className="w-3.5 h-3.5" />
                           <span>Download</span>
@@ -197,7 +197,7 @@ export const BackupsPage: React.FC = () => {
                         <button
                           onClick={() => handleDeleteBackup(b.id, b.filename)}
                           title="Deletar este arquivo de backup"
-                          className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors"
+                          className="p-1.5 rounded-lg text-crit hover:bg-crit/10 transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -214,26 +214,26 @@ export const BackupsPage: React.FC = () => {
       {/* Modal: Novo Backup */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-2xl border border-slate-800 w-full max-w-md overflow-hidden shadow-2xl p-6">
+          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-md overflow-hidden p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-white text-base flex items-center gap-2">
-                <HardDriveDownload className="w-5 h-5 text-emerald-400" />
+                <HardDriveDownload className="w-5 h-5 text-ok" />
                 Gerar Backup de Banco de Dados
               </h3>
-              <button onClick={() => setShowCreateModal(false)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setShowCreateModal(false)} className="text-on-surface-variant hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleCreateBackup} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                   Selecione o Banco de Dados *
                 </label>
                 <select
                   value={selectedDbId}
                   onChange={(e) => setSelectedDbId(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500 font-mono"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-ok font-mono"
                 >
                   {databases.length === 0 ? (
                     <option value="">Nenhum banco de dados cadastrado</option>
@@ -251,14 +251,14 @@ export const BackupsPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 text-slate-400 hover:text-white text-xs font-medium"
+                  className="px-4 py-2 text-on-surface-variant hover:text-white text-xs font-medium"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={submitting || !selectedDbId}
-                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/30 transition-all disabled:opacity-50"
+                  className="px-5 py-2.5 bg-ok/90 hover:bg-ok text-white rounded text-xs font-semibold transition-all disabled:opacity-50"
                 >
                   {submitting ? 'Gerando Dump...' : 'Iniciar Backup'}
                 </button>

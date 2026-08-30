@@ -71,8 +71,10 @@ export const TerminalPage: React.FC = () => {
     // terminal itself instead of leaving a silent blank screen.
     const onReady = (payload: { success: boolean; error?: string }) => {
       if (!payload.success && payload.error) {
-        term.write(`
-[31m${payload.error}[0m
+        term.write(`
+
+[31m${payload.error}[0m
+
 `);
       }
     };
@@ -123,14 +125,14 @@ export const TerminalPage: React.FC = () => {
   return (
     <div className="space-y-4 flex flex-col h-[calc(100vh-8rem)]">
       {/* Header toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#0f172a]/90 p-4 rounded-2xl border border-slate-800 shrink-0">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-surface-container p-4 rounded-lg border border-outline-variant shrink-0">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400">
+          <div className="p-2 rounded bg-primary/10 text-primary">
             <TerminalIcon className="w-5 h-5" />
           </div>
           <div>
             <h2 className="font-bold text-white text-base">Terminal Web Interativo (SSH / Shell)</h2>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-on-surface-variant">
               Acesso root direto ao sistema operacional da VPS ou dentro dos containers.
             </p>
           </div>
@@ -138,16 +140,16 @@ export const TerminalPage: React.FC = () => {
 
         <div className="flex items-center gap-2">
           {/* Target shell selector */}
-          <div className="flex items-center gap-1.5 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
-            <span className="text-slate-500 font-semibold uppercase text-[10px]">Ambiente:</span>
+          <div className="flex items-center gap-1.5 bg-surface-container-low px-3 py-1.5 rounded border border-outline-variant text-xs">
+            <span className="text-on-surface-variant/70 font-semibold uppercase text-[10px]">Ambiente:</span>
             <select
               value={selectedContainer}
               onChange={(e) => setSelectedContainer(e.target.value)}
-              className="bg-transparent text-slate-200 font-medium focus:outline-none cursor-pointer"
+              className="bg-transparent text-on-surface font-medium focus:outline-none cursor-pointer"
             >
-              <option value="" className="bg-slate-900 text-white">Shell do Servidor Host</option>
+              <option value="" className="bg-surface-container-low text-white">Shell do Servidor Host</option>
               {containers.map((c) => (
-                <option key={c.id} value={c.id} className="bg-slate-900 text-white">
+                <option key={c.id} value={c.id} className="bg-surface-container-low text-white">
                   Docker: {c.name}
                 </option>
               ))}
@@ -157,7 +159,7 @@ export const TerminalPage: React.FC = () => {
           <button
             onClick={handleClear}
             title="Limpar tela"
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+            className="p-2 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant transition-colors"
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -165,7 +167,7 @@ export const TerminalPage: React.FC = () => {
           <button
             onClick={handleRestart}
             title="Reiniciar sessão"
-            className="p-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 transition-colors"
+            className="p-2 rounded bg-primary-container/20 hover:bg-primary-container/30 text-primary border border-primary/30 transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
@@ -173,7 +175,7 @@ export const TerminalPage: React.FC = () => {
       </div>
 
       {/* Terminal Screen Container */}
-      <div className="flex-1 bg-[#090d16] rounded-2xl border border-slate-800 p-3 shadow-2xl overflow-hidden relative">
+      <div className="flex-1 bg-surface-container-lowest rounded-lg border border-outline-variant p-3 overflow-hidden relative">
         <div ref={terminalRef} className="w-full h-full" />
       </div>
     </div>

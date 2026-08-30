@@ -119,7 +119,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -129,10 +129,10 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2.5">
-            <Globe2 className="w-6 h-6 text-emerald-400" />
+            <Globe2 className="w-6 h-6 text-ok" />
             Analytics
           </h1>
-          <p className="text-sm text-slate-400 mt-1">
+          <p className="text-sm text-on-surface-variant mt-1">
             Visitas e origem geográfica dos acessos, medidas no proxy — sem script na sua página.
           </p>
         </div>
@@ -141,7 +141,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
           <select
             value={selectedId}
             onChange={(e) => setSelectedId(e.target.value)}
-            className="bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500"
+            className="bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-ok"
           >
             {apps.length === 0 && <option value="">Nenhuma aplicação</option>}
             {apps.map((app) => (
@@ -151,13 +151,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
             ))}
           </select>
 
-          <div className="flex bg-slate-900 border border-slate-800 rounded-xl p-1">
+          <div className="flex bg-surface-container-low border border-outline-variant rounded p-1">
             {RANGES.map((r) => (
               <button
                 key={r.id}
                 onClick={() => setRange(r.id)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  range === r.id ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
+                  range === r.id ? 'bg-emerald-600 text-white' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
                 {r.label}
@@ -168,7 +168,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
           <button
             onClick={fetchReport}
             title="Atualizar agora"
-            className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white"
+            className="p-2.5 rounded bg-surface-container-low border border-outline-variant text-on-surface-variant hover:text-white"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
@@ -176,8 +176,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
       </div>
 
       {report && !report.hasDomain && (
-        <div className="flex items-start gap-3 p-4 rounded-2xl border border-amber-500/40 bg-amber-500/10">
-          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+        <div className="flex items-start gap-3 p-4 rounded-lg border border-warn/30 bg-warn/10">
+          <AlertTriangle className="w-5 h-5 text-warn shrink-0 mt-0.5" />
           <div>
             <h4 className="font-bold text-amber-200 text-sm">Esta aplicação ainda não tem domínio</h4>
             <p className="text-xs text-amber-100/80 mt-1">
@@ -189,11 +189,11 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
       )}
 
       {report && report.hasDomain && report.totals.allTimeHits === 0 && (
-        <div className="flex items-start gap-3 p-4 rounded-2xl border border-slate-700 bg-slate-900/60">
-          <Globe2 className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
+        <div className="flex items-start gap-3 p-4 rounded-lg border border-outline-variant bg-surface-container-low">
+          <Globe2 className="w-5 h-5 text-on-surface-variant shrink-0 mt-0.5" />
           <div>
-            <h4 className="font-bold text-slate-200 text-sm">Ainda sem acessos registrados</h4>
-            <p className="text-xs text-slate-400 mt-1">
+            <h4 className="font-bold text-on-surface text-sm">Ainda sem acessos registrados</h4>
+            <p className="text-xs text-on-surface-variant mt-1">
               A coleta começa no próximo acesso ao site. Se você acabou de atualizar o painel, o proxy precisa
               recarregar a configuração uma vez para passar a gravar o log.
             </p>
@@ -247,7 +247,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
                     : 'Vincule um domínio à aplicação para medir os acessos.'
                 }
               />
-              <p className="text-[11px] text-slate-500 text-center mt-3">
+              <p className="text-[11px] text-on-surface-variant/70 text-center mt-3">
                 Arraste para girar. Cada ponto é uma cidade; o tamanho acompanha o volume de acessos.
               </p>
             </div>
@@ -255,7 +255,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
             <div className="xl:col-span-2 bg-surface-container rounded-lg p-5 border border-outline-variant">
               <h3 className="font-bold text-white text-sm mb-4">Países</h3>
               {report.countries.length === 0 ? (
-                <p className="text-xs text-slate-500">Sem dados de localização ainda.</p>
+                <p className="text-xs text-on-surface-variant/70">Sem dados de localização ainda.</p>
               ) : (
                 <div className="space-y-2.5">
                   {report.countries.slice(0, 10).map((c) => {
@@ -263,8 +263,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
                     return (
                       <div key={c.countryCode}>
                         <div className="flex items-center justify-between text-xs mb-1">
-                          <span className="text-slate-200 font-medium">{c.country}</span>
-                          <span className="text-slate-400 font-mono">{c.hits}</span>
+                          <span className="text-on-surface font-medium">{c.country}</span>
+                          <span className="text-on-surface-variant font-mono">{c.hits}</span>
                         </div>
                         <div className="h-1.5 bg-surface-container-high rounded-full overflow-hidden">
                           <div className="h-full bg-primary-container rounded-full" style={{ width: `${pct}%` }} />
@@ -302,7 +302,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
                       title={`${point.hits} visitas · ${point.visitors} visitantes`}
                     />
                   </div>
-                  <span className="text-[9px] text-slate-500 truncate w-full text-center">{point.label}</span>
+                  <span className="text-[9px] text-on-surface-variant/70 truncate w-full text-center">{point.label}</span>
                 </div>
               ))}
             </div>
@@ -318,7 +318,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
           {report.recentErrors.length > 0 && (
             <div className="bg-surface-container rounded-lg p-5 border border-outline-variant">
               <h3 className="font-bold text-white text-sm mb-4 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-rose-400" />
+                <AlertTriangle className="w-4 h-4 text-crit" />
                 Erros recentes
               </h3>
               <div className="space-y-1.5 max-h-64 overflow-y-auto custom-scrollbar">
@@ -328,14 +328,14 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
                     className="flex items-center gap-3 text-xs font-mono bg-surface-container-lowest px-3 py-2 rounded border border-outline-variant"
                   >
                     <span
-                      className={`font-bold shrink-0 ${err.status >= 500 ? 'text-rose-400' : 'text-amber-400'}`}
+                      className={`font-bold shrink-0 ${err.status >= 500 ? 'text-crit' : 'text-warn'}`}
                     >
                       {err.status}
                     </span>
-                    <span className="text-slate-500 shrink-0">{err.method}</span>
-                    <span className="text-slate-200 truncate flex-1">{err.path}</span>
-                    <span className="text-slate-500 shrink-0 hidden sm:inline">{err.country}</span>
-                    <span className="text-slate-600 shrink-0 hidden md:inline">
+                    <span className="text-on-surface-variant/70 shrink-0">{err.method}</span>
+                    <span className="text-on-surface truncate flex-1">{err.path}</span>
+                    <span className="text-on-surface-variant/70 shrink-0 hidden sm:inline">{err.country}</span>
+                    <span className="text-outline shrink-0 hidden md:inline">
                       {new Date(err.ts).toLocaleTimeString('pt-BR')}
                     </span>
                   </div>
@@ -344,7 +344,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
             </div>
           )}
 
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] text-on-surface-variant/70">
             Medido no proxy Caddy. Endereços IP são resolvidos para cidade e descartados: o painel guarda apenas
             contagens agregadas e um identificador irreversível por visitante, usado para contar visitantes únicos.
           </p>
@@ -362,17 +362,17 @@ const RankCard: React.FC<{
 }> = ({ title, icon, entries, emptyLabel }) => (
   <div className="bg-surface-container rounded-lg p-5 border border-outline-variant">
     <h3 className="font-bold text-white text-sm mb-4 flex items-center gap-2">
-      <span className="text-slate-400">{icon}</span>
+      <span className="text-on-surface-variant">{icon}</span>
       {title}
     </h3>
     {entries.length === 0 ? (
-      <p className="text-xs text-slate-500">{emptyLabel || 'Sem dados ainda.'}</p>
+      <p className="text-xs text-on-surface-variant/70">{emptyLabel || 'Sem dados ainda.'}</p>
     ) : (
       <div className="space-y-2">
         {entries.map((entry) => (
           <div key={entry.key} className="flex items-center justify-between gap-3 text-xs">
-            <span className="text-slate-300 truncate font-mono">{entry.key}</span>
-            <span className="text-slate-400 font-mono tabular-nums shrink-0">{entry.count.toLocaleString('pt-BR')}</span>
+            <span className="text-on-surface-variant truncate font-mono">{entry.key}</span>
+            <span className="text-on-surface-variant font-mono tabular-nums shrink-0">{entry.count.toLocaleString('pt-BR')}</span>
           </div>
         ))}
       </div>

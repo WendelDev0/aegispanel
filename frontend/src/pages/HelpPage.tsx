@@ -127,10 +127,10 @@ Me forneça as correções necessárias para fazer o commit e deploy!`
       {/* Header */}
       <div>
         <h2 className="text-2xl font-bold text-white flex items-center gap-2.5">
-          <HelpCircle className="w-6 h-6 text-indigo-400" />
+          <HelpCircle className="w-6 h-6 text-primary" />
           Central de Ajuda & Assistente de Prompts para IAs
         </h2>
-        <p className="text-sm text-slate-400 mt-1">
+        <p className="text-sm text-on-surface-variant mt-1">
           Copie os prompts prontos e envie para a sua IA (ChatGPT, Claude, Cursor, v0) preparar seu código e garantir deploys 100% perfeitos no AegisPanel.
         </p>
       </div>
@@ -149,10 +149,10 @@ Me forneça as correções necessárias para fazer o commit e deploy!`
             <button
               key={tab.id}
               onClick={() => setSelectedStack(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-semibold border transition-all ${
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold border transition-all ${
                 isSelected
-                  ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/30'
-                  : 'bg-[#0f172a] border-slate-800 text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                  ? 'bg-primary-container border-primary text-white'
+                  : 'bg-surface-container border-outline-variant text-on-surface-variant hover:bg-surface-container-high/80 hover:text-white'
               }`}
             >
               <Icon className="w-4 h-4" />
@@ -163,21 +163,21 @@ Me forneça as correções necessárias para fazer o commit e deploy!`
       </div>
 
       {/* Main Prompt Box */}
-      <div className="bg-[#0f172a]/95 rounded-3xl p-6 border border-indigo-500/30 shadow-2xl space-y-4">
+      <div className="bg-surface-container/95 rounded-lg p-6 border border-primary/30 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h3 className="font-bold text-white text-base flex items-center gap-2">
-              <Bot className="w-5 h-5 text-indigo-400" />
+              <Bot className="w-5 h-5 text-primary" />
               {stackPrompts[selectedStack]?.title}
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs text-on-surface-variant mt-0.5">
               {stackPrompts[selectedStack]?.desc}
             </p>
           </div>
 
           <button
             onClick={() => copyToClipboard(stackPrompts[selectedStack]?.prompt)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 transition-all active:scale-95 shrink-0"
+            className="flex items-center gap-2 px-4 py-2.5 rounded bg-primary-container hover:from-indigo-500 hover:to-emerald-500 text-white font-semibold text-xs transition-all active:scale-95 shrink-0"
           >
             {copiedPrompt ? (
               <>
@@ -199,55 +199,55 @@ Me forneça as correções necessárias para fazer o commit e deploy!`
             readOnly
             rows={12}
             value={stackPrompts[selectedStack]?.prompt}
-            className="w-full bg-slate-950/90 border border-slate-800 rounded-2xl p-4 text-xs font-mono text-slate-200 focus:outline-none select-all custom-scrollbar leading-relaxed"
+            className="w-full bg-surface-container-lowest/90 border border-outline-variant rounded-lg p-4 text-xs font-mono text-on-surface focus:outline-none select-all custom-scrollbar leading-relaxed"
           />
         </div>
       </div>
 
       {/* Checklist de Compatibilidade */}
-      <div className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
+      <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
         <h3 className="font-bold text-white text-base flex items-center gap-2">
-          <ShieldCheck className="w-5 h-5 text-emerald-400" />
+          <ShieldCheck className="w-5 h-5 text-ok" />
           Checklist Rápido: Vercel vs AegisPanel
         </h3>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-            <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm">
+          <div className="p-4 rounded-lg bg-surface-container-lowest border border-outline-variant space-y-2">
+            <div className="flex items-center gap-2 text-primary font-bold text-sm">
               <Cpu className="w-4 h-4" />
               <span>1. Host & Portas</span>
             </div>
-            <p className="text-slate-400">
-              Na Vercel, a porta é gerenciada automaticamente por funções serverless. No AegisPanel, seu servidor Node/API deve escutar em <strong className="text-emerald-400 font-mono">0.0.0.0</strong> usando <strong className="text-indigo-300 font-mono">process.env.PORT</strong>.
+            <p className="text-on-surface-variant">
+              Na Vercel, a porta é gerenciada automaticamente por funções serverless. No AegisPanel, seu servidor Node/API deve escutar em <strong className="text-ok font-mono">0.0.0.0</strong> usando <strong className="text-primary font-mono">process.env.PORT</strong>.
             </p>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-            <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm">
+          <div className="p-4 rounded-lg bg-surface-container-lowest border border-outline-variant space-y-2">
+            <div className="flex items-center gap-2 text-primary font-bold text-sm">
               <FileCode className="w-4 h-4" />
               <span>2. Scripts no Package.json</span>
             </div>
-            <p className="text-slate-400">
-              Certifique-se de que o <strong className="text-white font-mono">"scripts"</strong> do seu <strong className="text-white font-mono">package.json</strong> possui um comando <strong className="text-indigo-300 font-mono">"build"</strong> e um comando <strong className="text-emerald-400 font-mono">"start"</strong> claros.
+            <p className="text-on-surface-variant">
+              Certifique-se de que o <strong className="text-white font-mono">"scripts"</strong> do seu <strong className="text-white font-mono">package.json</strong> possui um comando <strong className="text-primary font-mono">"build"</strong> e um comando <strong className="text-ok font-mono">"start"</strong> claros.
             </p>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-            <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm">
+          <div className="p-4 rounded-lg bg-surface-container-lowest border border-outline-variant space-y-2">
+            <div className="flex items-center gap-2 text-primary font-bold text-sm">
               <Zap className="w-4 h-4" />
               <span>3. Next.js Standalone</span>
             </div>
-            <p className="text-slate-400">
-              Para projetos Next.js, adicione <strong className="text-amber-400 font-mono">output: 'standalone'</strong> no seu <strong className="text-white font-mono">next.config.js</strong> para compilação super rápida com menos consumo de RAM.
+            <p className="text-on-surface-variant">
+              Para projetos Next.js, adicione <strong className="text-warn font-mono">output: 'standalone'</strong> no seu <strong className="text-white font-mono">next.config.js</strong> para compilação super rápida com menos consumo de RAM.
             </p>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-            <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm">
+          <div className="p-4 rounded-lg bg-surface-container-lowest border border-outline-variant space-y-2">
+            <div className="flex items-center gap-2 text-primary font-bold text-sm">
               <CheckCircle2 className="w-4 h-4" />
               <span>4. SPAs (Vite / React)</span>
             </div>
-            <p className="text-slate-400">
+            <p className="text-on-surface-variant">
               Projetos Vite/React são detectados automaticamente pelo AegisPanel e servidos com alta velocidade através do servidor integrado com Healthcheck ativo.
             </p>
           </div>

@@ -266,21 +266,21 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   return (
     <div className="space-y-6">
       {/* Header banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-indigo-950/70 via-slate-900/80 to-slate-900/80 p-6 rounded-3xl border border-indigo-500/20 shadow-2xl backdrop-blur">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-surface-container p-5 rounded-lg border border-outline-variant">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-ok/15 text-ok border border-ok/30 flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
               Servidor Online
             </span>
-            <span className="text-xs text-slate-400 font-mono">
-              {stats?.osInfo.distro} ({stats?.osInfo.arch}) • IP: {stats?.osInfo.publicIp || '13.140.41.82'}
+            <span className="text-xs text-on-surface-variant font-mono">
+              {stats?.osInfo.distro} ({stats?.osInfo.arch}) • IP: {stats?.osInfo.publicIp || 'detectando...'}
             </span>
           </div>
           <h2 className="text-2xl font-extrabold text-white tracking-tight">
             Painel de Controle da Infraestrutura
           </h2>
-          <p className="text-sm text-slate-400 mt-0.5">
+          <p className="text-sm text-on-surface-variant mt-0.5">
             Métricas em tempo real, deploys automatizados e monitoramento completo de rede.
           </p>
         </div>
@@ -288,14 +288,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={handleRunSpeedtest}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-semibold text-xs border border-amber-500/30 shadow-lg transition-all active:scale-95"
+            className="flex items-center gap-2 px-4 py-2.5 rounded bg-warn/15 hover:bg-warn/30 text-warn font-semibold text-xs border border-warn/30 transition-all active:scale-95"
           >
-            <Zap className="w-4 h-4 text-amber-400" />
+            <Zap className="w-4 h-4 text-warn" />
             Teste de Velocidade (Speedtest)
           </button>
           <button
             onClick={() => setActiveTab('apps')}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 transition-all active:scale-95"
+            className="flex items-center gap-2 px-4 py-2.5 rounded bg-primary-container hover:bg-primary text-white font-semibold text-xs transition-all active:scale-95"
           >
             <Plus className="w-4 h-4" />
             Novo Deploy
@@ -399,13 +399,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <h3 className="font-bold text-white text-base flex items-center gap-2">
                 <span>Análise de Desempenho e Recursos</span>
                 {activeTimeRange === 'realtime' && (
-                  <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1">
+                  <span className="text-[10px] font-mono font-bold text-ok bg-ok/10 px-2 py-0.5 rounded-full border border-ok/30 flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                     Ao Vivo
                   </span>
                 )}
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-on-surface-variant mt-0.5">
                 {activeTimeRange === 'realtime'
                   ? 'Visualizando métricas instantâneas em tempo real'
                   : `Histórico acumulado do período selecionado (${activeTimeRange.toUpperCase()})`}
@@ -418,40 +418,40 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <div className="flex items-center gap-1 bg-surface-container-lowest p-1 rounded border border-outline-variant">
               <button
                 onClick={() => setActiveChartMetric('all')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                  activeChartMetric === 'all' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeChartMetric === 'all' ? 'bg-primary-container text-white shadow' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
                 Todos
               </button>
               <button
                 onClick={() => setActiveChartMetric('cpu')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                  activeChartMetric === 'cpu' ? 'bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 shadow' : 'text-slate-400 hover:text-white'
+                className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeChartMetric === 'cpu' ? 'bg-primary/25 text-primary border border-primary/40 shadow' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
                 CPU
               </button>
               <button
                 onClick={() => setActiveChartMetric('memory')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                  activeChartMetric === 'memory' ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 shadow' : 'text-slate-400 hover:text-white'
+                className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeChartMetric === 'memory' ? 'bg-ok/30 text-ok border border-emerald-500/40 shadow' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
                 RAM
               </button>
               <button
                 onClick={() => setActiveChartMetric('disk')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                  activeChartMetric === 'disk' ? 'bg-amber-500/30 text-amber-300 border border-amber-500/40 shadow' : 'text-slate-400 hover:text-white'
+                className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeChartMetric === 'disk' ? 'bg-warn/30 text-warn border border-warn/30 shadow' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
                 Disco
               </button>
               <button
                 onClick={() => setActiveChartMetric('network')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                  activeChartMetric === 'network' ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 shadow' : 'text-slate-400 hover:text-white'
+                className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeChartMetric === 'network' ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 shadow' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
                 Rede
@@ -462,48 +462,48 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <div className="flex items-center gap-1 bg-surface-container-lowest p-1 rounded border border-outline-variant">
               <button
                 onClick={() => handleTimeRangeChange('realtime')}
-                className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                  activeTimeRange === 'realtime' ? 'bg-slate-800 text-white font-bold' : 'text-slate-400 hover:text-white'
+                className={`px-2.5 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeTimeRange === 'realtime' ? 'bg-surface-container-high text-white font-bold' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
                 Tempo Real
               </button>
               <button
                 onClick={() => handleTimeRangeChange('1d')}
-                className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                  activeTimeRange === '1d' ? 'bg-slate-800 text-white font-bold' : 'text-slate-400 hover:text-white'
+                className={`px-2.5 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeTimeRange === '1d' ? 'bg-surface-container-high text-white font-bold' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
                 1 Dia
               </button>
               <button
                 onClick={() => handleTimeRangeChange('2d')}
-                className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                  activeTimeRange === '2d' ? 'bg-slate-800 text-white font-bold' : 'text-slate-400 hover:text-white'
+                className={`px-2.5 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeTimeRange === '2d' ? 'bg-surface-container-high text-white font-bold' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
                 2 Dias
               </button>
               <button
                 onClick={() => handleTimeRangeChange('3d')}
-                className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                  activeTimeRange === '3d' ? 'bg-slate-800 text-white font-bold' : 'text-slate-400 hover:text-white'
+                className={`px-2.5 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeTimeRange === '3d' ? 'bg-surface-container-high text-white font-bold' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
                 3 Dias
               </button>
               <button
                 onClick={() => handleTimeRangeChange('7d')}
-                className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                  activeTimeRange === '7d' ? 'bg-slate-800 text-white font-bold' : 'text-slate-400 hover:text-white'
+                className={`px-2.5 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeTimeRange === '7d' ? 'bg-surface-container-high text-white font-bold' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
                 7 Dias
               </button>
               <button
                 onClick={() => handleTimeRangeChange('custom')}
-                className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1 ${
-                  activeTimeRange === 'custom' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-white'
+                className={`px-2.5 py-1.5 rounded text-xs font-semibold transition-all flex items-center gap-1 ${
+                  activeTimeRange === 'custom' ? 'bg-primary-container text-white font-bold' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
                 <Calendar className="w-3 h-3" /> Personalizado
@@ -514,26 +514,26 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
         {/* Statistical Summary Pills */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800/80">
-            <span className="text-[10px] font-mono text-slate-400 block uppercase">Média de CPU</span>
-            <span className="text-lg font-extrabold text-indigo-400">{avgCpu}%</span>
+          <div className="bg-surface-container-lowest/70 p-3 rounded-lg border border-outline-variant">
+            <span className="text-[10px] font-mono text-on-surface-variant block uppercase">Média de CPU</span>
+            <span className="text-lg font-extrabold text-primary">{avgCpu}%</span>
           </div>
-          <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800/80">
-            <span className="text-[10px] font-mono text-slate-400 block uppercase">Pico Máximo de CPU</span>
-            <span className="text-lg font-extrabold text-rose-400">{maxCpu}%</span>
+          <div className="bg-surface-container-lowest/70 p-3 rounded-lg border border-outline-variant">
+            <span className="text-[10px] font-mono text-on-surface-variant block uppercase">Pico Máximo de CPU</span>
+            <span className="text-lg font-extrabold text-crit">{maxCpu}%</span>
           </div>
-          <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800/80">
-            <span className="text-[10px] font-mono text-slate-400 block uppercase">Média de Memória RAM</span>
-            <span className="text-lg font-extrabold text-emerald-400">{avgMem}%</span>
+          <div className="bg-surface-container-lowest/70 p-3 rounded-lg border border-outline-variant">
+            <span className="text-[10px] font-mono text-on-surface-variant block uppercase">Média de Memória RAM</span>
+            <span className="text-lg font-extrabold text-ok">{avgMem}%</span>
           </div>
-          <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800/80">
-            <span className="text-[10px] font-mono text-slate-400 block uppercase">Pico de Banda (Download)</span>
-            <span className="text-lg font-extrabold text-cyan-400">{maxRx} Mbps</span>
+          <div className="bg-surface-container-lowest/70 p-3 rounded-lg border border-outline-variant">
+            <span className="text-[10px] font-mono text-on-surface-variant block uppercase">Pico de Banda (Download)</span>
+            <span className="text-lg font-extrabold text-tertiary">{maxRx} Mbps</span>
           </div>
         </div>
 
         {!historyMeta.complete && historyMeta.collectedSince && historyData.length > 0 && (
-          <p className="text-[11px] text-amber-300/80 flex items-center gap-1.5">
+          <p className="text-[11px] text-warn/80 flex items-center gap-1.5">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
             Coletando métricas desde {new Date(historyMeta.collectedSince).toLocaleString('pt-BR')} — o período
             anterior a isso não foi medido.
@@ -544,8 +544,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         <div className="h-72 w-full pt-2">
           {historyData.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center px-6">
-              <p className="text-slate-300 text-sm font-semibold">Ainda sem histórico para este período</p>
-              <p className="text-slate-500 text-xs mt-1.5 max-w-md">
+              <p className="text-on-surface-variant text-sm font-semibold">Ainda sem histórico para este período</p>
+              <p className="text-on-surface-variant/70 text-xs mt-1.5 max-w-md">
                 O painel grava um ponto a cada 30 segundos a partir do momento em que sobe. Períodos
                 anteriores a isso ficam vazios porque não foram medidos.
               </p>
@@ -646,78 +646,78 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <div
           onClick={() => setActiveTab('apps')}
-          className="bg-[#0f172a]/70 p-5 rounded-2xl border border-slate-800 hover:border-indigo-500/50 cursor-pointer transition-all hover:bg-slate-800/40 group shadow-xl"
+          className="bg-surface-container/70 p-5 rounded-lg border border-outline-variant hover:border-primary/50 cursor-pointer transition-all hover:bg-surface-container-high group"
         >
           <div className="flex items-center justify-between mb-4">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+            <div className="w-10 h-10 rounded bg-primary/10 text-primary flex items-center justify-center group-hover:scale-110 transition-transform">
               <Layers className="w-5 h-5" />
             </div>
-            <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2.5 py-1 rounded-full font-semibold">
+            <span className="text-xs bg-primary/20 text-primary px-2.5 py-1 rounded-full font-semibold">
               {overview?.counts.runningApps || 0} Ativos
             </span>
           </div>
-          <h3 className="text-lg font-bold text-white group-hover:text-indigo-400 transition-colors">
+          <h3 className="text-lg font-bold text-white group-hover:text-primary transition-colors">
             Aplicações Web (PaaS)
           </h3>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-on-surface-variant mt-1">
             {overview?.counts.apps || 0} aplicações configuradas no servidor.
           </p>
         </div>
 
         <div
           onClick={() => setActiveTab('databases')}
-          className="bg-[#0f172a]/70 p-5 rounded-2xl border border-slate-800 hover:border-emerald-500/50 cursor-pointer transition-all hover:bg-slate-800/40 group shadow-xl"
+          className="bg-surface-container/70 p-5 rounded-lg border border-outline-variant hover:border-emerald-500/50 cursor-pointer transition-all hover:bg-surface-container-high group"
         >
           <div className="flex items-center justify-between mb-4">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+            <div className="w-10 h-10 rounded bg-ok/10 text-ok flex items-center justify-center group-hover:scale-110 transition-transform">
               <Database className="w-5 h-5" />
             </div>
-            <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-full font-semibold">
+            <span className="text-xs bg-ok/15 text-ok px-2.5 py-1 rounded-full font-semibold">
               {overview?.counts.runningDatabases || 0} Rodando
             </span>
           </div>
-          <h3 className="text-lg font-bold text-white group-hover:text-emerald-400 transition-colors">
+          <h3 className="text-lg font-bold text-white group-hover:text-ok transition-colors">
             Bancos de Dados
           </h3>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-on-surface-variant mt-1">
             Postgres, MySQL, Redis persistentes e criptografados.
           </p>
         </div>
 
         <div
           onClick={() => setActiveTab('containers')}
-          className="bg-[#0f172a]/70 p-5 rounded-2xl border border-slate-800 hover:border-cyan-500/50 cursor-pointer transition-all hover:bg-slate-800/40 group shadow-xl"
+          className="bg-surface-container/70 p-5 rounded-lg border border-outline-variant hover:border-cyan-500/50 cursor-pointer transition-all hover:bg-surface-container-high group"
         >
           <div className="flex items-center justify-between mb-4">
-            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+            <div className="w-10 h-10 rounded bg-tertiary/10 text-tertiary flex items-center justify-center group-hover:scale-110 transition-transform">
               <Boxes className="w-5 h-5" />
             </div>
             <span className="text-xs bg-cyan-500/20 text-cyan-300 px-2.5 py-1 rounded-full font-semibold">
               {overview?.docker.runningContainers || 0} Contêineres
             </span>
           </div>
-          <h3 className="text-lg font-bold text-white group-hover:text-cyan-400 transition-colors">
+          <h3 className="text-lg font-bold text-white group-hover:text-tertiary transition-colors">
             Docker Engine
           </h3>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-on-surface-variant mt-1">
             {overview?.docker.totalContainers || 0} contêineres instalados no host.
           </p>
         </div>
       </div>
 
       {/* Global Activity Timeline Widget */}
-      <div className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+      <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-outline-variant pb-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400">
+            <div className="p-2 rounded bg-primary/10 text-primary">
               <Activity className="w-5 h-5" />
             </div>
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <span>Linha do Tempo de Atividades Recentes</span>
-                <span className="text-[11px] font-normal text-slate-400">({activities.length} eventos registrados)</span>
+                <span className="text-[11px] font-normal text-on-surface-variant">({activities.length} eventos registrados)</span>
               </h3>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-on-surface-variant">
                 Histórico em tempo real de deploys, recargas do Caddy, backups e eventos do servidor.
               </p>
             </div>
@@ -725,15 +725,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
           <div className="flex items-center gap-2 flex-wrap">
             {/* Filter buttons */}
-            <div className="bg-slate-900/90 p-1 rounded-xl border border-slate-800 flex items-center gap-1 text-[11px]">
+            <div className="bg-surface-container-low/90 p-1 rounded border border-outline-variant flex items-center gap-1 text-[11px]">
               {(['all', 'deploy', 'domain', 'database', 'alert'] as const).map(tab => (
                 <button
                   key={tab}
                   onClick={() => setActivityFilter(tab)}
                   className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
                     activityFilter === tab
-                      ? 'bg-indigo-600 text-white shadow-md'
-                      : 'text-slate-400 hover:text-white'
+                      ? 'bg-primary-container text-white'
+                      : 'text-on-surface-variant hover:text-white'
                   }`}
                 >
                   {tab === 'all' ? 'Todos' : tab === 'deploy' ? 'Deploys 🚀' : tab === 'domain' ? 'Domínios 🌐' : tab === 'database' ? 'Bancos 🗄️' : 'Alertas ⚠️'}
@@ -743,10 +743,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
             <button
               onClick={fetchActivities}
-              className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors"
+              className="p-1.5 rounded-lg bg-surface-container-high text-on-surface-variant hover:text-white transition-colors"
               title="Atualizar atividades"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${loadingActivities ? 'animate-spin text-indigo-400' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingActivities ? 'animate-spin text-primary' : ''}`} />
             </button>
           </div>
         </div>
@@ -754,7 +754,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         {/* Activities List */}
         <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1 custom-scrollbar">
           {activities.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 text-xs font-mono">
+            <div className="p-8 text-center text-on-surface-variant/70 text-xs font-mono">
               Nenhuma atividade recente registrada ainda.
             </div>
           ) : (
@@ -763,14 +763,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               .map(act => (
                 <div
                   key={act.id}
-                  className="flex items-start justify-between p-3 rounded-2xl bg-slate-950/70 border border-slate-800/80 hover:border-slate-700 transition-all text-xs"
+                  className="flex items-start justify-between p-3 rounded-lg bg-surface-container-lowest/70 border border-outline-variant hover:border-outline-variant transition-all text-xs"
                 >
                   <div className="flex items-start gap-3">
-                    <div className={`p-2 rounded-xl mt-0.5 ${
-                      act.status === 'success' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                      act.status === 'error' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
-                      act.status === 'warning' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-                      'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                    <div className={`p-2 rounded mt-0.5 ${
+                      act.status === 'success' ? 'bg-ok/10 text-ok border border-ok/30' :
+                      act.status === 'error' ? 'bg-crit/10 text-crit border border-crit/25' :
+                      act.status === 'warning' ? 'bg-warn/10 text-warn border border-warn/30' :
+                      'bg-primary/10 text-primary border border-primary/25'
                     }`}>
                       {act.type === 'deploy' ? <Zap className="w-4 h-4" /> :
                        act.type === 'rollback' ? <Clock className="w-4 h-4" /> :
@@ -782,19 +782,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                       <div className="font-bold text-white flex items-center gap-2">
                         <span>{act.title}</span>
                         <span className={`text-[10px] px-2 py-0.5 rounded-md font-mono ${
-                          act.status === 'success' ? 'bg-emerald-500/15 text-emerald-300' :
-                          act.status === 'error' ? 'bg-rose-500/15 text-rose-300' :
-                          act.status === 'warning' ? 'bg-amber-500/15 text-amber-300' :
-                          'bg-indigo-500/15 text-indigo-300'
+                          act.status === 'success' ? 'bg-ok/10 text-ok' :
+                          act.status === 'error' ? 'bg-crit/10 text-crit' :
+                          act.status === 'warning' ? 'bg-warn/10 text-warn' :
+                          'bg-primary/15 text-primary'
                         }`}>
                           {act.status.toUpperCase()}
                         </span>
                       </div>
-                      <p className="text-slate-300 text-xs mt-0.5">{act.description}</p>
+                      <p className="text-on-surface-variant text-xs mt-0.5">{act.description}</p>
                     </div>
                   </div>
 
-                  <div className="text-[11px] text-slate-500 font-mono shrink-0 ml-3 text-right">
+                  <div className="text-[11px] text-on-surface-variant/70 font-mono shrink-0 ml-3 text-right">
                     {new Date(act.timestamp).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                   </div>
                 </div>
@@ -806,20 +806,20 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       {/* Custom Date Range Modal */}
       {showCustomDateModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-md overflow-hidden shadow-2xl p-6 space-y-5">
+          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-md overflow-hidden p-6 space-y-5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-white font-bold text-base">
-                <Calendar className="w-5 h-5 text-indigo-400" />
+                <Calendar className="w-5 h-5 text-primary" />
                 <span>Selecionar Período Personalizado</span>
               </div>
-              <button onClick={() => setShowCustomDateModal(false)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setShowCustomDateModal(false)} className="text-on-surface-variant hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleApplyCustomDates} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                   Data e Hora Inicial
                 </label>
                 <input
@@ -827,12 +827,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   required
                   value={customStartDate}
                   onChange={(e) => setCustomStartDate(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary font-mono"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
                   Data e Hora Final
                 </label>
                 <input
@@ -840,7 +840,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   required
                   value={customEndDate}
                   onChange={(e) => setCustomEndDate(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary font-mono"
                 />
               </div>
 
@@ -848,13 +848,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowCustomDateModal(false)}
-                  className="px-4 py-2.5 text-slate-400 hover:text-white text-xs font-semibold"
+                  className="px-4 py-2.5 text-on-surface-variant hover:text-white text-xs font-semibold"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/30"
+                  className="px-5 py-2.5 bg-primary-container hover:bg-primary text-white rounded text-xs font-semibold"
                 >
                   Aplicar Filtro
                 </button>
@@ -867,16 +867,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       {/* Speedtest Modal */}
       {showSpeedtestModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] rounded-3xl border border-slate-800 w-full max-w-lg overflow-hidden shadow-2xl p-6 space-y-6">
+          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-lg overflow-hidden p-6 space-y-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-white font-bold text-lg">
-                <Zap className="w-6 h-6 text-amber-400" />
+                <Zap className="w-6 h-6 text-warn" />
                 <span>Teste de Velocidade da VPS (Speedtest)</span>
               </div>
               <button
                 onClick={() => setShowSpeedtestModal(false)}
                 disabled={runningSpeedtest}
-                className="text-slate-400 hover:text-white disabled:opacity-30"
+                className="text-on-surface-variant hover:text-white disabled:opacity-30"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -884,9 +884,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
             {runningSpeedtest ? (
               <div className="py-12 text-center space-y-4">
-                <RefreshCw className="w-12 h-12 text-amber-400 animate-spin mx-auto" />
+                <RefreshCw className="w-12 h-12 text-warn animate-spin mx-auto" />
                 <h4 className="font-bold text-white text-base">Testando velocidade da conexão...</h4>
-                <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                <p className="text-xs text-on-surface-variant max-w-sm mx-auto">
                   Enviando e recebendo pacotes de teste via CDN de alta velocidade para medir Latência, Download e Upload.
                 </p>
               </div>
@@ -895,61 +895,61 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 {/* Result Gauges */}
                 <div className="grid grid-cols-2 gap-4">
                   {/* Download */}
-                  <div className="bg-slate-950 p-4 rounded-2xl border border-emerald-500/30 text-center space-y-1">
-                    <span className="text-[10px] font-mono uppercase text-slate-400 flex items-center justify-center gap-1">
-                      <ArrowDownRight className="w-3.5 h-3.5 text-emerald-400" /> VELOCIDADE DOWNLOAD
+                  <div className="bg-surface-container-lowest p-4 rounded-lg border border-ok/30 text-center space-y-1">
+                    <span className="text-[10px] font-mono uppercase text-on-surface-variant flex items-center justify-center gap-1">
+                      <ArrowDownRight className="w-3.5 h-3.5 text-ok" /> VELOCIDADE DOWNLOAD
                     </span>
-                    <div className="text-3xl font-extrabold text-emerald-400">
+                    <div className="text-3xl font-extrabold text-ok">
                       {speedtestResult.downloadMbps} <span className="text-xs font-normal">Mbps</span>
                     </div>
                   </div>
 
                   {/* Upload */}
-                  <div className="bg-slate-950 p-4 rounded-2xl border border-indigo-500/30 text-center space-y-1">
-                    <span className="text-[10px] font-mono uppercase text-slate-400 flex items-center justify-center gap-1">
-                      <ArrowUpRight className="w-3.5 h-3.5 text-indigo-400" /> VELOCIDADE UPLOAD
+                  <div className="bg-surface-container-lowest p-4 rounded-lg border border-primary/30 text-center space-y-1">
+                    <span className="text-[10px] font-mono uppercase text-on-surface-variant flex items-center justify-center gap-1">
+                      <ArrowUpRight className="w-3.5 h-3.5 text-primary" /> VELOCIDADE UPLOAD
                     </span>
-                    <div className="text-3xl font-extrabold text-indigo-400">
+                    <div className="text-3xl font-extrabold text-primary">
                       {speedtestResult.uploadMbps} <span className="text-xs font-normal">Mbps</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Detailed Info */}
-                <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 space-y-2.5 text-xs font-mono">
+                <div className="bg-surface-container-lowest/80 p-4 rounded-lg border border-outline-variant space-y-2.5 text-xs font-mono">
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Ping (Latência):</span>
+                    <span className="text-on-surface-variant">Ping (Latência):</span>
                     <span className="text-white font-bold">{speedtestResult.pingMs} ms</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Jitter:</span>
-                    <span className="text-slate-200">{speedtestResult.jitterMs} ms</span>
+                    <span className="text-on-surface-variant">Jitter:</span>
+                    <span className="text-on-surface">{speedtestResult.jitterMs} ms</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Provedor / Backbone:</span>
-                    <span className="text-amber-400">{speedtestResult.isp}</span>
+                    <span className="text-on-surface-variant">Provedor / Backbone:</span>
+                    <span className="text-warn">{speedtestResult.isp}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Localização do Servidor:</span>
-                    <span className="text-slate-200">{speedtestResult.serverLocation}</span>
+                    <span className="text-on-surface-variant">Localização do Servidor:</span>
+                    <span className="text-on-surface">{speedtestResult.serverLocation}</span>
                   </div>
                 </div>
 
-                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                <div className="p-3 rounded bg-ok/10 border border-ok/30 text-ok text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-ok" />
                   <span>Velocidade excelente para hospedagem de aplicações e APIs de alto tráfego!</span>
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     onClick={handleRunSpeedtest}
-                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold"
+                    className="px-4 py-2.5 bg-surface-container-high hover:bg-surface-container-highest text-on-surface rounded text-xs font-semibold"
                   >
                     Testar Novamente
                   </button>
                   <button
                     onClick={() => setShowSpeedtestModal(false)}
-                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold"
+                    className="px-5 py-2.5 bg-primary-container hover:bg-primary text-white rounded text-xs font-semibold"
                   >
                     Fechar
                   </button>
