@@ -422,6 +422,46 @@ class DockerManager {
   }
 
   /**
+   * Removes containers named "<name>-prev-*", left over from a swap that was
+   * interrupted before its cleanup ran.
+   */
+  private async removeStaleBackups(name: string): Promise<void> {
+    try {
+      const containers = await this.docker.listContainers({ all: true });
+      for (const info of containers) {
+        const containerName = (info.Names[0] || '').replace(/^\//, '');
+        if (containerName.startsWith(`${name}-prev-`)) {
+          try {
+            await this.docker.getContainer(info.Id).remove({ force: true });
+            console.warn(`Contêiner órfão removido: ${containerName}`);
+          } catch (err: any) {
+            console.warn(`Não foi possível remover o órfão ${containerName}:`, err.message);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('Não foi possível varrer contêineres órfãos:', err.message);
+    }
+  }
+
+  /** Finds which container is publishing one of the given host ports. */
+  private async findPortHolder(hostPorts: number[]): Promise<{ port: number; container: string } | null> {
+    try {
+      const containers = await this.docker.listContainers({ all: false });
+      for (const info of containers) {
+        for (const p of info.Ports || []) {
+          if (p.PublicPort && hostPorts.includes(p.PublicPort)) {
+            return { port: p.PublicPort, container: (info.Names[0] || '').replace(/^\//, '') };
+          }
+        }
+      }
+    } catch {
+      // diagnostics only
+    }
+    return null;
+  }
+
+  /**
    * Creates and starts a container, replacing any previous one with the same
    * name.
    *
@@ -457,8 +497,14 @@ class DockerManager {
     const networkName = await this.findAegisNetworkName();
     const createOptions = this.buildCreateOptions({ ...options, networkName });
 
+    // Sweep containers left behind by an earlier interrupted swap. Each one
+    // still holds the host port binding, so without this a single failed
+    // deploy makes the port permanently unavailable.
+    await this.removeStaleBackups(options.name);
+
     const backupName = `${options.name}-prev-${Date.now().toString(36)}`;
     let renamedOld = false;
+    let created: Docker.Container | null = null;
 
     try {
       const existing = this.docker.getContainer(options.name);
@@ -468,15 +514,15 @@ class DockerManager {
       try {
         await existing.stop({ t: 10 });
       } catch {
-        // already stopped
+        // already stopped, or stopping while restarting
       }
     } catch {
       // nothing to replace
     }
 
     try {
-      const container = await this.docker.createContainer(createOptions);
-      await container.start();
+      created = await this.docker.createContainer(createOptions);
+      await created.start();
 
       if (renamedOld) {
         try {
@@ -486,10 +532,20 @@ class DockerManager {
         }
       }
 
-      return container.id;
+      return created.id;
     } catch (err: any) {
-      // Roll back to the previous container so a failed deploy does not take
-      // the application offline.
+      // Remove the half-created container first. It holds the target name even
+      // when it never started, which would make restoring the previous
+      // container fail with a name conflict and leave it stranded under its
+      // backup name, still binding the host port.
+      if (created) {
+        try {
+          await created.remove({ force: true });
+        } catch (removeErr: any) {
+          console.warn('Não foi possível remover o contêiner que falhou:', removeErr.message);
+        }
+      }
+
       if (renamedOld) {
         try {
           const old = this.docker.getContainer(backupName);
@@ -507,8 +563,14 @@ class DockerManager {
           err.message.includes('address already in use') ||
           err.message.includes('Ports are not available'))
       ) {
+        const hostPorts = Object.values(options.ports || {});
+        const holder = await this.findPortHolder(hostPorts);
         throw new Error(
-          'A porta do host já está em uso por outro serviço na sua máquina (ex: painel ou outro contêiner). Altere a porta da aplicação para 5000, 5050 ou 8080.'
+          holder
+            ? `A porta do host :${holder.port} já está em uso pelo contêiner "${holder.container}". ` +
+              `Pare esse contêiner ou escolha outra porta para esta aplicação.`
+            : `A porta do host :${hostPorts.join(', ')} já está em uso por outro serviço nesta máquina. ` +
+              `Escolha outra porta (ex: 5000, 5050, 8080) ou libere a atual.`
         );
       }
 
