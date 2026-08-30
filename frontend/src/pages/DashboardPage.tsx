@@ -44,6 +44,7 @@ import {
 import { OverviewData, SystemStats, ActivityRecord } from '../types/index.js';
 import { NavTab } from '../components/Sidebar.js';
 import { api } from '../services/api.js';
+import { toneForUsage } from '../components/ui.js';
 
 interface DashboardPageProps {
   overview: OverviewData | null;
@@ -69,6 +70,62 @@ interface SpeedtestResult {
   isp: string;
   testedAt: string;
 }
+
+/**
+ * One telemetry tile.
+ *
+ * Local to the dashboard rather than in ui.tsx because it carries the
+ * selected-metric behaviour that only this page has; the visual treatment
+ * follows the same tokens as the shared StatCard.
+ */
+const TelemetryCard: React.FC<{
+  label: string;
+  value: string;
+  unit?: string;
+  detail?: string;
+  detailRight?: string;
+  icon: React.ReactNode;
+  percent: number;
+  tone: 'ok' | 'warn' | 'crit';
+  active: boolean;
+  onClick: () => void;
+}> = ({ label, value, unit, detail, detailRight, icon, percent, tone, active, onClick }) => {
+  const bar = tone === 'crit' ? 'bg-crit' : tone === 'warn' ? 'bg-warn' : 'bg-primary-container';
+  const accent = tone === 'crit' ? 'text-crit' : tone === 'warn' ? 'text-warn' : 'text-primary';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`relative text-left bg-surface-container border rounded-lg p-4 overflow-hidden transition-colors w-full ${
+        active ? 'border-primary bg-surface-container-high' : 'border-outline-variant hover:bg-surface-container-high'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <span className="mono-label">{label}</span>
+        <span className={`shrink-0 ${accent}`}>{icon}</span>
+      </div>
+
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <span className="text-[28px] leading-none font-bold text-on-surface tracking-[-0.02em] tabular-nums">
+          {value}
+        </span>
+        {unit && <span className="font-mono text-xs text-on-surface-variant">{unit}</span>}
+      </div>
+
+      <div className="flex items-center justify-between gap-2 mt-2">
+        {detail && <p className="font-mono text-2xs text-on-surface-variant/70 truncate">{detail}</p>}
+        {detailRight && <span className="font-mono text-2xs text-warn shrink-0">{detailRight}</span>}
+      </div>
+
+      <span
+        className={`absolute bottom-0 left-0 h-[3px] transition-all duration-500 ${bar}`}
+        style={{ width: `${Math.max(0, Math.min(100, percent))}%` }}
+        aria-hidden
+      />
+    </button>
+  );
+};
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
   overview,
@@ -247,134 +304,95 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       </div>
 
       {/* Real-time Metric Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-        {/* CPU */}
-        <div
+      {/*
+        Telemetry row.
+
+        Follows the Aegis Command spec: micro mono label, large Inter value,
+        monospaced unit, and a hairline fill bar on the bottom edge. Selection
+        is shown by brightening the surface and colouring the border, not by a
+        shadow or a ring, since depth in this system comes from tonal layering.
+      */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <TelemetryCard
+          label="Uso de CPU"
+          icon={<Cpu className="w-4 h-4" />}
+          value={`${cpuPercent}%`}
+          unit={`${stats?.cpu.cores || 1} vCPUs`}
+          detail={stats?.cpu.brand || 'Processador da VPS'}
+          detailRight={stats?.cpu.temperature ? `${Math.round(stats.cpu.temperature)}°C` : undefined}
+          percent={cpuPercent}
+          tone={toneForUsage(cpuPercent)}
+          active={activeChartMetric === 'cpu'}
           onClick={() => setActiveChartMetric('cpu')}
-          className={`bg-[#0f172a]/90 rounded-3xl p-5 border transition-all cursor-pointer relative overflow-hidden shadow-xl hover:shadow-2xl ${
-            activeChartMetric === 'cpu' ? 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-950/20' : 'border-slate-800'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Uso de CPU</span>
-            <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400">
-              <Cpu className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="flex items-baseline justify-between mb-3">
-            <span className="text-3xl font-extrabold text-white tracking-tight">{cpuPercent}%</span>
-            <span className="text-xs font-mono text-slate-400">{stats?.cpu.cores || 1} Núcleos</span>
-          </div>
-          <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
-            <div
-              className={`h-full transition-all duration-500 rounded-full ${
-                cpuPercent > 85 ? 'bg-rose-500' : cpuPercent > 60 ? 'bg-amber-500' : 'bg-indigo-500'
-              }`}
-              style={{ width: `${Math.min(100, Math.max(0, cpuPercent))}%` }}
-            ></div>
-          </div>
-          <p className="text-[11px] text-slate-500 mt-2 truncate">{stats?.cpu.brand || 'Processador da VPS'}</p>
-        </div>
+        />
 
-        {/* RAM */}
-        <div
+        <TelemetryCard
+          label="Memória RAM"
+          icon={<Activity className="w-4 h-4" />}
+          value={`${memPercent}%`}
+          unit={`${formatBytes(stats?.memory.usedBytes || 0)} / ${formatBytes(stats?.memory.totalBytes || 0)}`}
+          detail={`Livre: ${formatBytes(stats?.memory.freeBytes || 0)}`}
+          percent={memPercent}
+          tone={toneForUsage(memPercent)}
+          active={activeChartMetric === 'memory'}
           onClick={() => setActiveChartMetric('memory')}
-          className={`bg-[#0f172a]/90 rounded-3xl p-5 border transition-all cursor-pointer relative overflow-hidden shadow-xl hover:shadow-2xl ${
-            activeChartMetric === 'memory' ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-950/20' : 'border-slate-800'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Memória RAM</span>
-            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
-              <Activity className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="flex items-baseline justify-between mb-3">
-            <span className="text-3xl font-extrabold text-white tracking-tight">{memPercent}%</span>
-            <span className="text-xs font-mono text-slate-400">
-              {formatBytes(stats?.memory.usedBytes || 0)} / {formatBytes(stats?.memory.totalBytes || 0)}
-            </span>
-          </div>
-          <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
-            <div
-              className={`h-full transition-all duration-500 rounded-full ${
-                memPercent > 85 ? 'bg-rose-500' : memPercent > 70 ? 'bg-amber-500' : 'bg-emerald-500'
-              }`}
-              style={{ width: `${Math.min(100, Math.max(0, memPercent))}%` }}
-            ></div>
-          </div>
-          <p className="text-[11px] text-slate-500 mt-2">Livre: {formatBytes(stats?.memory.freeBytes || 0)}</p>
-        </div>
+        />
 
-        {/* Disco */}
-        <div
+        <TelemetryCard
+          label="Disco"
+          icon={<HardDrive className="w-4 h-4" />}
+          value={`${diskPercent}%`}
+          unit={`${formatBytes(disk?.usedBytes || 0)} / ${formatBytes(disk?.sizeBytes || 0)}`}
+          detail={`Disponível: ${formatBytes(disk?.availableBytes || 0)}`}
+          percent={diskPercent}
+          tone={toneForUsage(diskPercent)}
+          active={activeChartMetric === 'disk'}
           onClick={() => setActiveChartMetric('disk')}
-          className={`bg-[#0f172a]/90 rounded-3xl p-5 border transition-all cursor-pointer relative overflow-hidden shadow-xl hover:shadow-2xl ${
-            activeChartMetric === 'disk' ? 'border-amber-500 ring-2 ring-amber-500/20 bg-amber-950/20' : 'border-slate-800'
+        />
+
+        <button
+          type="button"
+          onClick={() => setActiveChartMetric('network')}
+          className={`relative text-left bg-surface-container border rounded-lg p-4 overflow-hidden transition-colors ${
+            activeChartMetric === 'network'
+              ? 'border-tertiary bg-surface-container-high'
+              : 'border-outline-variant hover:bg-surface-container-high'
           }`}
         >
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Disco SSD NVMe</span>
-            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400">
-              <HardDrive className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="flex items-baseline justify-between mb-3">
-            <span className="text-3xl font-extrabold text-white tracking-tight">{diskPercent}%</span>
-            <span className="text-xs font-mono text-slate-400">
-              {formatBytes(disk?.usedBytes || 0)} / {formatBytes(disk?.sizeBytes || 0)}
+          <div className="flex items-start justify-between gap-2 mb-3">
+            <span className="mono-label">Tráfego de Rede</span>
+            <span className="text-tertiary shrink-0">
+              <Wifi className="w-4 h-4" />
             </span>
           </div>
-          <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
-            <div
-              className={`h-full transition-all duration-500 rounded-full ${
-                diskPercent > 85 ? 'bg-rose-500' : 'bg-amber-500'
-              }`}
-              style={{ width: `${Math.min(100, Math.max(0, diskPercent))}%` }}
-            ></div>
-          </div>
-          <p className="text-[11px] text-slate-500 mt-2">Disponível: {formatBytes(disk?.availableBytes || 0)}</p>
-        </div>
 
-        {/* Rede / Download & Upload */}
-        <div
-          onClick={() => setActiveChartMetric('network')}
-          className={`bg-[#0f172a]/90 rounded-3xl p-5 border transition-all cursor-pointer relative overflow-hidden shadow-xl hover:shadow-2xl ${
-            activeChartMetric === 'network' ? 'border-cyan-500 ring-2 ring-cyan-500/20 bg-cyan-950/20' : 'border-slate-800'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tráfego de Rede</span>
-            <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400">
-              <Wifi className="w-4 h-4" />
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2 font-mono text-sm">
+              <span className="flex items-center gap-1 text-on-surface-variant/80 text-xs">
+                <ArrowDownRight className="w-3.5 h-3.5 text-ok" />
+              </span>
+              <span className="text-ok">{rxMbps} Mbps</span>
+            </div>
+            <div className="flex items-center justify-between gap-2 font-mono text-sm">
+              <span className="flex items-center gap-1 text-on-surface-variant/80 text-xs">
+                <ArrowUpRight className="w-3.5 h-3.5 text-primary" />
+              </span>
+              <span className="text-primary">{txMbps} Mbps</span>
             </div>
           </div>
-          <div className="space-y-1.5 mt-1">
-            <div className="flex items-center justify-between text-xs font-mono">
-              <span className="flex items-center gap-1 text-slate-400">
-                <ArrowDownRight className="w-3.5 h-3.5 text-emerald-400" /> Download:
-              </span>
-              <span className="text-emerald-400 font-bold">{rxMbps} Mbps</span>
-            </div>
-            <div className="flex items-center justify-between text-xs font-mono">
-              <span className="flex items-center gap-1 text-slate-400">
-                <ArrowUpRight className="w-3.5 h-3.5 text-indigo-400" /> Upload:
-              </span>
-              <span className="text-indigo-300 font-bold">{txMbps} Mbps</span>
-            </div>
-          </div>
-          <p className="text-[10px] text-slate-500 mt-2 truncate flex items-center gap-1">
-            <Radio className="w-3 h-3 text-emerald-400 animate-pulse" /> 1Gbps Backbone Ativo
+
+          <p className="font-mono text-2xs text-on-surface-variant/70 mt-2 truncate">
+            {stats?.osInfo.publicIp || stats?.network.interfaces[0] || 'rede'}
           </p>
-        </div>
+        </button>
       </div>
 
       {/* Real-time Rolling Multi-Metric & Timeframe Chart Container */}
-      <div className="bg-[#0f172a]/90 rounded-3xl p-6 border border-slate-800 shadow-2xl space-y-5">
+      <div className="bg-surface-container rounded-lg p-5 border border-outline-variant space-y-5">
         {/* Top Controls: Metric Filter + Time Range Filter */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800/80 pb-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-outline-variant pb-4">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-indigo-500/10 text-indigo-400">
+            <div className="p-2 rounded bg-primary/10 text-primary">
               <BarChart3 className="w-5 h-5" />
             </div>
             <div>
@@ -397,7 +415,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
           <div className="flex flex-wrap items-center gap-3">
             {/* Metric Filter Tabs */}
-            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800">
+            <div className="flex items-center gap-1 bg-surface-container-lowest p-1 rounded border border-outline-variant">
               <button
                 onClick={() => setActiveChartMetric('all')}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
@@ -441,7 +459,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </div>
 
             {/* Timeframe Filter Tabs: 1d, 2d, 3d, 7d, custom */}
-            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800">
+            <div className="flex items-center gap-1 bg-surface-container-lowest p-1 rounded border border-outline-variant">
               <button
                 onClick={() => handleTimeRangeChange('realtime')}
                 className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${

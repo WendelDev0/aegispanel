@@ -4,26 +4,60 @@
 
 @layer base {
   body {
-    @apply bg-[#0b0f19] text-slate-100 antialiased;
+    @apply bg-surface text-on-surface antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Tabular figures everywhere numbers are compared column to column or
+     update in place, so digits do not shift width as values change. */
+  .font-mono,
+  code,
+  pre {
+    font-variant-numeric: tabular-nums;
   }
 }
 
-/* Custom modern scrollbar */
+@layer components {
+  /**
+   * Uppercase micro-label used above metric values and on table headers.
+   * Small, wide-tracked and monospaced, which is what separates a technical
+   * readout from ordinary body copy.
+   */
+  .mono-label {
+    @apply font-mono text-2xs uppercase tracking-[0.12em] text-on-surface-variant/70;
+  }
+
+  /* Level 1 surface: card, sidebar, top bar. Defined by a hairline, not a
+     shadow — depth in this system comes from tonal layering. */
+  .panel {
+    @apply bg-surface-container border border-outline-variant rounded-lg;
+  }
+
+  .panel-inset {
+    @apply bg-surface-container-lowest border border-outline-variant rounded;
+  }
+
+  /* Interactive surfaces brighten on hover instead of lifting. */
+  .panel-interactive {
+    @apply panel transition-colors hover:bg-surface-container-high;
+  }
+}
+
+/* Scrollbars tuned to the surface scale rather than the old slate palette. */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #0f172a;
+  background: #0d1321;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: #2f3543;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #424754;
 }

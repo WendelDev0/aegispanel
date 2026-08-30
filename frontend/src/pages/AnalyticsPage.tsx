@@ -12,6 +12,7 @@ import {
 import { api } from '../services/api.js';
 import { AppRecord } from '../types/index.js';
 import { GlobeView, GlobeMarker } from '../components/GlobeView.js';
+import { StatCard, Badge, Tone } from '../components/ui.js';
 
 type Range = '24h' | '7d' | '30d';
 
@@ -54,11 +55,11 @@ const RANGES: Array<{ id: Range; label: string }> = [
   { id: '30d', label: '30 dias' },
 ];
 
-const STATUS_STYLES: Record<string, { label: string; className: string }> = {
-  '2xx': { label: 'Sucesso', className: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' },
-  '3xx': { label: 'Redirect', className: 'bg-sky-500/15 text-sky-300 border-sky-500/30' },
-  '4xx': { label: 'Erro cliente', className: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },
-  '5xx': { label: 'Erro servidor', className: 'bg-rose-500/15 text-rose-300 border-rose-500/30' },
+const STATUS_STYLES: Record<string, { label: string; tone: Tone }> = {
+  '2xx': { label: 'Sucesso', tone: 'ok' },
+  '3xx': { label: 'Redirect', tone: 'info' },
+  '4xx': { label: 'Erro cliente', tone: 'warn' },
+  '5xx': { label: 'Erro servidor', tone: 'crit' },
 };
 
 interface AnalyticsPageProps {
@@ -203,29 +204,40 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
       {report && (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard icon={<Eye className="w-5 h-5" />} label="Visitas" value={report.totals.hits} accent="emerald" />
             <StatCard
-              icon={<Users className="w-5 h-5" />}
-              label="Visitantes únicos"
-              value={report.totals.visitors}
-              accent="indigo"
+              icon={<Eye className="w-4 h-4" />}
+              label="Visitas"
+              value={report.totals.hits.toLocaleString('pt-BR')}
+              tone="info"
             />
             <StatCard
-              icon={<Globe2 className="w-5 h-5" />}
+              icon={<Users className="w-4 h-4" />}
+              label="Visitantes únicos"
+              value={report.totals.visitors.toLocaleString('pt-BR')}
+              tone="info"
+            />
+            <StatCard
+              icon={<Globe2 className="w-4 h-4" />}
               label="Países"
               value={report.countries.length}
-              accent="sky"
+              tone="ok"
             />
             <StatCard
-              icon={<AlertTriangle className="w-5 h-5" />}
+              icon={<AlertTriangle className="w-4 h-4" />}
               label="Erros (4xx + 5xx)"
-              value={(report.statusTotals['4xx'] || 0) + (report.statusTotals['5xx'] || 0)}
-              accent="rose"
+              value={((report.statusTotals['4xx'] || 0) + (report.statusTotals['5xx'] || 0)).toLocaleString('pt-BR')}
+              tone={
+                (report.statusTotals['5xx'] || 0) > 0
+                  ? 'crit'
+                  : (report.statusTotals['4xx'] || 0) > 0
+                  ? 'warn'
+                  : 'neutral'
+              }
             />
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-5 gap-5">
-            <div className="xl:col-span-3 bg-[#0f172a]/80 rounded-2xl p-5 border border-slate-800">
+            <div className="xl:col-span-3 bg-surface-container rounded-lg p-5 border border-outline-variant">
               <h3 className="font-bold text-white text-sm mb-4">Origem dos acessos</h3>
               <GlobeView
                 markers={markers}
@@ -240,7 +252,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
               </p>
             </div>
 
-            <div className="xl:col-span-2 bg-[#0f172a]/80 rounded-2xl p-5 border border-slate-800">
+            <div className="xl:col-span-2 bg-surface-container rounded-lg p-5 border border-outline-variant">
               <h3 className="font-bold text-white text-sm mb-4">Países</h3>
               {report.countries.length === 0 ? (
                 <p className="text-xs text-slate-500">Sem dados de localização ainda.</p>
@@ -254,8 +266,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
                           <span className="text-slate-200 font-medium">{c.country}</span>
                           <span className="text-slate-400 font-mono">{c.hits}</span>
                         </div>
-                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                          <div className="h-full bg-emerald-500/70 rounded-full" style={{ width: `${pct}%` }} />
+                        <div className="h-1.5 bg-surface-container-high rounded-full overflow-hidden">
+                          <div className="h-full bg-primary-container rounded-full" style={{ width: `${pct}%` }} />
                         </div>
                       </div>
                     );
@@ -265,22 +277,16 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
             </div>
           </div>
 
-          <div className="bg-[#0f172a]/80 rounded-2xl p-5 border border-slate-800">
+          <div className="bg-surface-container rounded-lg p-5 border border-outline-variant">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-white text-sm">Visitas por {range === '24h' ? 'hora' : 'dia'}</h3>
               <div className="flex flex-wrap gap-1.5">
                 {Object.entries(report.statusTotals).map(([cls, count]) => {
-                  const style = STATUS_STYLES[cls] || {
-                    label: cls,
-                    className: 'bg-slate-800 text-slate-300 border-slate-700',
-                  };
+                  const style = STATUS_STYLES[cls] || { label: cls, tone: 'neutral' as Tone };
                   return (
-                    <span
-                      key={cls}
-                      className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${style.className}`}
-                    >
+                    <Badge key={cls} tone={style.tone} dot>
                       {style.label} {count}
-                    </span>
+                    </Badge>
                   );
                 })}
               </div>
@@ -291,7 +297,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
                 <div key={point.key} className="flex-1 min-w-[10px] flex flex-col items-center gap-1 group">
                   <div className="w-full flex flex-col justify-end h-32">
                     <div
-                      className="w-full bg-emerald-500/70 group-hover:bg-emerald-400 rounded-t transition-colors"
+                      className="w-full bg-primary-container group-hover:bg-primary rounded-t transition-colors"
                       style={{ height: `${(point.hits / maxSeries) * 100}%`, minHeight: point.hits > 0 ? 2 : 0 }}
                       title={`${point.hits} visitas · ${point.visitors} visitantes`}
                     />
@@ -310,7 +316,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
           </div>
 
           {report.recentErrors.length > 0 && (
-            <div className="bg-[#0f172a]/80 rounded-2xl p-5 border border-slate-800">
+            <div className="bg-surface-container rounded-lg p-5 border border-outline-variant">
               <h3 className="font-bold text-white text-sm mb-4 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-rose-400" />
                 Erros recentes
@@ -319,7 +325,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
                 {report.recentErrors.map((err, idx) => (
                   <div
                     key={`${err.ts}-${idx}`}
-                    className="flex items-center gap-3 text-xs font-mono bg-slate-950 px-3 py-2 rounded-lg border border-slate-800"
+                    className="flex items-center gap-3 text-xs font-mono bg-surface-container-lowest px-3 py-2 rounded border border-outline-variant"
                   >
                     <span
                       className={`font-bold shrink-0 ${err.status >= 500 ? 'text-rose-400' : 'text-amber-400'}`}
@@ -348,35 +354,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ initialAppId }) =>
   );
 };
 
-const ACCENTS: Record<string, string> = {
-  emerald: 'bg-emerald-500/10 text-emerald-400',
-  indigo: 'bg-indigo-500/10 text-indigo-400',
-  sky: 'bg-sky-500/10 text-sky-400',
-  rose: 'bg-rose-500/10 text-rose-400',
-};
-
-const StatCard: React.FC<{ icon: React.ReactNode; label: string; value: number; accent: string }> = ({
-  icon,
-  label,
-  value,
-  accent,
-}) => (
-  <div className="bg-[#0f172a]/80 p-5 rounded-2xl border border-slate-800 flex items-start gap-3.5">
-    <div className={`p-2.5 rounded-xl shrink-0 ${ACCENTS[accent]}`}>{icon}</div>
-    <div className="min-w-0">
-      <p className="text-2xl font-bold text-white tabular-nums">{value.toLocaleString('pt-BR')}</p>
-      <p className="text-xs text-slate-400 mt-0.5">{label}</p>
-    </div>
-  </div>
-);
-
 const RankCard: React.FC<{
   title: string;
   icon: React.ReactNode;
   entries: CountEntry[];
   emptyLabel?: string;
 }> = ({ title, icon, entries, emptyLabel }) => (
-  <div className="bg-[#0f172a]/80 rounded-2xl p-5 border border-slate-800">
+  <div className="bg-surface-container rounded-lg p-5 border border-outline-variant">
     <h3 className="font-bold text-white text-sm mb-4 flex items-center gap-2">
       <span className="text-slate-400">{icon}</span>
       {title}

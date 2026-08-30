@@ -159,7 +159,7 @@ export function App() {
   };
 
   return (
-    <div className="flex h-screen bg-[#070a13] text-slate-100 font-sans overflow-hidden">
+    <div className="flex h-screen bg-surface text-on-surface font-sans overflow-hidden">
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}

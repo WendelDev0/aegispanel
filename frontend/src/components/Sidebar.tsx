@@ -80,20 +80,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serve
   ];
 
   return (
-    <aside className="w-64 bg-[#090d16] border-r border-slate-800/80 flex flex-col h-screen shrink-0 select-none">
+    <aside className="w-60 bg-surface-container-lowest border-r border-outline-variant flex flex-col h-screen shrink-0 select-none">
       {/* Brand Header */}
-      <div className="p-4 border-b border-slate-800/80 flex items-center justify-between">
+      <div className="p-4 border-b border-outline-variant flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-emerald-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <Flame className="w-5 h-5 text-white" />
+          <div className="w-9 h-9 rounded bg-primary-container/15 border border-primary/30 flex items-center justify-center">
+            <Flame className="w-[18px] h-[18px] text-primary" />
           </div>
           <div>
-            <h1 className="font-extrabold text-sm tracking-wide text-white flex items-center gap-1">
-              AEGIS<span className="text-indigo-400 font-normal">PANEL</span>
+            <h1 className="font-bold text-sm tracking-[-0.01em] text-on-surface flex items-center gap-1">
+              AEGIS<span className="text-primary font-normal">PANEL</span>
             </h1>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="text-[10px] text-slate-400 font-mono truncate max-w-[120px]">
+              <span className="w-1.5 h-1.5 rounded-full bg-ok"></span>
+              <span className="text-2xs text-on-surface-variant/80 font-mono truncate max-w-[120px]">
                 {serverName}
               </span>
             </div>
@@ -105,7 +105,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serve
       <div className="flex-1 overflow-y-auto p-3 space-y-5 custom-scrollbar">
         {menuSections.map((section, sIdx) => (
           <div key={sIdx} className="space-y-1">
-            <h2 className="px-3 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
+            <h2 className="px-3 mono-label">
               {section.title}
             </h2>
             <div className="space-y-0.5 pt-1">
@@ -118,16 +118,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serve
                     key={item.id}
                     onClick={() => setActiveTab(item.id)}
                     title={item.tooltip}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all group ${
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded text-xs font-medium transition-colors group ${
                       isActive
-                        ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-md shadow-indigo-600/20'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                        ? 'bg-primary-container text-white'
+                        : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
                       <Icon
                         className={`w-4 h-4 transition-colors ${
-                          isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'
+                          isActive ? 'text-white' : 'text-on-surface-variant/70 group-hover:text-on-surface'
                         }`}
                       />
                       <span>{item.label}</span>
@@ -135,12 +135,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serve
 
                     {item.badge && (
                       <span
-                        className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold tracking-tight ${
+                        className={`text-2xs px-1.5 py-0.5 rounded-full font-mono tracking-tight border ${
                           isActive
-                            ? 'bg-white/20 text-white'
+                            ? 'bg-white/20 text-white border-white/25'
                             : item.badge === 'NOVO'
-                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                            : 'bg-slate-800 text-slate-400'
+                            ? 'bg-ok/10 text-ok border-ok/30'
+                            : 'bg-surface-container-high text-on-surface-variant border-outline-variant'
                         }`}
                       >
                         {item.badge}
@@ -155,13 +155,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serve
       </div>
 
       {/* Server Badge Footer */}
-      <div className="p-3 border-t border-slate-800/80 bg-slate-950/40">
-        <div className="flex items-center justify-between text-[11px] text-slate-400 px-2">
+      <div className="p-3 border-t border-outline-variant">
+        <div className="flex items-center justify-between text-2xs text-on-surface-variant/80 px-2">
           <div className="flex items-center gap-1.5">
-            <Server className="w-3.5 h-3.5 text-indigo-400" />
+            <Server className="w-3.5 h-3.5 text-primary" />
             <span className="font-mono">VPS Ready (v2.0)</span>
           </div>
-          <span className="text-[10px] text-emerald-400 font-mono font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded">
+          <span className="text-2xs text-ok font-mono bg-ok/10 border border-ok/30 px-1.5 py-0.5 rounded-full">
             Self-Hosted
           </span>
         </div>

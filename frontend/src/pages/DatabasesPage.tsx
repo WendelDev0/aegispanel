@@ -285,18 +285,18 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
       </div>
 
       {/* Security Banner */}
-      <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-2xl p-4 flex items-center justify-between gap-4">
+      <div className="bg-surface-container border border-outline-variant rounded-lg p-4 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400">
+          <div className="p-2 rounded bg-ok/10 text-ok">
             <ShieldCheck className="w-5 h-5" />
           </div>
-          <div className="text-xs text-slate-300">
-            <span className="font-bold text-white block text-sm">Criptografia Autenticada AES-256-GCM em Repouso</span>
+          <div className="text-xs text-on-surface-variant">
+            <span className="font-semibold text-on-surface block text-sm tracking-[-0.01em]">Criptografia Autenticada AES-256-GCM em Repouso</span>
             Todas as senhas e chaves são criptografadas antes de serem salvas no disco. Nenhum dado sensível é armazenado em texto puro.
           </div>
         </div>
 
-        <span className="text-[11px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/30 shrink-0">
+        <span className="text-2xs font-mono text-ok bg-ok/10 px-2.5 py-1 rounded-full border border-ok/30 shrink-0">
           Zero-Leak Shield
         </span>
       </div>
@@ -339,41 +339,52 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
             return (
               <div
                 key={db.id}
-                className="bg-[#0f172a]/80 rounded-2xl p-5 border border-slate-800 hover:border-slate-700/80 transition-all flex flex-col justify-between"
+                className={`relative bg-surface-container rounded-lg p-5 border transition-colors flex flex-col justify-between overflow-hidden ${
+                  db.status === 'running' ? 'border-outline-variant' : 'border-outline-variant/60'
+                }`}
               >
+                {/* Status carried by a left accent bar, as in the reference
+                    cluster cards: readable before any text is parsed. */}
+                <span
+                  className={`absolute inset-y-0 left-0 w-[3px] ${
+                    db.status === 'running' ? 'bg-ok' : 'bg-outline-variant'
+                  }`}
+                  aria-hidden
+                />
+
                 <div>
                   {/* Top row */}
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold">
+                      <div className="w-9 h-9 rounded bg-primary/10 text-primary flex items-center justify-center">
                         <Database className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="font-bold text-white text-base flex items-center gap-2">
+                        <h3 className="font-semibold text-on-surface text-base flex items-center gap-2 tracking-[-0.01em]">
                           {db.name}
-                          <span className="text-xs font-mono uppercase bg-slate-800 text-emerald-400 px-2 py-0.5 rounded border border-slate-700">
+                          <span className="text-2xs font-mono uppercase bg-surface-container-high text-primary px-2 py-0.5 rounded-full border border-outline-variant">
                             {db.type}
                           </span>
                         </h3>
-                        <p className="text-xs text-slate-400">Porta Host: :{db.port}</p>
+                        <p className="font-mono text-2xs text-on-surface-variant/70">host :{db.port}</p>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-mono font-semibold flex items-center gap-1">
+                      <span className="text-2xs bg-ok/10 text-ok border border-ok/30 px-2 py-0.5 rounded-full font-mono flex items-center gap-1">
                         <Lock className="w-3 h-3" /> AES-256
                       </span>
 
                       <span
-                        className={`text-xs px-2.5 py-1 rounded-full font-semibold flex items-center gap-1.5 ${
+                        className={`text-2xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1.5 border ${
                           db.status === 'running'
-                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                            : 'bg-slate-800 text-slate-400 border border-slate-700'
+                            ? 'bg-ok/10 text-ok border-ok/30'
+                            : 'bg-surface-container-high text-on-surface-variant border-outline-variant'
                         }`}
                       >
                         <span
                           className={`w-1.5 h-1.5 rounded-full ${
-                            db.status === 'running' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                            db.status === 'running' ? 'bg-ok' : 'bg-outline'
                           }`}
                         ></span>
                         {db.status === 'running' ? 'Online' : 'Parado'}
@@ -383,7 +394,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
 
                   {/* Connection String Box */}
                   <div className="space-y-2 mb-4">
-                    <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                    <div className="flex items-center justify-between mono-label">
                       <span>String de Conexão (DATABASE_URL)</span>
                       <button
                         onClick={() => togglePasswordVisibility(db.id)}
@@ -394,7 +405,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                       </button>
                     </div>
 
-                    <div className="flex items-center gap-2 bg-slate-950 p-2.5 rounded-xl border border-slate-800 font-mono text-xs text-slate-300">
+                    <div className="flex items-center gap-2 bg-surface-container-lowest p-2.5 rounded border border-outline-variant font-mono text-xs text-on-surface-variant">
                       <span className="truncate flex-1 select-all">
                         {isPassVisible ? displayConn : displayConn.replace(/:([^:@]+)@/, ':••••••••••••@')}
                       </span>
@@ -423,7 +434,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
 
                   {/* Ready-to-paste .env line, addressed to the container on the shared network */}
                   <div className="space-y-2 mb-4">
-                    <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                    <div className="flex items-center justify-between mono-label">
                       <span>Para colar no .env da aplicação</span>
                       <button
                         onClick={() => toggleEnvBlock(db.id)}
@@ -434,7 +445,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                       </button>
                     </div>
 
-                    <div className="flex items-start gap-2 bg-slate-950 p-2.5 rounded-xl border border-indigo-500/30 font-mono text-xs text-indigo-200">
+                    <div className="flex items-start gap-2 bg-surface-container-lowest p-2.5 rounded border border-primary/30 font-mono text-xs text-primary">
                       <span className="flex-1 break-all select-all">
                         {isEnvVisible && creds
                           ? creds.envLine
@@ -468,20 +479,20 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                   </div>
 
                   {/* Metadata Credentials Info */}
-                  <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 mb-4">
+                  <div className="grid grid-cols-2 gap-3 text-xs font-mono bg-surface-container-lowest p-3 rounded border border-outline-variant mb-4">
                     <div>
-                      <span className="text-slate-500 block text-[10px] uppercase">Usuário Seguro</span>
-                      <span className="text-slate-200 font-semibold select-all">{db.dbUser}</span>
+                      <span className="mono-label block mb-0.5">Usuário</span>
+                      <span className="text-on-surface select-all">{db.dbUser}</span>
                     </div>
                     <div>
-                      <span className="text-slate-500 block text-[10px] uppercase">Nome do Database</span>
-                      <span className="text-slate-200 font-semibold select-all">{db.dbName || db.name}</span>
+                      <span className="mono-label block mb-0.5">Database</span>
+                      <span className="text-on-surface select-all">{db.dbName || db.name}</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Actions with Tooltips */}
-                <div className="flex items-center justify-between pt-3 border-t border-slate-800/80">
+                <div className="flex items-center justify-between pt-3 border-t border-outline-variant">
                   <div className="flex items-center gap-2">
                     {db.status === 'running' ? (
                       <button
