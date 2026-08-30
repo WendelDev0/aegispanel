@@ -5,6 +5,8 @@ const TABS: NavTab[] = [
   'dashboard',
   'templates',
   'apps',
+  'analytics',
+  'nodes',
   'databases',
   'querystudio',
   'filemanager',

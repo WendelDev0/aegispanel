@@ -25,6 +25,7 @@ export type NavTab =
   | 'templates'
   | 'apps'
   | 'analytics'
+  | 'nodes'
   | 'databases'
   | 'querystudio'
   | 'filemanager'
@@ -52,6 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serve
         { id: 'dashboard' as NavTab, label: 'Visão Geral', icon: LayoutDashboard, tooltip: 'Painel com métricas de CPU, RAM e status geral da VPS' },
         { id: 'templates' as NavTab, label: 'Marketplace 1-Clique', icon: ShoppingBag, badge: 'NOVO', tooltip: 'Instale n8n, WhatsApp Evolution API, Typebot, WordPress e S3 em 1 clique' },
         { id: 'apps' as NavTab, label: 'Aplicações & CI/CD', icon: Layers, badge: 'PaaS', tooltip: 'Deploy de sites e APIs com Webhook automático estilo Vercel' },
+        { id: 'nodes' as NavTab, label: 'Servidores', icon: Server, badge: 'BETA', tooltip: 'Registre outros servidores e verifique a conexão via SSH' },
         { id: 'analytics' as NavTab, label: 'Analytics', icon: Globe2, badge: 'NOVO', tooltip: 'Visitas, origem geográfica dos acessos e erros de cada aplicação' },
         { id: 'databases' as NavTab, label: 'Bancos de Dados', icon: Database, badge: '1-Click', tooltip: 'PostgreSQL, MySQL, Redis e MongoDB com criptografia AES-256' },
         { id: 'querystudio' as NavTab, label: 'Database Studio', icon: Code2, badge: 'SQL', tooltip: 'Executor de queries SQL e visualizador de tabelas em tempo real' },

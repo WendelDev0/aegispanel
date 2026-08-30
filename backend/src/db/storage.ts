@@ -160,9 +160,35 @@ export interface ServerNode {
   name: string;
   type: 'vps' | 'local' | 'cloud';
   hostIp: string;
+  /** True for the machine this process runs on; it needs no SSH transport. */
+  isLocal?: boolean;
   isCurrent: boolean;
-  status: 'online' | 'offline';
+  status: 'online' | 'offline' | 'unknown' | 'error';
   location?: string;
+
+  // --- SSH transport -----------------------------------------------------
+  // Remote nodes are reached with dockerode's SSH transport, which runs
+  // `docker system dial-stdio` over an ordinary SSH session. No Docker port is
+  // ever exposed on the node.
+  sshHost?: string;
+  sshPort?: number;
+  sshUser?: string;
+  /**
+   * Private key, encrypted at rest with ENCRYPTION_KEY.
+   *
+   * This key grants membership of the remote `docker` group, which is
+   * equivalent to root on that machine. It is never returned by the API - only
+   * a boolean saying whether one is stored.
+   */
+  sshPrivateKey?: string;
+  /** Passphrase for the key above, encrypted with the same key. */
+  sshPassphrase?: string;
+
+  // --- last health check --------------------------------------------------
+  lastCheckedAt?: string;
+  lastError?: string;
+  dockerVersion?: string;
+  containerCount?: number;
 }
 
 export interface PanelSettings {
@@ -228,7 +254,7 @@ const DEFAULT_DATA: DatabaseSchema = {
   // Only the machine running this process. Additional nodes are registered by
   // the operator; shipping a placeholder for someone else's provider is noise.
   serverNodes: [
-    { id: 'node-local', name: 'Este Servidor', type: 'local', hostIp: '127.0.0.1', isCurrent: true, status: 'online', location: 'On-Premise' },
+    { id: 'node-local', name: 'Este Servidor', type: 'local', hostIp: '127.0.0.1', isLocal: true, isCurrent: true, status: 'online', location: 'On-Premise' },
   ],
   settings: {
     serverName: 'Aegis Node 01',

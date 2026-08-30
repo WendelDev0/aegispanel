@@ -13,6 +13,7 @@ import { AuthPage } from './pages/AuthPage.js';
 const DashboardPage = lazy(() => import('./pages/DashboardPage.js').then(m => ({ default: m.DashboardPage })));
 const TemplatesPage = lazy(() => import('./pages/TemplatesPage.js').then(m => ({ default: m.TemplatesPage })));
 const AppsPage = lazy(() => import('./pages/AppsPage.js').then(m => ({ default: m.AppsPage })));
+const NodesPage = lazy(() => import('./pages/NodesPage.js').then(m => ({ default: m.NodesPage })));
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage.js').then(m => ({ default: m.AnalyticsPage })));
 const DatabasesPage = lazy(() => import('./pages/DatabasesPage.js').then(m => ({ default: m.DatabasesPage })));
 const ContainersPage = lazy(() => import('./pages/ContainersPage.js').then(m => ({ default: m.ContainersPage })));
@@ -127,6 +128,8 @@ export function App() {
         return <TemplatesPage setActiveTab={setActiveTab} />;
       case 'apps':
         return <AppsPage onOpenAnalytics={(appId) => setActiveTab('analytics', appId)} />;
+      case 'nodes':
+        return <NodesPage />;
       case 'analytics':
         return <AnalyticsPage initialAppId={routeParam} />;
       case 'databases':
