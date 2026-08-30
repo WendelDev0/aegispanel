@@ -21,6 +21,26 @@ function normalizeHost(value: unknown): string {
     .replace(/\/.*$/, '');
 }
 
+/**
+ * Validates the SSH login name.
+ *
+ * Worth checking rather than trusting: a server name pasted into this field
+ * ("VPS SELVA") is accepted by the form, fails authentication on the node, and
+ * surfaces as a generic "authentication refused" that says nothing about the
+ * real mistake.
+ */
+function validateSshUser(user: string): string | null {
+  const trimmed = user.trim();
+  if (!trimmed) return 'Usuário SSH é obrigatório.';
+  if (/\s/.test(trimmed)) {
+    return `"${trimmed}" não é um usuário SSH válido: nomes de usuário não têm espaços. Informe a conta de login no servidor, por exemplo "aegis" ou "root".`;
+  }
+  if (!/^[a-z_][a-z0-9_-]{0,31}$/i.test(trimmed)) {
+    return `"${trimmed}" não é um usuário SSH válido. Use apenas letras, números, hífen e sublinhado.`;
+  }
+  return null;
+}
+
 /** Rejects a key that is not in a format ssh2 can parse, before it is stored. */
 function validatePrivateKey(key: string): string | null {
   const trimmed = key.trim();
@@ -55,8 +75,9 @@ nodeRouter.post('/', requireAdmin, (req: Request, res: Response): void => {
       return;
     }
 
-    if (!sshUser) {
-      res.status(400).json({ error: 'Usuário SSH é obrigatório' });
+    const userProblem = validateSshUser(String(sshUser || ''));
+    if (userProblem) {
+      res.status(400).json({ error: userProblem });
       return;
     }
 
@@ -129,7 +150,14 @@ nodeRouter.put('/:id', requireAdmin, (req: Request, res: Response): void => {
 
     if (name) node.name = name;
     if (location !== undefined) node.location = location || undefined;
-    if (sshUser) node.sshUser = String(sshUser).trim();
+    if (sshUser) {
+      const userProblem = validateSshUser(String(sshUser));
+      if (userProblem) {
+        res.status(400).json({ error: userProblem });
+        return;
+      }
+      node.sshUser = String(sshUser).trim();
+    }
 
     if (sshHost) {
       const host = normalizeHost(sshHost);

@@ -103,6 +103,11 @@ export class NodeService {
 
     const passphrase = node.sshPassphrase ? EncryptionService.tryDecrypt(node.sshPassphrase) : undefined;
 
+    // Note: dockerode logs a DeprecationWarning about a malformed URL for the
+    // ssh protocol (docker-modem builds it with url.format and no scheme). It
+    // is cosmetic - the address is re-resolved before the request and the
+    // connection works - so it is left alone rather than worked around with a
+    // fragile patch to the library's internals.
     return new Docker({
       protocol: 'ssh',
       host: node.sshHost,

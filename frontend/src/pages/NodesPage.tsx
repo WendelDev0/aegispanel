@@ -354,11 +354,16 @@ export const NodesPage: React.FC = () => {
                 <label className="block text-xs font-semibold text-on-surface-variant mb-1">Usuário SSH *</label>
                 <input
                   required
+                  pattern="[A-Za-z_][A-Za-z0-9_-]*"
+                  title="Nome de login no servidor, sem espaços"
                   value={sshUser}
-                  onChange={(e) => setSshUser(e.target.value)}
+                  onChange={(e) => setSshUser(e.target.value.trim())}
                   placeholder="aegis"
                   className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3.5 py-2.5 text-on-surface text-sm font-mono focus:outline-none focus:border-primary"
                 />
+                <p className="text-2xs text-on-surface-variant/70 mt-1">
+                  A conta de login no servidor, não o nome dele. Ex.: <span className="font-mono">aegis</span>.
+                </p>
               </div>
 
               <div>
