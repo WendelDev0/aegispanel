@@ -52,10 +52,16 @@ export const GlobeView: React.FC<GlobeViewProps> = ({ markers, emptyMessage }) =
       size: 0.03 + (Math.log10(1 + m.hits) / Math.log10(1 + maxHits)) * 0.06,
     }));
 
+    // cobe expects width/height in backing-store pixels, which is the CSS size
+    // multiplied by the ratio it is given. Hardcoding a factor of 2 while
+    // passing a ratio of 1 on a standard display renders the globe at the
+    // wrong scale.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
     const globe = createGlobe(canvasRef.current, {
-      devicePixelRatio: Math.min(window.devicePixelRatio, 2),
-      width: size * 2,
-      height: size * 2,
+      devicePixelRatio: dpr,
+      width: size * dpr,
+      height: size * dpr,
       phi: phiRef.current,
       theta: 0.25,
       dark: 1,
