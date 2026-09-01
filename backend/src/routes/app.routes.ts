@@ -12,6 +12,7 @@ import { PortService } from '../services/port.service.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { assertSafeGitUrl } from '../utils/url-security.js';
 import { isValidDomain } from '../utils/naming.js';
+import { getPublicBaseUrl } from '../utils/public-url.js';
 import { authMiddleware, requireWrite, requireAdmin, AuthRequest } from '../middleware/auth.js';
 
 export const appRouter = Router();
@@ -358,7 +359,11 @@ appRouter.get('/:id/webhook', requireAdmin, (req: Request, res: Response): void 
     return;
   }
   const secret = AppService.getWebhookSecret(app) || AppService.rotateWebhookSecret(app.id);
-  const hostUrl = `${req.protocol}://${req.get('host') || 'localhost:4000'}`;
+  const hostUrl = getPublicBaseUrl(dbStorage.getSettings());
+  if (!hostUrl) {
+    res.status(503).json({ error: 'Configure AEGIS_PUBLIC_BASE_URL ou o domínio do painel antes de gerar o webhook.' });
+    return;
+  }
   res.json({
     url: `${hostUrl}/api/webhooks/deploy/${app.id}`,
     secret,
@@ -374,7 +379,11 @@ appRouter.get('/:id/workflow', requireWrite, (req: Request, res: Response): void
     return;
   }
 
-  const hostUrl = `${req.protocol}://${req.get('host') || 'localhost:4000'}`;
+  const hostUrl = getPublicBaseUrl(dbStorage.getSettings());
+  if (!hostUrl) {
+    res.status(503).json({ error: 'Configure AEGIS_PUBLIC_BASE_URL ou o domínio do painel antes de gerar o workflow.' });
+    return;
+  }
   res.json({ yaml: CicdService.generateGitHubWorkflow(app, hostUrl) });
 });
 

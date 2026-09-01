@@ -350,7 +350,7 @@ export class DatabaseService {
     throw new Error('No container associated');
   }
 
-  static async getSupabaseHub(host: string = 'localhost'): Promise<any> {
+  static async getSupabaseHub(host = ''): Promise<any> {
     const envPath = '/opt/supabase/docker/.env';
     let content = '';
 
@@ -389,22 +389,43 @@ export class DatabaseService {
     }
 
     const isInstalled = fs.existsSync(envPath) || fs.existsSync('/opt/supabase') || services.length > 0;
-    const anonKey = getVal('ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg4MjgzMDQ3LCJleHAiOjE5NDU5NjMwNDd9.cIZSRI0zpUMbu68UHHnrXfOKUK_qa7ZTMP2t2_zCOyk');
-    const serviceRoleKey = getVal('SERVICE_ROLE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJpYXQiOjE3ODgyODMwNDcsImV4cCI6MTk0NTk2MzA0N30.9Tj2LsVPuHo2G5PXxBdmrxWpSV9VzPF86zKfkcQKdyA');
-    const postgresPassword = getVal('POSTGRES_PASSWORD', 'ef62aea1d96bd9216352a5f684950c65');
-    const dashboardPassword = getVal('DASHBOARD_PASSWORD', '5bcfef1c9f197c7498b929698c709772');
-    const dashboardUser = getVal('DASHBOARD_USERNAME', 'supabase');
-    const organization = getVal('STUDIO_DEFAULT_ORGANIZATION', 'BomDeBolao');
-    const project = getVal('STUDIO_DEFAULT_PROJECT', 'neon-bet');
+    const publicHost = CONFIG.SUPABASE_PUBLIC_HOST || host.trim();
+    if (!publicHost || !content) {
+      return {
+        installed: false,
+        configured: false,
+        running: isRunning,
+        services,
+      };
+    }
 
-    const cleanHost = host.replace(/:\d+$/, '');
-    const targetHost = cleanHost === 'localhost' || cleanHost === '127.0.0.1' ? '13.140.41.82' : cleanHost;
-    const studioUrl = `http://${targetHost}:8000/`;
-    const apiUrl = `http://${targetHost}:8000`;
+    const anonKey = getVal('ANON_KEY');
+    const serviceRoleKey = getVal('SERVICE_ROLE_KEY');
+    const postgresPassword = getVal('POSTGRES_PASSWORD');
+    const dashboardPassword = getVal('DASHBOARD_PASSWORD');
+    const dashboardUser = getVal('DASHBOARD_USERNAME');
+    const organization = getVal('STUDIO_DEFAULT_ORGANIZATION');
+    const project = getVal('STUDIO_DEFAULT_PROJECT');
+
+    if (!anonKey || !serviceRoleKey || !postgresPassword || !dashboardPassword) {
+      return {
+        installed: false,
+        configured: false,
+        running: isRunning,
+        services,
+      };
+    }
+
+    const cleanHost = publicHost.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
+    const targetHost = cleanHost;
+    const scheme = CONFIG.LOCAL_MODE ? 'http' : 'https';
+    const studioUrl = `${scheme}://${targetHost}${CONFIG.LOCAL_MODE ? ':8000' : ''}/`;
+    const apiUrl = `${scheme}://${targetHost}${CONFIG.LOCAL_MODE ? ':8000' : ''}`;
     const connectionString = `postgresql://postgres:${postgresPassword}@${targetHost}:5432/postgres`;
 
     return {
       installed: isInstalled,
+      configured: true,
       running: isRunning,
       studioUrl,
       apiUrl,

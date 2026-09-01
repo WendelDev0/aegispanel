@@ -106,6 +106,10 @@ export const CONFIG = {
   DB_BIND_IP: process.env.AEGIS_DB_BIND_IP || '127.0.0.1',
   /** Application ports are loopback-only; Caddy reaches workloads over Docker. */
   APP_BIND_IP: process.env.AEGIS_APP_BIND_IP || '127.0.0.1',
+  /** Canonical public URL used in generated webhooks and workflows. */
+  PUBLIC_BASE_URL: (process.env.AEGIS_PUBLIC_BASE_URL || '').trim().replace(/\/+$/, ''),
+  /** Optional public hostname for the self-hosted Supabase gateway/studio. */
+  SUPABASE_PUBLIC_HOST: (process.env.AEGIS_SUPABASE_PUBLIC_HOST || '').trim(),
   /** Optional explicit network/container names for isolated Compose stacks. */
   DOCKER_NETWORK: process.env.AEGIS_DOCKER_NETWORK || '',
   CADDY_CONTAINER: process.env.AEGIS_CADDY_CONTAINER || 'aegis-caddy',

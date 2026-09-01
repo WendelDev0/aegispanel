@@ -43,8 +43,8 @@ export const TEMPLATES_CATALOG: AppTemplate[] = [
     env: {
       API_GW_HTTP_PORT: '8000',
       POSTGRES_PORT: '5432',
-      STUDIO_DEFAULT_ORGANIZATION: 'BomDeBolao',
-      STUDIO_DEFAULT_PROJECT: 'neon-bet',
+      STUDIO_DEFAULT_ORGANIZATION: 'AegisPanel',
+      STUDIO_DEFAULT_PROJECT: 'aegis-project',
     },
     features: [
       'PostgreSQL 17 com pgvector e extensões',
@@ -53,7 +53,7 @@ export const TEMPLATES_CATALOG: AppTemplate[] = [
       'Supabase Studio completo para gerenciar tabelas e SQL',
       'Storage e Realtime WebSockets para dados ao vivo',
     ],
-    tags: ['Supabase', 'PostgreSQL', 'Auth', 'BaaS', 'Neon-Bet'],
+    tags: ['Supabase', 'PostgreSQL', 'Auth', 'BaaS'],
     docsUrl: 'https://supabase.com/docs',
   },
   {

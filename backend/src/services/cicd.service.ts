@@ -12,7 +12,8 @@ import { PortService } from './port.service.js';
 import { containerNameForApp } from '../utils/naming.js';
 import { emit } from '../realtime.js';
 import { CONFIG } from '../config.js';
-import { assertSafeGitUrl } from '../utils/url-security.js';
+import { assertSafeGitUrl, SafeGitTarget } from '../utils/url-security.js';
+import { injectPublicBuildArgs, publicBuildArgs } from '../utils/build-env.js';
 
 const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 const BUILD_TIMEOUT_MS = 30 * 60 * 1000;
@@ -183,6 +184,17 @@ export class CicdService {
     return gitUrl.trim();
   }
 
+  /** Pins Git's HTTPS connection to the address checked by assertSafeGitUrl. */
+  private static gitNetworkArgs(target: SafeGitTarget): string[] {
+    const address = target.address.includes(':') ? `[${target.address}]` : target.address;
+    return [
+      '-c',
+      `http.curloptResolve=${target.hostname}:${target.port}:${address}`,
+      '-c',
+      'http.followRedirects=false',
+    ];
+  }
+
   /** Keeps repository metadata and common secret files out of Docker builds. */
   private static ensureBuildContextIgnore(buildsDir: string): void {
     const ignorePath = path.join(buildsDir, '.dockerignore');
@@ -208,7 +220,7 @@ export class CicdService {
     inspection: ProjectInspectionResult;
     commit?: { hash: string; message: string; author: string; date: string };
   }> {
-    await assertSafeGitUrl(options.gitUrl);
+    const safeGitTarget = await assertSafeGitUrl(options.gitUrl);
     const tempDir = path.join(
       CONFIG.DATA_DIR,
       'temp',
@@ -221,10 +233,11 @@ export class CicdService {
       const cloneUrl = this.buildCloneUrl(options.gitUrl);
       const gitEnv = this.gitAuthEnv(options.gitUrl, options.githubToken);
       const branch = safeBranchName(options.branch);
+      const gitNetworkArgs = this.gitNetworkArgs(safeGitTarget);
 
       const cloned = await run(
         'git',
-        ['clone', '--depth', '1', '-b', branch, '--single-branch', cloneUrl, tempDir],
+        [...gitNetworkArgs, 'clone', '--depth', '1', '-b', branch, '--single-branch', cloneUrl, tempDir],
         { timeoutMs: CLONE_TIMEOUT_MS, env: gitEnv }
       );
 
@@ -232,7 +245,7 @@ export class CicdService {
         // Fall back to the repository's default branch.
         fs.rmSync(tempDir, { recursive: true, force: true });
         fs.mkdirSync(tempDir, { recursive: true });
-        const fallback = await run('git', ['clone', '--depth', '1', cloneUrl, tempDir], {
+        const fallback = await run('git', [...gitNetworkArgs, 'clone', '--depth', '1', cloneUrl, tempDir], {
           timeoutMs: CLONE_TIMEOUT_MS,
           env: gitEnv,
         });
@@ -409,8 +422,10 @@ export class CicdService {
         fs.mkdirSync(buildsDir, { recursive: true });
 
         const token = AppService.getGithubToken(app);
+        const safeGitTarget = await assertSafeGitUrl(app.gitUrl);
         const cloneUrl = this.buildCloneUrl(app.gitUrl);
         const gitEnv = this.gitAuthEnv(app.gitUrl, token);
+        const gitNetworkArgs = this.gitNetworkArgs(safeGitTarget);
 
         log(
           token
@@ -433,7 +448,7 @@ export class CicdService {
           // Never leave a PAT in .git/config. It is used only for this fetch,
           // then the remote is immediately restored to the public URL.
           await run('git', ['remote', 'set-url', 'origin', cloneUrl], { cwd: buildsDir });
-          const fetched = await run('git', ['fetch', '--prune', 'origin', branch], {
+          const fetched = await run('git', [...gitNetworkArgs, 'fetch', '--prune', 'origin', branch], {
             cwd: buildsDir,
             timeoutMs: CLONE_TIMEOUT_MS,
             onOutput: (c) => log(this.redactSecrets(c)),
@@ -443,7 +458,7 @@ export class CicdService {
           if (fetched.exitCode !== 0) {
             log(`[Git] Fetch falhou, re-clonando repositório...\n`);
             fs.rmSync(buildsDir, { recursive: true, force: true });
-            const cloned = await run('git', ['clone', '-b', branch, '--single-branch', cloneUrl, buildsDir], {
+            const cloned = await run('git', [...gitNetworkArgs, 'clone', '-b', branch, '--single-branch', cloneUrl, buildsDir], {
               timeoutMs: CLONE_TIMEOUT_MS,
               env: gitEnv,
             });
@@ -461,7 +476,7 @@ export class CicdService {
             stepName: 'Git Clone',
             percentage: 35,
           });
-          const cloned = await run('git', ['clone', '-b', branch, '--single-branch', cloneUrl, buildsDir], {
+          const cloned = await run('git', [...gitNetworkArgs, 'clone', '-b', branch, '--single-branch', cloneUrl, buildsDir], {
             timeoutMs: CLONE_TIMEOUT_MS,
             env: gitEnv,
           });
@@ -531,7 +546,7 @@ export class CicdService {
             dbStorage.saveApp(app);
           }
 
-          fs.writeFileSync(dockerfilePath, detection.dockerfile, 'utf-8');
+          fs.writeFileSync(dockerfilePath, injectPublicBuildArgs(detection.dockerfile, app.env || {}), 'utf-8');
         } else {
           try {
             const dockerContent = fs.readFileSync(dockerfilePath, 'utf8');
@@ -562,20 +577,10 @@ export class CicdService {
           percentage: 65,
         });
 
-        // Inject .env and build-args so Vite/Next/frontend frameworks receive variables during build
-        const buildArgs: string[] = [];
-        let envFileContent = '';
-        for (const [key, val] of Object.entries(app.env || {})) {
-          if (val !== undefined && val !== null) {
-            buildArgs.push('--build-arg', `${key}=${val}`);
-            envFileContent += `${key}=${val}\n`;
-          }
-        }
-        if (envFileContent) {
-          fs.writeFileSync(path.join(buildsDir, '.env'), envFileContent, 'utf-8');
-          fs.writeFileSync(path.join(buildsDir, '.env.production'), envFileContent, 'utf-8');
-          fs.writeFileSync(path.join(buildsDir, '.env.local'), envFileContent, 'utf-8');
-        }
+        // Only intentionally public variables may enter the image build. All
+        // other application variables are injected into the runtime container
+        // below and never become Docker build arguments or build-context files.
+        const buildArgs = publicBuildArgs(app.env || {});
 
         const build = await run('docker', ['build', ...buildArgs, '-t', buildImageTag, '-t', versionedTag, '.'], {
           cwd: buildsDir,

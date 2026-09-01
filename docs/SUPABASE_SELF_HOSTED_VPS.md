@@ -1,6 +1,6 @@
 # 🚀 Guia de Implantação: Supabase Self-Hosted no AegisPanel / VPS Linux
 
-Este guia detalha como subir a infraestrutura completa e 100% gratuita do **Supabase Self-Hosted** na sua VPS Linux com Docker, conectando ao seu projeto **BomDeBolão (Neon-Bet)**.
+Este guia detalha como subir a infraestrutura completa e 100% gratuita do **Supabase Self-Hosted** na sua VPS Linux com Docker, conectando ao seu próprio projeto.
 
 ---
 
@@ -30,7 +30,7 @@ Ao rodar o Supabase na sua VPS, você terá:
                          ▼               ▼
                ┌────────────────┐   ┌───────────────────────────┐
                │ Frontend React │   │   Supabase Self-Hosted    │
-               │ (neon-bet:3000)│   │   (Kong Gateway :8000)    │
+               │ (app:3000)     │   │   (Kong Gateway :8000)    │
                └────────────────┘   │   ├─ PostgreSQL (:5432)   │
                                     │   ├─ GoTrue (Auth)        │
                                     │   ├─ PostgREST (API)      │
@@ -73,8 +73,8 @@ No arquivo `.env` do Supabase na sua VPS, configure as chaves de segurança prin
 2. **URLs Públicas:**
    * `API_EXTERNAL_URL`: `https://api-supabase.seudominio.com`
    * `SITE_URL`: `https://seudominio.com` (URL do seu frontend)
-   * `STUDIO_DEFAULT_ORGANIZATION`: `BomDeBolao`
-   * `STUDIO_DEFAULT_PROJECT`: `neon-bet`
+   * `STUDIO_DEFAULT_ORGANIZATION`: nome da sua organização
+   * `STUDIO_DEFAULT_PROJECT`: nome do seu projeto
 
 ---
 
@@ -112,7 +112,7 @@ studio-supabase.seudominio.com {
 
 ---
 
-## 🔗 6. Conectando o Frontend (`neon-bet`) ao seu Supabase
+## 🔗 6. Conectando o frontend ao seu Supabase
 
 No AegisPanel, adicione as variáveis de ambiente na aplicação do Frontend:
 

@@ -374,7 +374,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
                   </span>
                 </div>
                 <p className="text-xs text-on-surface-variant mt-1">
-                  Stack oficial do <strong className="text-white">BomDeBolão (Neon-Bet)</strong> • Projeto: <span className="font-mono text-emerald-400 font-semibold">{supabaseHub.project}</span> • Org: <span className="font-mono text-white">{supabaseHub.organization}</span>
+                  Stack Supabase desta instalação • Projeto: <span className="font-mono text-emerald-400 font-semibold">{supabaseHub.project}</span> • Org: <span className="font-mono text-white">{supabaseHub.organization}</span>
                 </p>
               </div>
             </div>
@@ -395,7 +395,7 @@ export const DatabasesPage: React.FC<DatabasesPageProps> = ({ setActiveTab }) =>
           {/* Quick Shortcuts Bar */}
           <div className="mt-5">
             <h4 className="text-2xs font-mono uppercase text-on-surface-variant/80 tracking-wider mb-2.5 flex items-center gap-1.5">
-              <Zap className="w-3.5 h-3.5 text-emerald-400" /> Atalhos Rápidos do Projeto BomDeBolão
+              <Zap className="w-3.5 h-3.5 text-emerald-400" /> Atalhos rápidos do projeto
             </h4>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
               <a

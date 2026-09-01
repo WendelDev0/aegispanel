@@ -54,6 +54,12 @@ test('rejeita repositórios Git em HTTP ou redes privadas', async () => {
   await assert.rejects(() => assertSafeGitUrl('https://localhost/repo.git'));
 });
 
+test('rejeita faixas reservadas que não são redes privadas comuns', async () => {
+  await assert.rejects(() => assertSafeGitUrl('https://192.0.2.10/repo.git'));
+  await assert.rejects(() => assertSafeGitUrl('https://198.18.0.10/repo.git'));
+  await assert.rejects(() => assertSafeGitUrl('https://203.0.113.10/repo.git'));
+});
+
 test('aceita nomes DNS e rejeita literais de IP como domínio de aplicação', () => {
   assert.equal(isValidDomain('painel.example.com'), true);
   assert.equal(isValidDomain('127.0.0.1'), false);

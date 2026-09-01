@@ -1,8 +1,13 @@
 import bcrypt from 'bcryptjs';
 import { dbStorage } from '../db/storage.js';
 
-const newPassword = process.argv[2] || 'Admin@123456';
+const newPassword = process.argv[2];
 const newUsername = process.argv[3] || 'admin';
+
+if (!newPassword || newPassword.length < 12 || newPassword.length > 256) {
+  console.error('Uso: npm run reset-admin -- <senha-com-pelo-menos-12-caracteres> [usuario]');
+  process.exit(1);
+}
 
 async function resetAdmin() {
   const users = dbStorage.getUsers();
@@ -19,7 +24,7 @@ async function resetAdmin() {
     console.log(`🛡️  AegisPanel - Redefinição de Administrador`);
     console.log(`==================================================`);
     console.log(`✅ Usuário: ${newUsername}`);
-    console.log(`🔑 Nova Senha: ${newPassword}`);
+    console.log(`🔑 Senha: definida com sucesso (não é exibida nos logs)`);
     console.log(`==================================================\n`);
   } else {
     const newAdmin = {
@@ -35,7 +40,7 @@ async function resetAdmin() {
     console.log(`🛡️  AegisPanel - Novo Administrador Criado`);
     console.log(`==================================================`);
     console.log(`✅ Usuário: ${newUsername}`);
-    console.log(`🔑 Nova Senha: ${newPassword}`);
+    console.log(`🔑 Senha: definida com sucesso (não é exibida nos logs)`);
     console.log(`==================================================\n`);
   }
   process.exit(0);

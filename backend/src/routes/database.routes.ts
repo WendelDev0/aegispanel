@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { DatabaseService } from '../services/database.service.js';
-import { authMiddleware, requireWrite } from '../middleware/auth.js';
+import { CONFIG } from '../config.js';
+import { authMiddleware, requireAdmin, requireWrite } from '../middleware/auth.js';
 
 export const databaseRouter = Router();
 
@@ -14,10 +15,9 @@ databaseRouter.get('/', (req: Request, res: Response) => {
   res.json(databases);
 });
 
-databaseRouter.get('/supabase-hub', requireWrite, async (req: Request, res: Response) => {
+databaseRouter.get('/supabase-hub', requireAdmin, async (req: Request, res: Response) => {
   try {
-    const host = (req.headers['x-forwarded-host'] || req.headers.host || req.hostname || '13.140.41.82') as string;
-    const hub = await DatabaseService.getSupabaseHub(host);
+    const hub = await DatabaseService.getSupabaseHub(CONFIG.SUPABASE_PUBLIC_HOST);
     res.json(hub || { installed: false });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

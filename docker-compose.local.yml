@@ -61,6 +61,15 @@ services:
       - DATA_DIR=/app/data
       - CADDY_CONFIG_PATH=/app/caddy/Caddyfile.local
       - ACCESS_LOG_PATH=/var/log/caddy/access.log
+      # Resolves visitor addresses to a city for the analytics map. Off by
+      # default because it sends those addresses to ip-api.com; set
+      # GEOIP_ENABLED=true in .env to turn it on.
+      - GEOIP_ENABLED=${GEOIP_ENABLED:-false}
+      # Comma-separated CIDRs of a CDN or proxy in front of Caddy. Without it,
+      # every visit behind a CDN is attributed to the CDN's own address.
+      - AEGIS_TRUSTED_PROXIES=${AEGIS_TRUSTED_PROXIES:-}
+      - AEGIS_PUBLIC_BASE_URL=${AEGIS_PUBLIC_BASE_URL:-}
+      - AEGIS_SUPABASE_PUBLIC_HOST=${AEGIS_SUPABASE_PUBLIC_HOST:-}
       - DOCKER_SOCKET=/var/run/docker.sock
       - TZ=${TZ:-America/Sao_Paulo}
       # Segredos fixos e sem valor: são só de desenvolvimento e nunca protegem
