@@ -48,6 +48,7 @@ import {
 import { api } from '../services/api.js';
 import { socket } from '../services/socket.js';
 import { AppRecord, DeploymentRecord } from '../types/index.js';
+import { EnvEditor } from '../components/EnvEditor.js';
 
 interface AppsPageProps {
   /** Opens the analytics view already focused on this application. */
@@ -85,8 +86,10 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
   // Env Editor modal
   const [selectedEnvApp, setSelectedEnvApp] = useState<AppRecord | null>(null);
-  const [envString, setEnvString] = useState('');
+  const [envRecordDraft, setEnvRecordDraft] = useState<Record<string, string>>({});
+  const [loadingEnv, setLoadingEnv] = useState(false);
   const [savingEnv, setSavingEnv] = useState(false);
+  const [redeployOnSave, setRedeployOnSave] = useState(true);
 
   // Domain Editor modal
   const [selectedDomainApp, setSelectedDomainApp] = useState<AppRecord | null>(null);
@@ -372,34 +375,27 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
   const openEnvModal = async (app: AppRecord) => {
     try {
-      const res = await api.get(`/apps/${app.id}/env`);
+      setLoadingEnv(true);
       setSelectedEnvApp(app);
-      const envLines = Object.entries(res.data.env || {}).map(([k, v]) => `${k}=${v}`).join('\n');
-      setEnvString(envLines);
+      const res = await api.get(`/apps/${app.id}/env`);
+      const loadedEnv = res.data.env || {};
+      setEnvRecordDraft(loadedEnv);
     } catch (err: any) {
       alert('Erro ao carregar variáveis: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setLoadingEnv(false);
     }
   };
 
   const handleSaveEnv = async (redeploy: boolean = true) => {
     if (!selectedEnvApp) return;
 
-    const envObj: Record<string, string> = {};
-    envString.split('\n').forEach(line => {
-      const parts = line.split('=');
-      if (parts.length >= 2) {
-        const key = parts[0].trim();
-        const val = parts.slice(1).join('=').trim();
-        if (key) envObj[key] = val;
-      }
-    });
-
     try {
       setSavingEnv(true);
-      await api.put(`/apps/${selectedEnvApp.id}/env?redeploy=${redeploy}`, { env: envObj });
+      await api.put(`/apps/${selectedEnvApp.id}/env?redeploy=${redeploy}`, { env: envRecordDraft });
       setSelectedEnvApp(null);
       fetchApps();
-      alert('✅ Variáveis de ambiente atualizadas com sucesso!');
+      alert('✅ Variáveis de ambiente (.env) atualizadas e aplicadas com sucesso!');
     } catch (err: any) {
       alert('Erro ao salvar .env: ' + (err.response?.data?.error || err.message));
     } finally {
@@ -1139,45 +1135,78 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
       {/* Modal: Editar Variáveis de Ambiente (.env) */}
       {selectedEnvApp && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-lg overflow-hidden p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Sliders className="w-5 h-5 text-warn" />
-                <h3 className="font-bold text-white text-base">Variáveis de Ambiente (.env): {selectedEnvApp.name}</h3>
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-surface-container rounded-xl border border-outline-variant w-full max-w-2xl overflow-hidden p-6 space-y-4 shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between pb-3 border-b border-outline-variant">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-warn/10 p-2 flex items-center justify-center text-warn">
+                  <Sliders className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base">Variáveis de Ambiente (.env)</h3>
+                  <p className="text-[11px] text-on-surface-variant font-mono">Aplicação: {selectedEnvApp.name}</p>
+                </div>
               </div>
               <button onClick={() => setSelectedEnvApp(null)} className="text-on-surface-variant hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <p className="text-xs text-on-surface-variant">
-              Edite as chaves e valores no formato <code className="text-warn font-mono">CHAVE=VALOR</code> (uma por linha):
-            </p>
+            <div className="overflow-y-auto custom-scrollbar flex-1 pr-1">
+              {loadingEnv ? (
+                <div className="flex items-center justify-center p-12 text-on-surface-variant gap-2">
+                  <RefreshCw className="w-5 h-5 animate-spin text-primary" />
+                  <span className="text-xs">Carregando variáveis do servidor...</span>
+                </div>
+              ) : (
+                <EnvEditor
+                  initialEnv={envRecordDraft}
+                  onChange={(record) => {
+                    setEnvRecordDraft(record);
+                  }}
+                  title="Variáveis em Produção"
+                />
+              )}
+            </div>
 
-            <textarea
-              rows={8}
-              value={envString}
-              onChange={(e) => setEnvString(e.target.value)}
-              placeholder="DATABASE_URL=postgresql://...&#10;JWT_SECRET=...&#10;NODE_ENV=production"
-              className="w-full bg-surface-container-lowest border border-outline-variant rounded-lg p-4 text-xs font-mono text-ok focus:outline-none focus:border-primary leading-relaxed"
-            />
+            <div className="pt-3 border-t border-outline-variant flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-on-surface select-none">
+                <input
+                  type="checkbox"
+                  checked={redeployOnSave}
+                  onChange={(e) => setRedeployOnSave(e.target.checked)}
+                  className="rounded border-outline-variant text-primary focus:ring-primary w-4 h-4"
+                />
+                <span>Reiniciar contêiner e aplicar alterações imediatamente</span>
+              </label>
 
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setSelectedEnvApp(null)}
-                className="px-4 py-2 text-on-surface-variant hover:text-white text-xs font-medium"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => handleSaveEnv(true)}
-                disabled={savingEnv}
-                className="px-5 py-2.5 bg-primary-container hover:bg-primary text-white rounded text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
-              >
-                {savingEnv ? 'Salvando & Reiniciando...' : 'Salvar & Aplicar (.env)'}
-              </button>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedEnvApp(null)}
+                  className="px-4 py-2 text-on-surface-variant hover:text-white text-xs font-medium"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaveEnv(redeployOnSave)}
+                  disabled={savingEnv || loadingEnv}
+                  className="px-5 py-2.5 bg-primary-container hover:bg-primary text-white rounded-lg text-xs font-semibold transition-all active:scale-95 disabled:opacity-50 shadow-md flex items-center gap-1.5"
+                >
+                  {savingEnv ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Salvando & Aplicando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Salvar Variáveis (.env)</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1833,17 +1862,13 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
                 </p>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                  Variáveis de Ambiente Iniciais (.env)
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder="CHAVE=VALOR&#10;PORT=3000"
-                  value={createEnvString}
-                  onChange={(e) => setCreateEnvString(e.target.value)}
-                  className="w-full bg-surface-container-low border border-outline-variant rounded p-3 text-white text-xs font-mono focus:outline-none focus:border-primary"
-                ></textarea>
+              <div className="pt-2">
+                <EnvEditor
+                  initialEnv={createEnvString}
+                  onChange={(_, str) => setCreateEnvString(str)}
+                  compact={true}
+                  title="Variáveis de Ambiente Iniciais (.env)"
+                />
               </div>
 
               <div className="pt-2 flex items-center justify-end gap-3">
