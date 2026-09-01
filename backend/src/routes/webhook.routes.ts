@@ -1,8 +1,8 @@
 import { Router, Request, Response } from 'express';
-import express from 'express';
 import crypto from 'crypto';
 import { dbStorage } from '../db/storage.js';
 import { CicdService } from '../services/cicd.service.js';
+import { AppService } from '../services/app.service.js';
 
 export const webhookRouter = Router();
 
@@ -15,15 +15,6 @@ interface RawBodyRequest extends Request {
  * computed over the exact bytes sent. Re-serialising the parsed object would
  * produce a different string and fail verification.
  */
-webhookRouter.use(
-  express.json({
-    limit: '512kb',
-    verify: (req, _res, buf) => {
-      (req as RawBodyRequest).rawBody = buf.toString('utf-8');
-    },
-  })
-);
-
 /** Length-safe constant-time string comparison. */
 function safeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
@@ -62,13 +53,12 @@ webhookRouter.post('/deploy/:appId', async (req: RawBodyRequest, res: Response):
       return;
     }
 
-    const providedSecret =
-      (req.headers['x-aegis-secret'] as string | undefined) || (req.query.secret as string | undefined);
+    const providedSecret = req.headers['x-aegis-secret'] as string | undefined;
     const githubSignature = req.headers['x-hub-signature-256'] as string | undefined;
 
     const authorized = githubSignature
-      ? CicdService.verifyGitHubSignature(req.rawBody || '', githubSignature, app.webhookSecret)
-      : Boolean(providedSecret) && safeEqual(providedSecret!, app.webhookSecret);
+      ? CicdService.verifyGitHubSignature(req.rawBody || '', githubSignature, AppService.getWebhookSecret(app))
+      : Boolean(providedSecret) && safeEqual(providedSecret!, AppService.getWebhookSecret(app) || '');
 
     if (!authorized) {
       console.warn(`⛔ Webhook rejeitado para "${app.name}": credencial inválida.`);
@@ -85,28 +75,35 @@ webhookRouter.post('/deploy/:appId', async (req: RawBodyRequest, res: Response):
     lastTrigger.set(appId, now);
 
     const body = req.body || {};
+    if (app.autoDeploy === false) {
+      res.status(409).json({ error: 'Deploy automático está desativado para esta aplicação.' });
+      return;
+    }
     const headCommit = body.head_commit || body;
     const commitHash =
       headCommit.id || body.commit || (headCommit.sha ? String(headCommit.sha).substring(0, 8) : undefined);
     const commitMessage = headCommit.message || body.message || 'GitHub Push Auto-Deploy';
     const authorName = headCommit.author?.name || headCommit.author?.username || body.author || 'GitHub';
     const branch = body.ref ? String(body.ref).replace('refs/heads/', '') : body.branch || app.branch || 'main';
+    const expectedBranch = app.deployBranch || app.branch || 'main';
+    if (branch !== expectedBranch) {
+      res.status(202).json({ accepted: true, ignored: true, reason: `Branch ignorada; esperado: ${expectedBranch}.` });
+      return;
+    }
 
     console.log(`🚀 [CI/CD] Webhook aceito para "${app.name}" na branch "${branch}" - commit ${commitHash}`);
 
-    const deployment = await CicdService.executeDeploy(app, {
+    CicdService.executeDeploy(app, {
       commitHash,
       commitMessage,
       authorName,
       branch,
       triggeredBy: body.head_commit ? 'webhook' : 'github_action',
-    });
+    }).catch((err) => console.error(`Webhook deploy error for ${app.name}:`, err.message));
 
-    res.status(200).json({
-      success: true,
-      message: `Deploy concluído com sucesso para ${app.name}`,
-      deploymentId: deployment.id,
-      durationSeconds: deployment.durationSeconds,
+    res.status(202).json({
+      accepted: true,
+      message: `Deploy aceito para ${app.name}`,
     });
   } catch (err: any) {
     console.error('CI/CD deploy execution error:', err.message);

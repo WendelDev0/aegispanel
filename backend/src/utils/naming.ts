@@ -1,3 +1,5 @@
+import net from 'node:net';
+
 /**
  * Naming rules shared by the deploy pipeline, the app service and the Caddy
  * generator.
@@ -15,6 +17,14 @@ export function normalizeDomain(domain?: string): string | undefined {
   if (!domain) return undefined;
   const clean = domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   return clean || undefined;
+}
+
+const HOSTNAME = /^(\*\.)?([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/** Domain names only; IP literals are not valid application hostnames here. */
+export function isValidDomain(domain?: string): boolean {
+  const clean = normalizeDomain(domain);
+  return Boolean(clean && HOSTNAME.test(clean) && !net.isIP(clean));
 }
 
 export function containerNameForDatabase(dbName: string): string {

@@ -16,7 +16,7 @@ import {
   Upload,
   Download
 } from 'lucide-react';
-import { api } from '../services/api.js';
+import { api, downloadAuthenticated } from '../services/api.js';
 import { FileItem } from '../types/index.js';
 
 export const FileManagerPage: React.FC = () => {
@@ -111,8 +111,12 @@ export const FileManagerPage: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  const handleDownloadItem = (item: FileItem) => {
-    window.open(`/api/files/download?path=${encodeURIComponent(item.path)}`, '_blank');
+  const handleDownloadItem = async (item: FileItem) => {
+    try {
+      await downloadAuthenticated(`/files/download?path=${encodeURIComponent(item.path)}`, item.name);
+    } catch (err: any) {
+      alert('Erro ao baixar arquivo: ' + (err.response?.data?.error || err.message));
+    }
   };
 
   const handleCreateFolder = async (e: React.FormEvent) => {

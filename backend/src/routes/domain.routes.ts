@@ -2,7 +2,8 @@ import { Router, Request, Response } from 'express';
 import { dbStorage, DomainRecord } from '../db/storage.js';
 import { CaddyService } from '../services/caddy.service.js';
 import { DomainService } from '../services/domain.service.js';
-import { authMiddleware, requireWrite } from '../middleware/auth.js';
+import { isValidDomain } from '../utils/naming.js';
+import { authMiddleware, requireWrite, AuthRequest } from '../middleware/auth.js';
 
 export const domainRouter = Router();
 
@@ -87,20 +88,36 @@ domainRouter.post('/:id/renew-ssl', requireWrite, async (req: Request, res: Resp
   }
 });
 
-domainRouter.post('/', requireWrite, async (req: Request, res: Response): Promise<void> => {
+domainRouter.post('/', requireWrite, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { domain, targetPort, targetContainer } = req.body;
-    if (!domain || !targetPort) {
+    if (typeof domain !== 'string' || !targetPort) {
       res.status(400).json({ error: 'Domínio e porta de destino são obrigatórios' });
       return;
     }
 
     const cleanDomain = domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    const parsedPort = Number(targetPort);
+    if (!isValidDomain(cleanDomain) || !Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
+      res.status(400).json({ error: 'Domínio ou porta de destino inválidos.' });
+      return;
+    }
+    if (dbStorage.getDomains().some((d) => d.domain === cleanDomain)) {
+      res.status(409).json({ error: 'Este domínio já está cadastrado.' });
+      return;
+    }
+    const hasManagedApp = dbStorage.getApps().some((app) => app.port === parsedPort);
+    if (!hasManagedApp && req.user?.role !== 'admin') {
+      res.status(403).json({
+        error: 'Somente administradores podem publicar uma porta arbitrária do host. Para developers, associe o domínio a uma aplicação gerenciada pelo painel.',
+      });
+      return;
+    }
     const id = `dom-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
     const record: DomainRecord = {
       id,
       domain: cleanDomain,
-      targetPort: parseInt(targetPort),
+      targetPort: parsedPort,
       targetContainer,
       sslEnabled: true,
       status: 'active',

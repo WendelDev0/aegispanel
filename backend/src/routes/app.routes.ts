@@ -9,7 +9,10 @@ import { dbStorage } from '../db/storage.js';
 import { CONFIG } from '../config.js';
 import { resolveSafePath } from '../utils/safe-path.js';
 import { PortService } from '../services/port.service.js';
-import { authMiddleware, requireWrite, AuthRequest } from '../middleware/auth.js';
+import { EncryptionService } from '../utils/crypto.js';
+import { assertSafeGitUrl } from '../utils/url-security.js';
+import { isValidDomain } from '../utils/naming.js';
+import { authMiddleware, requireWrite, requireAdmin, AuthRequest } from '../middleware/auth.js';
 
 export const appRouter = Router();
 
@@ -18,6 +21,22 @@ appRouter.use(authMiddleware);
 /** Repository files live under data/builds/<appId>. */
 function buildsDirFor(appId: string): string {
   return path.join(CONFIG.DATA_DIR, 'builds', appId);
+}
+
+function rejectGitMetadata(filePath: string): void {
+  const segments = filePath.replace(/\\/g, '/').split('/').filter(Boolean);
+  if (segments.includes('.git')) {
+    throw new Error('Metadados internos do Git não podem ser acessados pelo painel.');
+  }
+}
+
+function parsePort(value: unknown, label: string, minimum = 1024): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const port = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(port) || port < minimum || port > 65535) {
+    throw new Error(`${label} deve ser um número inteiro entre ${minimum} e 65535.`);
+  }
+  return port;
 }
 
 // Free host port the create form can show as the default.
@@ -51,11 +70,16 @@ appRouter.post('/inspect-repo', requireWrite, async (req: Request, res: Response
 
 appRouter.post('/', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { name, sourceType, gitUrl, branch, imageName, port, internalPort, env, domain, githubToken } = req.body;
+    const { name, sourceType, gitUrl, branch, imageName, port, internalPort, env, domain, githubToken, autoDeploy, deployBranch } = req.body;
     if (!name) {
       res.status(400).json({ error: 'Nome é obrigatório' });
       return;
     }
+    if (domain && !isValidDomain(domain)) {
+      res.status(400).json({ error: 'Domínio inválido. Informe um nome DNS, não um IP.' });
+      return;
+    }
+    if (sourceType === 'git' && gitUrl) await assertSafeGitUrl(String(gitUrl));
 
     // The host port is optional: leaving it out assigns a free one. Traffic
     // reaches the application through Caddy on the container's internal port,
@@ -66,11 +90,13 @@ appRouter.post('/', requireWrite, async (req: Request, res: Response): Promise<v
       gitUrl,
       branch,
       imageName,
-      port: port ? parseInt(port) : undefined,
-      internalPort: internalPort ? parseInt(internalPort) : undefined,
-      env: env || {},
+      port: parsePort(port, 'A porta do host'),
+      internalPort: parsePort(internalPort, 'A porta interna', 1),
+      env: AppService.validateEnv(env || {}),
       domain,
       githubToken,
+      autoDeploy,
+      deployBranch,
     });
 
     // Returned immediately so the client can open the live deploy stream; the
@@ -98,7 +124,7 @@ appRouter.put('/:id', requireWrite, async (req: Request, res: Response): Promise
       return;
     }
 
-    const { name, port, internalPort, imageName, gitUrl, branch, domain, githubToken } = req.body;
+    const { name, port, internalPort, imageName, gitUrl, branch, domain, githubToken, autoDeploy, deployBranch } = req.body;
 
     const previousName = app.name;
     const previousPort = app.port;
@@ -106,6 +132,12 @@ appRouter.put('/:id', requireWrite, async (req: Request, res: Response): Promise
     const previousImage = app.imageName;
     const previousGitUrl = app.gitUrl;
     const previousBranch = app.branch;
+
+    if (gitUrl && gitUrl !== previousGitUrl) await assertSafeGitUrl(String(gitUrl));
+    if (domain !== undefined && domain !== '' && !isValidDomain(domain)) {
+      res.status(400).json({ error: 'Domínio inválido. Informe um nome DNS, não um IP.' });
+      return;
+    }
 
     if (name) app.name = name;
 
@@ -115,7 +147,8 @@ appRouter.put('/:id', requireWrite, async (req: Request, res: Response): Promise
       app.autoPort = true;
       app.port = await PortService.allocate(undefined, app.containerId);
     } else if (port) {
-      const requested = parseInt(port);
+      const requested = parsePort(port, 'A porta do host');
+      if (requested === undefined) throw new Error('Porta inválida.');
       if (requested !== app.port) {
         const conflict = await PortService.describeConflict(requested, app.containerId);
         if (conflict) {
@@ -126,11 +159,19 @@ appRouter.put('/:id', requireWrite, async (req: Request, res: Response): Promise
       app.port = requested;
       app.autoPort = false;
     }
-    if (internalPort) app.internalPort = parseInt(internalPort);
+    if (internalPort) {
+      const parsedInternalPort = parsePort(internalPort, 'A porta interna', 1);
+      if (parsedInternalPort === undefined) throw new Error('Porta interna inválida.');
+      app.internalPort = parsedInternalPort;
+    }
     if (imageName) app.imageName = imageName;
     if (gitUrl) app.gitUrl = gitUrl;
     if (branch) app.branch = branch;
-    if (githubToken !== undefined) app.githubToken = githubToken;
+    if (autoDeploy !== undefined) app.autoDeploy = Boolean(autoDeploy);
+    if (deployBranch) app.deployBranch = String(deployBranch);
+    if (githubToken !== undefined) {
+      app.githubToken = githubToken ? EncryptionService.encrypt(String(githubToken)) : undefined;
+    }
     if (domain !== undefined) {
       app.domain = domain ? domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '') : undefined;
     }
@@ -189,7 +230,7 @@ appRouter.put('/:id', requireWrite, async (req: Request, res: Response): Promise
 });
 
 // Manage .env variables
-appRouter.get('/:id/env', (req: Request, res: Response): void => {
+appRouter.get('/:id/env', requireWrite, (req: Request, res: Response): void => {
   const app = dbStorage.getAppById(req.params.id);
   if (!app) {
     res.status(404).json({ error: 'App não encontrado' });
@@ -206,11 +247,7 @@ appRouter.put('/:id/env', requireWrite, async (req: Request, res: Response): Pro
       return;
     }
 
-    const { env } = req.body;
-    if (typeof env !== 'object' || env === null || Array.isArray(env)) {
-      res.status(400).json({ error: 'O campo env deve ser um objeto chave-valor' });
-      return;
-    }
+    const env = AppService.validateEnv(req.body.env);
 
     app.env = env;
     app.updatedAt = new Date().toISOString();
@@ -245,6 +282,10 @@ appRouter.put('/:id/domain', requireWrite, async (req: Request, res: Response): 
     }
 
     const { domain } = req.body;
+    if (domain && !isValidDomain(domain)) {
+      res.status(400).json({ error: 'Domínio inválido. Informe um nome DNS, não um IP.' });
+      return;
+    }
     app.domain = domain
       ? domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
       : undefined;
@@ -260,7 +301,7 @@ appRouter.put('/:id/domain', requireWrite, async (req: Request, res: Response): 
 });
 
 // Deployment history
-appRouter.get('/:id/deployments', (req: Request, res: Response): void => {
+appRouter.get('/:id/deployments', requireWrite, (req: Request, res: Response): void => {
   res.json(dbStorage.getDeployments(req.params.id));
 });
 
@@ -273,12 +314,19 @@ appRouter.post('/:id/deploy', requireWrite, async (req: Request, res: Response):
       return;
     }
 
-    const deployment = await CicdService.executeDeploy(app, {
+    // Answered immediately, like the initial deploy on app creation. Awaiting
+    // the pipeline here held the HTTP request open for the whole build, and
+    // nginx closes a proxied request after 60s by default: every build longer
+    // than a minute surfaced as "erro ao disparar deploy" in the panel while
+    // the build carried on running on the server.
+    res.status(202).json({ accepted: true, appId: app.id });
+
+    CicdService.executeDeploy(app, {
       commitMessage: req.body.commitMessage || 'Deploy manual disparado pelo painel',
       triggeredBy: 'manual',
+    }).catch((err) => {
+      console.error(`Manual deploy error for app ${app.name}:`, err.message);
     });
-
-    res.json(deployment);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -294,7 +342,7 @@ appRouter.post('/:id/rollback/:deploymentId', requireWrite, async (req: Request,
 });
 
 // Rotate the webhook secret
-appRouter.post('/:id/webhook-secret', requireWrite, (req: Request, res: Response): void => {
+appRouter.post('/:id/webhook-secret', requireAdmin, (req: Request, res: Response): void => {
   try {
     res.json({ webhookSecret: AppService.rotateWebhookSecret(req.params.id) });
   } catch (err: any) {
@@ -303,15 +351,19 @@ appRouter.post('/:id/webhook-secret', requireWrite, (req: Request, res: Response
 });
 
 // Reveal the webhook URL, including the secret
-appRouter.get('/:id/webhook', requireWrite, (req: Request, res: Response): void => {
+appRouter.get('/:id/webhook', requireAdmin, (req: Request, res: Response): void => {
   const app = dbStorage.getAppById(req.params.id);
   if (!app) {
     res.status(404).json({ error: 'App não encontrado' });
     return;
   }
-  const secret = app.webhookSecret || AppService.rotateWebhookSecret(app.id);
+  const secret = AppService.getWebhookSecret(app) || AppService.rotateWebhookSecret(app.id);
   const hostUrl = `${req.protocol}://${req.get('host') || 'localhost:4000'}`;
-  res.json({ url: `${hostUrl}/api/webhooks/deploy/${app.id}?secret=${encodeURIComponent(secret)}`, secret });
+  res.json({
+    url: `${hostUrl}/api/webhooks/deploy/${app.id}`,
+    secret,
+    header: 'X-Aegis-Secret',
+  });
 });
 
 // GitHub Actions workflow
@@ -351,7 +403,7 @@ appRouter.post('/:id/restart', requireWrite, async (req: Request, res: Response)
 });
 
 // File explorer: list
-appRouter.get('/:id/files', (req: Request, res: Response): void => {
+appRouter.get('/:id/files', requireWrite, (req: Request, res: Response): void => {
   try {
     const app = dbStorage.getAppById(req.params.id);
     if (!app) {
@@ -361,6 +413,7 @@ appRouter.get('/:id/files', (req: Request, res: Response): void => {
 
     const buildsDir = buildsDirFor(app.id);
     const subPath = (req.query.subPath as string) || '';
+    rejectGitMetadata(subPath);
     const targetDir = resolveSafePath(buildsDir, subPath);
 
     if (!fs.existsSync(targetDir)) {
@@ -404,7 +457,7 @@ appRouter.get('/:id/files', (req: Request, res: Response): void => {
 });
 
 // File explorer: read
-appRouter.get('/:id/files/content', (req: Request, res: Response): void => {
+appRouter.get('/:id/files/content', requireWrite, (req: Request, res: Response): void => {
   try {
     const app = dbStorage.getAppById(req.params.id);
     if (!app) {
@@ -417,6 +470,7 @@ appRouter.get('/:id/files/content', (req: Request, res: Response): void => {
       res.status(400).json({ error: 'Parâmetro filePath é obrigatório' });
       return;
     }
+    rejectGitMetadata(filePath);
 
     const targetFile = resolveSafePath(buildsDirFor(app.id), filePath);
     if (!fs.existsSync(targetFile) || fs.statSync(targetFile).isDirectory()) {
@@ -450,6 +504,7 @@ appRouter.put('/:id/files/content', requireWrite, (req: Request, res: Response):
       res.status(400).json({ error: 'Parâmetros filePath e content são obrigatórios' });
       return;
     }
+    rejectGitMetadata(filePath);
 
     const targetFile = resolveSafePath(buildsDirFor(app.id), filePath);
     fs.writeFileSync(targetFile, content, 'utf-8');
@@ -459,7 +514,7 @@ appRouter.put('/:id/files/content', requireWrite, (req: Request, res: Response):
   }
 });
 
-appRouter.get('/:id/logs', async (req: Request, res: Response) => {
+appRouter.get('/:id/logs', requireWrite, async (req: Request, res: Response) => {
   try {
     const app = dbStorage.getAppById(req.params.id);
     if (!app) {

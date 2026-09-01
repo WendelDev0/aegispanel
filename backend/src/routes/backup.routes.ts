@@ -28,7 +28,9 @@ backupRouter.post('/:id/restore', requireAdmin, async (req: Request, res: Respon
   }
 });
 
-backupRouter.get('/download/:filename', requireWrite, (req: Request, res: Response): void => {
+// A backup is a database dump, not just an application artifact. Only an
+// administrator may download it or carry it outside the server.
+backupRouter.get('/download/:filename', requireAdmin, (req: Request, res: Response): void => {
   const filePath = BackupService.getBackupFilePath(req.params.filename);
   if (!filePath) {
     res.status(404).json({ error: 'Arquivo de backup não encontrado' });

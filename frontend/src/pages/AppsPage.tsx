@@ -235,7 +235,10 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
   const handleCreateApp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!appName || !port) return;
+    // Only the name is required. The port field is optional by design - left
+    // blank, the server allocates a free one - and requiring it here made the
+    // button do nothing at all for the case the field itself recommends.
+    if (!appName) return;
 
     try {
       setSubmitting(true);
@@ -367,10 +370,15 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
     }
   };
 
-  const openEnvModal = (app: AppRecord) => {
-    setSelectedEnvApp(app);
-    const envLines = Object.entries(app.env || {}).map(([k, v]) => `${k}=${v}`).join('\n');
-    setEnvString(envLines);
+  const openEnvModal = async (app: AppRecord) => {
+    try {
+      const res = await api.get(`/apps/${app.id}/env`);
+      setSelectedEnvApp(app);
+      const envLines = Object.entries(res.data.env || {}).map(([k, v]) => `${k}=${v}`).join('\n');
+      setEnvString(envLines);
+    } catch (err: any) {
+      alert('Erro ao carregar variáveis: ' + (err.response?.data?.error || err.message));
+    }
   };
 
   const handleSaveEnv = async (redeploy: boolean = true) => {

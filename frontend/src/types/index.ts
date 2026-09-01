@@ -99,6 +99,8 @@ export interface AppRecord {
    */
   hasWebhookSecret?: boolean;
   hasGithubToken?: boolean;
+  autoDeploy?: boolean;
+  deployBranch?: string;
   status: 'running' | 'stopped' | 'building' | 'error';
   lastDeployAt?: string;
   lastCommitHash?: string;

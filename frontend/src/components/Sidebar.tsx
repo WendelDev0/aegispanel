@@ -43,9 +43,10 @@ interface SidebarProps {
   activeTab: NavTab;
   setActiveTab: (tab: NavTab) => void;
   serverName: string;
+  role?: 'admin' | 'developer' | 'viewer';
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverName }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverName, role }) => {
   const menuSections = [
     {
       title: 'Plataforma & Deploys',
@@ -111,7 +112,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serve
               {section.title}
             </h2>
             <div className="space-y-0.5 pt-1">
-              {section.items.map((item) => {
+              {section.items.filter((item) => item.id !== 'filemanager' || role === 'admin').map((item) => {
                 const Icon = item.icon;
                 const isActive = activeTab === item.id;
 

@@ -2,6 +2,7 @@ import http from 'http';
 import https from 'https';
 import { dbStorage } from '../db/storage.js';
 import { CONFIG } from '../config.js';
+import { EncryptionService } from '../utils/crypto.js';
 
 /**
  * Blocks outbound notifications from a development copy.
@@ -20,8 +21,14 @@ function outboundBlocked(channel: string): boolean {
 }
 
 export class AlertService {
+  private static reveal(value: string | undefined): string | undefined {
+    if (!value) return value;
+    return EncryptionService.tryDecrypt(value) ?? value;
+  }
+
   static async sendDiscordAlert(webhookUrl: string, title: string, description: string, color: number = 0x6366f1) {
     if (outboundBlocked('Discord')) return;
+    webhookUrl = this.reveal(webhookUrl) || '';
     if (!webhookUrl) return;
 
     try {
@@ -62,6 +69,7 @@ export class AlertService {
 
   static async sendTelegramAlert(botToken: string, chatId: string, text: string) {
     if (outboundBlocked('Telegram')) return;
+    botToken = this.reveal(botToken) || '';
     if (!botToken || !chatId) return;
 
     try {
@@ -92,6 +100,7 @@ export class AlertService {
 
   static async sendWhatsAppAlert(apiUrl: string, apiKey: string, instance: string, number: string, message: string) {
     if (outboundBlocked('WhatsApp')) return;
+    apiKey = this.reveal(apiKey) || '';
     if (!apiUrl || !apiKey || !instance || !number) return;
 
     try {

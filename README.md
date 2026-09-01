@@ -36,10 +36,11 @@ curl -fsSL https://raw.githubusercontent.com/WendelDev0/aegispanel/main/install.
 
 O script instala o Docker, configura o firewall, **gera os segredos exclusivos daquela máquina** em `/opt/aegispanel/.env` e sobe a stack.
 
-Abra no navegador:
+O painel fica preso ao loopback durante o bootstrap. Acesse por um túnel SSH:
 
 ```
-http://SEU_IP_DA_VPS:3000
+ssh -L 3000:127.0.0.1:3000 usuario@SEU_IP_DA_VPS
+# depois abra http://localhost:3000
 ```
 
 No primeiro acesso você cria a conta de administrador (senha de no mínimo 12 caracteres).
@@ -50,7 +51,6 @@ No primeiro acesso você cria a conta de administrador (senha de no mínimo 12 c
 |-------|-----|
 | 22    | SSH |
 | 80/443| Caddy (HTTP/HTTPS e emissão de SSL) |
-| 3000  | Painel web |
 
 A API (porta 4000) **não é publicada**: ela só é acessível pela rede interna do Docker, através do proxy do painel. Aplicações publicadas devem ser acessadas pelo domínio, via Caddy. Para expor uma porta específica, libere-a manualmente com `sudo ufw allow <porta>/tcp`.
 
@@ -71,7 +71,8 @@ chmod 600 .env
 |----------|--------|
 | `JWT_SECRET` | Assina os tokens de sessão. |
 | `ENCRYPTION_KEY` | Criptografa senhas de banco e tokens do GitHub em repouso. **Separada do JWT** para que rotacionar sessões não torne ilegível o que já foi gravado. |
-| `PANEL_BIND` | Interface do painel. Use `127.0.0.1` depois de publicar o painel por HTTPS via Caddy. |
+| `PANEL_BIND` | Interface do painel. `127.0.0.1` é o padrão seguro; publique por HTTPS via Caddy ou túnel SSH. |
+| `GEOIP_ENABLED` | Geolocalização externa de IPs. `false` é o padrão; ative apenas após revisar a política de privacidade. |
 | `CORS_ORIGINS` | Origens de navegador permitidas. Vazio = apenas mesma origem (padrão correto). |
 
 > ⚠️ Trocar a `ENCRYPTION_KEY` depois que bancos já foram criados torna as senhas gravadas ilegíveis. O painel avisa em vez de gravar um valor corrompido por cima.
@@ -81,7 +82,7 @@ chmod 600 .env
 | Perfil | Pode |
 |--------|------|
 | `admin` | Tudo: usuários, terminal do host, tarefas shell, firewall, import/export do estado do painel. |
-| `developer` | Apps, deploys, bancos, domínios, arquivos, backups e terminal de contêineres. |
+| `developer` | Apps, deploys, bancos, domínios de aplicações gerenciadas, arquivos, criação/remoção de backups e terminal de contêineres. Downloads, restauração de dumps e publicação de portas arbitrárias ficam com `admin`. |
 | `viewer` | Somente leitura. |
 
 ---

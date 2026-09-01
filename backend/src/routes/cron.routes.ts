@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { CronService } from '../services/cron.service.js';
 import { dbStorage } from '../db/storage.js';
-import { authMiddleware, requireWrite, AuthRequest } from '../middleware/auth.js';
+import { authMiddleware, requireAdmin, requireWrite, AuthRequest } from '../middleware/auth.js';
 
 export const cronRouter = Router();
 
@@ -35,9 +35,9 @@ cronRouter.post('/', requireWrite, (req: AuthRequest, res: Response): void => {
       return;
     }
 
-    if (type === 'shell' && !canHandleShell(req)) {
+    if (type !== 'backup' && !canHandleShell(req)) {
       res.status(403).json({
-        error: 'Somente administradores podem criar tarefas do tipo shell, pois elas executam comandos no servidor.',
+        error: 'Somente administradores podem criar tarefas shell ou webhook, pois elas executam ações privilegiadas no servidor.',
       });
       return;
     }
@@ -73,8 +73,8 @@ cronRouter.post('/:id/run', requireWrite, async (req: AuthRequest, res: Response
       return;
     }
 
-    if (job.type === 'shell' && !canHandleShell(req)) {
-      res.status(403).json({ error: 'Somente administradores podem executar tarefas do tipo shell.' });
+    if (job.type !== 'backup' && !canHandleShell(req)) {
+      res.status(403).json({ error: 'Somente administradores podem executar tarefas shell ou webhook.' });
       return;
     }
 
@@ -84,7 +84,7 @@ cronRouter.post('/:id/run', requireWrite, async (req: AuthRequest, res: Response
   }
 });
 
-cronRouter.post('/:id/toggle', requireWrite, (req: AuthRequest, res: Response) => {
+cronRouter.post('/:id/toggle', requireAdmin, (req: AuthRequest, res: Response) => {
   try {
     res.json(CronService.toggle(req.params.id));
   } catch (err: any) {
@@ -92,6 +92,6 @@ cronRouter.post('/:id/toggle', requireWrite, (req: AuthRequest, res: Response) =
   }
 });
 
-cronRouter.delete('/:id', requireWrite, (req: AuthRequest, res: Response) => {
+cronRouter.delete('/:id', requireAdmin, (req: AuthRequest, res: Response) => {
   res.json({ success: CronService.delete(req.params.id) });
 });

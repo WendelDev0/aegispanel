@@ -52,6 +52,7 @@ export class NodeService {
       ...rest,
       hasSshKey: Boolean(sshPrivateKey),
       hasPassphrase: Boolean(sshPassphrase),
+      hasSshHostFingerprint: Boolean(node.sshHostFingerprint),
     };
   }
 
@@ -92,6 +93,12 @@ export class NodeService {
     if (!node.sshPrivateKey) {
       throw new Error(`O nó "${node.name}" não tem chave SSH cadastrada.`);
     }
+    if (!node.sshHostFingerprint) {
+      throw new Error(
+        `O nó "${node.name}" não possui fingerprint da chave do host SSH. ` +
+          'Informe o SHA256 exibido por ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256.'
+      );
+    }
 
     const privateKey = EncryptionService.tryDecrypt(node.sshPrivateKey);
     if (privateKey === null) {
@@ -102,6 +109,7 @@ export class NodeService {
     }
 
     const passphrase = node.sshPassphrase ? EncryptionService.tryDecrypt(node.sshPassphrase) : undefined;
+    const expectedFingerprint = node.sshHostFingerprint.replace(/^SHA256:/i, '').trim();
 
     // Note: dockerode logs a DeprecationWarning about a malformed URL for the
     // ssh protocol (docker-modem builds it with url.format and no scheme). It
@@ -117,6 +125,8 @@ export class NodeService {
         privateKey,
         ...(passphrase ? { passphrase } : {}),
         readyTimeout: CONNECT_TIMEOUT_MS,
+        hostVerifier: (fingerprint: string) =>
+          fingerprint === expectedFingerprint || fingerprint === `SHA256:${expectedFingerprint}`,
       },
     } as Docker.DockerOptions);
   }

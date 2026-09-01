@@ -4,6 +4,7 @@ import { CaddyService } from './caddy.service.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { PortService } from './port.service.js';
 import { containerNameForApp, normalizeDomain } from '../utils/naming.js';
+import { CONFIG } from '../config.js';
 
 export { containerNameForApp, normalizeDomain };
 
@@ -19,9 +20,32 @@ export interface CreateAppDTO {
   env?: Record<string, string>;
   domain?: string;
   githubToken?: string;
+  autoDeploy?: boolean;
+  deployBranch?: string;
 }
 
 export class AppService {
+  static validateEnv(env: unknown): Record<string, string> {
+    if (!env || typeof env !== 'object' || Array.isArray(env)) {
+      throw new Error('O campo env deve ser um objeto chave-valor.');
+    }
+
+    const entries = Object.entries(env as Record<string, unknown>);
+    if (entries.length > 200) throw new Error('Uma aplicação pode ter no máximo 200 variáveis de ambiente.');
+
+    const result: Record<string, string> = {};
+    for (const [key, value] of entries) {
+      if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/.test(key)) {
+        throw new Error(`Nome de variável inválido: ${key}`);
+      }
+      if (typeof value !== 'string' || value.length > 64 * 1024) {
+        throw new Error(`Valor inválido ou grande demais para a variável ${key}.`);
+      }
+      result[key] = value;
+    }
+    return result;
+  }
+
   static getAll(): AppRecord[] {
     return dbStorage.getApps();
   }
@@ -35,9 +59,11 @@ export class AppService {
     hasGithubToken: boolean;
     hasWebhookSecret: boolean;
   } {
-    const { githubToken, webhookSecret, ...rest } = app;
+    const { githubToken, webhookSecret, env, ...rest } = app;
+    const maskedEnv = Object.fromEntries(Object.keys(env || {}).map((key) => [key, '••••••••']));
     return {
       ...rest,
+      env: maskedEnv,
       hasGithubToken: Boolean(githubToken),
       hasWebhookSecret: Boolean(webhookSecret),
     };
@@ -49,13 +75,23 @@ export class AppService {
     return EncryptionService.tryDecrypt(app.githubToken) ?? undefined;
   }
 
+  /** Reads a webhook secret while supporting legacy plaintext records. */
+  static getWebhookSecret(app: AppRecord): string | undefined {
+    if (!app.webhookSecret) return undefined;
+    if (EncryptionService.isEncrypted(app.webhookSecret)) {
+      return EncryptionService.tryDecrypt(app.webhookSecret) ?? undefined;
+    }
+    return app.webhookSecret;
+  }
+
   static rotateWebhookSecret(appId: string): string {
     const app = dbStorage.getAppById(appId);
     if (!app) throw new Error('App não encontrado');
-    app.webhookSecret = EncryptionService.generateToken(32);
+    const rawSecret = EncryptionService.generateToken(32);
+    app.webhookSecret = EncryptionService.encrypt(rawSecret);
     app.updatedAt = new Date().toISOString();
     dbStorage.saveApp(app);
-    return app.webhookSecret;
+    return rawSecret;
   }
 
   static async removeContainerByAppName(appName: string): Promise<void> {
@@ -76,7 +112,7 @@ export class AppService {
     // so the host port only matters for direct IP:port access.
     const autoPort = !dto.port;
     const hostPort = await PortService.allocate(dto.port);
-    const envRecord = dto.env || {};
+    const envRecord = this.validateEnv(dto.env || {});
     const envList = Object.entries(envRecord).map(([k, v]) => `${k}=${v}`);
 
     const image = dto.imageName || 'node:20-alpine';
@@ -92,6 +128,7 @@ export class AppService {
         image,
         env: envList,
         ports,
+        bindIp: CONFIG.APP_BIND_IP,
         labels: {
           'aegis.type': 'app',
           'aegis.app.name': dto.name,
@@ -119,8 +156,10 @@ export class AppService {
       domain: cleanDomain,
       // Every app gets a high-entropy webhook secret at creation. Without one
       // the webhook endpoint has nothing to verify and accepts any caller.
-      webhookSecret: EncryptionService.generateToken(32),
+      webhookSecret: EncryptionService.encrypt(EncryptionService.generateToken(32)),
       githubToken: dto.githubToken ? EncryptionService.encrypt(dto.githubToken) : undefined,
+      autoDeploy: dto.autoDeploy ?? true,
+      deployBranch: dto.deployBranch || dto.branch || 'main',
       status,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

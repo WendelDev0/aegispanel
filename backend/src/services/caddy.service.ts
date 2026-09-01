@@ -3,9 +3,9 @@ import path from 'path';
 import { CONFIG } from '../config.js';
 import { dbStorage } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
-import { containerNameForApp } from '../utils/naming.js';
+import { containerNameForApp, isValidDomain } from '../utils/naming.js';
 
-const CADDY_CONTAINER = 'aegis-caddy';
+const CADDY_CONTAINER = CONFIG.CADDY_CONTAINER;
 
 /**
  * Shared access log, inside the Caddy container.
@@ -18,8 +18,6 @@ const CADDY_CONTAINER = 'aegis-caddy';
 const ACCESS_LOG_PATH = '/var/log/caddy/access.log';
 
 /** Rejects anything that is not a plausible hostname before it reaches the config. */
-const HOSTNAME = /^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
-
 function isLocalDomain(domain: string): boolean {
   const clean = domain.toLowerCase();
   return (
@@ -43,12 +41,12 @@ export class CaddyService {
    */
   private static resolveAcmeEmail(): string | undefined {
     const settings = dbStorage.getSettings();
-    if (settings.notificationEmail && settings.notificationEmail.includes('@')) {
+    if (settings.notificationEmail && /^[^\s{}]+@[^\s{}]+$/.test(settings.notificationEmail)) {
       return settings.notificationEmail;
     }
 
     const admin = dbStorage.getUsers().find((u) => u.role === 'admin');
-    if (admin?.email && admin.email.includes('@') && !admin.email.endsWith('.internal')) {
+    if (admin?.email && /^[^\s{}]+@[^\s{}]+$/.test(admin.email) && !admin.email.endsWith('.internal')) {
       return admin.email;
     }
 
@@ -82,6 +80,10 @@ export class CaddyService {
     lines.push('    max_fails 3');
     lines.push('  }');
     lines.push('  encode gzip zstd');
+    lines.push('  log {');
+    lines.push(`    output file ${ACCESS_LOG_PATH}`);
+    lines.push('    format json');
+    lines.push('  }');
     lines.push('}');
     return lines.join('\n') + '\n\n';
   }
@@ -97,6 +99,10 @@ export class CaddyService {
     let content = '# Aegis Auto-Generated Caddyfile\n';
     content += '# Gerado automaticamente pelo AegisPanel. Edições manuais são sobrescritas.\n';
 
+    // Caddy accepts exactly one global options block, so every global
+    // directive is collected here and emitted together.
+    const globalDirectives: string[] = [];
+
     if (CONFIG.LOCAL_MODE) {
       // local_certs makes Caddy sign everything with its own internal CA and
       // never contact an ACME provider. Without it, a development copy holding
@@ -104,17 +110,36 @@ export class CaddyService {
       // does not serve: those attempts fail, and repeated failures count
       // against the rate limit of the real domain on the real server.
       content += '# MODO LOCAL: certificados internos, nenhuma requisição ao Let\'s Encrypt.\n';
-      content += '{\n  local_certs\n}\n\n';
+      globalDirectives.push('local_certs');
       console.warn('🧪 Modo local: Caddy usará certificados internos; nenhum certificado público será solicitado.');
     } else if (email) {
-      content += `{\n  email ${email}\n}\n\n`;
+      globalDirectives.push(`email ${email}`);
     } else {
       content +=
         '# Nenhum e-mail de contato configurado: defina "notificationEmail" nas configurações\n' +
-        '# do painel para que o Let\'s Encrypt possa avisar sobre expiração de certificados.\n\n';
+        '# do painel para que o Let\'s Encrypt possa avisar sobre expiração de certificados.\n';
       console.warn(
         '⚠️ Caddy: nenhum e-mail ACME configurado. Defina o e-mail de notificação nas configurações do painel.'
       );
+    }
+
+    // Behind a CDN or proxy, the connecting address is the proxy's, so the
+    // access log records that instead of the visitor and analytics attributes
+    // every visit to a handful of datacenters. Declaring the proxy ranges as
+    // trusted makes Caddy derive client_ip from X-Forwarded-For.
+    //
+    // Opt-in on purpose: trusting that header without a proxy in front lets
+    // any caller forge its own address by setting it.
+    if (CONFIG.TRUSTED_PROXIES.length) {
+      globalDirectives.push(
+        `servers {\n    trusted_proxies static ${CONFIG.TRUSTED_PROXIES.join(' ')}\n  }`
+      );
+    }
+
+    if (globalDirectives.length) {
+      content += `{\n  ${globalDirectives.join('\n  ')}\n}\n\n`;
+    } else {
+      content += '\n';
     }
 
     const rendered = new Set<string>();
@@ -122,7 +147,7 @@ export class CaddyService {
     const addSite = (rawDomain: string, appName: string | undefined, hostPort: number, internalPort: number) => {
       const domain = rawDomain.toLowerCase().trim();
       if (!domain || rendered.has(domain)) return;
-      if (!HOSTNAME.test(domain)) {
+      if (!isValidDomain(domain)) {
         console.warn(`⚠️ Caddy: domínio ignorado por formato inválido: "${domain}"`);
         return;
       }
@@ -136,6 +161,23 @@ export class CaddyService {
 
       content += this.renderSite(domain, upstream, CONFIG.LOCAL_MODE || isLocalDomain(domain));
     };
+
+    // The panel's own domain is rendered first, so an application that happens
+    // to carry the same hostname cannot take the panel's place in the config
+    // and lock the operator out of the UI.
+    const panelDomain = dbStorage.getSettings().panelDomain?.toLowerCase().trim();
+    if (panelDomain) {
+      if (isValidDomain(panelDomain)) {
+        rendered.add(panelDomain);
+        content += this.renderSite(
+          panelDomain,
+          CONFIG.PANEL_UPSTREAM,
+          CONFIG.LOCAL_MODE || isLocalDomain(panelDomain)
+        );
+      } else {
+        console.warn(`⚠️ Caddy: domínio do painel ignorado por formato inválido: "${panelDomain}"`);
+      }
+    }
 
     for (const d of domains) {
       const matchingApp =
@@ -151,7 +193,10 @@ export class CaddyService {
 
     fs.writeFileSync(this.caddyfilePath, content, 'utf-8');
 
-    await this.reload();
+    const reload = await this.reload();
+    if (!reload.success) {
+      throw new Error(`Caddyfile salvo, mas o Caddy não foi recarregado: ${reload.message}`);
+    }
     return content;
   }
 
@@ -203,7 +248,7 @@ export class CaddyService {
     try {
       const result = await dockerService.execInContainer(
         CADDY_CONTAINER,
-        ['rm', '-rf', '/data/caddy/acme'],
+        ['rm', '-rf', '/data/caddy/acme', '/data/caddy/certificates'],
         { timeoutMs: 30_000 }
       );
 

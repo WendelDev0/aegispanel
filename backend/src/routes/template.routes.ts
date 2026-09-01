@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { TemplateService } from '../services/template.service.js';
+import { AppService } from '../services/app.service.js';
 import { authMiddleware, requireWrite } from '../middleware/auth.js';
 
 export const templateRouter = Router();
@@ -27,7 +28,9 @@ templateRouter.post('/install', requireWrite, async (req: Request, res: Response
       customEnv,
     });
 
-    res.status(201).json(app);
+    // Template installation generates API keys and database credentials. Keep
+    // the response subject to the same redaction as ordinary app creation.
+    res.status(201).json(AppService.toPublic(app));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

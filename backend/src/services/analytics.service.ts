@@ -173,8 +173,11 @@ export class AnalyticsService {
     if (!this.dirty) return;
     try {
       const tmp = `${this.filePath}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(this.data), 'utf-8');
+      fs.writeFileSync(tmp, JSON.stringify(this.data), { encoding: 'utf-8', mode: 0o600 });
       fs.renameSync(tmp, this.filePath);
+      if (!CONFIG.IS_WINDOWS) {
+        try { fs.chmodSync(this.filePath, 0o600); } catch { /* best effort */ }
+      }
       this.dirty = false;
     } catch (err: any) {
       console.warn('Não foi possível gravar analytics.json:', err.message);

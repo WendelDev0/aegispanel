@@ -74,7 +74,8 @@ export const CONFIG = {
   /** Caddy's shared JSON access log, the source for per-application analytics. */
   ACCESS_LOG_PATH: process.env.ACCESS_LOG_PATH || path.join(process.cwd(), 'data', 'caddy-logs', 'access.log'),
   /** Sends visitor IPs to ip-api.com to resolve country and city. */
-  GEOIP_ENABLED: process.env.GEOIP_ENABLED !== 'false',
+  // GeoIP sends visitor IPs to an external provider; make that opt-in.
+  GEOIP_ENABLED: process.env.GEOIP_ENABLED === 'true',
 
   /**
    * Local mode: this instance is a development copy, not the server that owns
@@ -103,6 +104,34 @@ export const CONFIG = {
    * and put a firewall in front of it that Docker cannot bypass.
    */
   DB_BIND_IP: process.env.AEGIS_DB_BIND_IP || '127.0.0.1',
+  /** Application ports are loopback-only; Caddy reaches workloads over Docker. */
+  APP_BIND_IP: process.env.AEGIS_APP_BIND_IP || '127.0.0.1',
+  /** Optional explicit network/container names for isolated Compose stacks. */
+  DOCKER_NETWORK: process.env.AEGIS_DOCKER_NETWORK || '',
+  CADDY_CONTAINER: process.env.AEGIS_CADDY_CONTAINER || 'aegis-caddy',
+  /**
+   * Upstream Caddy uses to reach the panel's own web container when the panel
+   * is published on a domain (settings.panelDomain).
+   *
+   * The container name on the shared network, not host.docker.internal:3000:
+   * once the panel is published over HTTPS the operator is told to set
+   * PANEL_BIND=127.0.0.1, and a port bound to the host's loopback is not
+   * reachable through the docker gateway. Routing over the internal network
+   * keeps working in both binds.
+   */
+  PANEL_UPSTREAM: process.env.AEGIS_PANEL_UPSTREAM || 'aegis-frontend:80',
+  /**
+   * CIDR ranges of a CDN or reverse proxy sitting in front of Caddy, declared
+   * trusted so the real visitor address is read from X-Forwarded-For.
+   *
+   * Empty by default: trusting that header with nothing in front lets any
+   * caller forge its own address, which would poison analytics and the
+   * per-address rate limits.
+   */
+  TRUSTED_PROXIES: (process.env.AEGIS_TRUSTED_PROXIES || '')
+    .split(',')
+    .map((r) => r.trim())
+    .filter(Boolean),
   /** Comma-separated list of allowed browser origins. Empty means same-origin only. */
   CORS_ORIGINS: (process.env.CORS_ORIGINS || '')
     .split(',')

@@ -13,7 +13,7 @@ import {
   X,
   AlertTriangle
 } from 'lucide-react';
-import { api } from '../services/api.js';
+import { api, downloadAuthenticated } from '../services/api.js';
 import { BackupRecord, DatabaseRecord } from '../types/index.js';
 
 export const BackupsPage: React.FC = () => {
@@ -90,8 +90,12 @@ export const BackupsPage: React.FC = () => {
     }
   };
 
-  const handleDownload = (filename: string) => {
-    window.open(`/api/backups/download/${filename}`, '_blank');
+  const handleDownload = async (filename: string) => {
+    try {
+      await downloadAuthenticated(`/backups/download/${encodeURIComponent(filename)}`, filename);
+    } catch (err: any) {
+      alert('Erro ao baixar backup: ' + (err.response?.data?.error || err.message));
+    }
   };
 
   const formatBytes = (bytes: number) => {

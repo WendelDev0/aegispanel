@@ -6,13 +6,14 @@ import { dockerService } from './docker.service.js';
 import { EncryptionService } from '../utils/crypto.js';
 
 const DUMP_TIMEOUT_MS = 10 * 60 * 1000;
+const MAX_RESTORE_BYTES = 512 * 1024 * 1024;
 
 export class BackupService {
   private static backupDir = path.join(CONFIG.DATA_DIR, 'backups');
 
   private static ensureDir() {
     if (!fs.existsSync(this.backupDir)) {
-      fs.mkdirSync(this.backupDir, { recursive: true });
+      fs.mkdirSync(this.backupDir, { recursive: true, mode: 0o700 });
     }
   }
 
@@ -40,7 +41,9 @@ export class BackupService {
     }
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `backup_${db.type}_${db.name}_${timestamp}.sql`;
+    const safeName = db.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const extension = db.type === 'mongodb' ? 'archive' : 'sql';
+    const filename = `backup_${db.type}_${safeName}_${timestamp}.${extension}`;
     const targetPath = path.join(this.backupDir, filename);
     const backupId = `bkp-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
     const rawPassword = EncryptionService.decrypt(db.dbPassword);
@@ -73,7 +76,7 @@ export class BackupService {
         throw new Error(`Backup automático não é suportado para bancos do tipo ${db.type}.`);
     }
 
-    const writeStream = fs.createWriteStream(targetPath);
+    const writeStream = fs.createWriteStream(targetPath, { mode: 0o600 });
 
     try {
       const { stderr, exitCode } = await dockerService.execToStream(db.containerId, cmd, writeStream, {
@@ -153,15 +156,19 @@ export class BackupService {
       throw new Error('Este backup não foi concluído com sucesso e não pode ser restaurado.');
     }
 
-    const filePath = path.join(this.backupDir, backup.filename);
+    const filePath = path.join(this.backupDir, path.basename(backup.filename));
     if (!fs.existsSync(filePath)) throw new Error('Arquivo de backup não encontrado no disco');
+    const backupStats = fs.statSync(filePath);
+    if (backupStats.size > MAX_RESTORE_BYTES) {
+      throw new Error(`O backup excede o limite de restauração de ${MAX_RESTORE_BYTES / 1024 / 1024} MB.`);
+    }
 
     const db = dbStorage.getDatabaseById(backup.targetId);
     if (!db || !db.containerId) throw new Error('Banco de dados ou contêiner não está ativo para restauração');
     if (db.status !== 'running') throw new Error(`O contêiner do banco está ${db.status}.`);
 
     const rawPassword = EncryptionService.decrypt(db.dbPassword);
-    const sql = fs.readFileSync(filePath, 'utf-8');
+    const dump = fs.readFileSync(filePath);
 
     let cmd: string[];
     let env: string[];
@@ -176,13 +183,24 @@ export class BackupService {
         cmd = ['mysql', '-u', db.dbUser, db.dbName];
         env = [`MYSQL_PWD=${rawPassword}`];
         break;
+      case 'mongodb':
+        cmd = [
+          'mongorestore',
+          '--archive',
+          '--drop',
+          '-u', db.dbUser,
+          '-p', rawPassword,
+          '--authenticationDatabase', 'admin',
+        ];
+        env = [];
+        break;
       default:
         throw new Error(`Restauração não suportada para bancos do tipo ${db.type}.`);
     }
 
     const result = await dockerService.execInContainer(db.containerId, cmd, {
       env,
-      stdin: sql,
+      stdin: dump,
       timeoutMs: DUMP_TIMEOUT_MS,
     });
 
@@ -205,7 +223,7 @@ export class BackupService {
     const target = dbStorage.getBackups().find((b) => b.id === id);
     if (!target) return false;
 
-    const filePath = path.join(this.backupDir, target.filename);
+    const filePath = path.join(this.backupDir, path.basename(target.filename));
     if (fs.existsSync(filePath)) {
       try {
         fs.unlinkSync(filePath);

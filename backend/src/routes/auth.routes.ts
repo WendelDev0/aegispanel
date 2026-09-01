@@ -19,6 +19,8 @@ const MAX_ATTEMPTS = 5;
 const LOCK_TIME_MS = 15 * 60 * 1000;
 const ATTEMPT_TTL_MS = 60 * 60 * 1000;
 const MAX_TRACKED_IPS = 10_000;
+const USERNAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$/;
+const MAX_PASSWORD_LENGTH = 512;
 
 interface AttemptRecord {
   attempts: number;
@@ -35,6 +37,7 @@ interface AttemptRecord {
  * the lockout entirely.
  */
 const loginAttempts = new Map<string, AttemptRecord>();
+let setupInProgress = false;
 
 function pruneAttempts(now: number): void {
   if (loginAttempts.size < MAX_TRACKED_IPS) {
@@ -60,6 +63,16 @@ function publicUser(u: User) {
   return { id: u.id, username: u.username, email: u.email, role: u.role, createdAt: u.createdAt };
 }
 
+function validateCredentials(username: unknown, password: unknown): string | null {
+  if (typeof username !== 'string' || !USERNAME.test(username)) {
+    return 'O usuário deve ter entre 3 e 64 caracteres e usar apenas letras, números, ponto, hífen ou sublinhado.';
+  }
+  if (typeof password !== 'string' || password.length < 12 || password.length > MAX_PASSWORD_LENGTH) {
+    return `A senha deve ter entre 12 e ${MAX_PASSWORD_LENGTH} caracteres.`;
+  }
+  return null;
+}
+
 // Check if panel needs initial setup
 authRouter.get('/status', (req: Request, res: Response) => {
   const users = dbStorage.getUsers();
@@ -77,34 +90,48 @@ authRouter.post('/setup', async (req: Request, res: Response): Promise<void> => 
     return;
   }
 
-  const { username, password, email, serverName } = req.body;
-  if (!username || !password) {
-    res.status(400).json({ error: 'Usuário e senha são obrigatórios.' });
+  const { username, password, email, serverName } = req.body || {};
+  const credentialError = validateCredentials(username, password);
+  if (credentialError) {
+    res.status(400).json({ error: credentialError });
     return;
   }
 
-  if (typeof password !== 'string' || password.length < 12) {
-    res.status(400).json({ error: 'A senha do administrador deve ter no mínimo 12 caracteres.' });
+  if (setupInProgress) {
+    res.status(409).json({ error: 'A configuração inicial já está em andamento.' });
     return;
   }
 
-  const passwordHash = await bcrypt.hash(password, 12);
-  const newUser: User = {
-    id: `usr_${Date.now().toString(36)}`,
-    username,
-    passwordHash,
-    email,
-    role: 'admin',
-    createdAt: new Date().toISOString(),
-  };
+  setupInProgress = true;
+  try {
+    // Re-check after validation and before the asynchronous hash. This closes
+    // the race where two first-run requests both observed an empty database.
+    if (dbStorage.getUsers().length > 0) {
+      res.status(403).json({ error: 'Acesso bloqueado: O painel já possui um administrador cadastrado.' });
+      return;
+    }
 
-  dbStorage.addUser(newUser);
+    const passwordHash = await bcrypt.hash(password, 12);
+    const newUser: User = {
+      id: `usr_${Date.now().toString(36)}`,
+      username,
+      passwordHash,
+      email,
+      role: 'admin',
+      tokenVersion: 0,
+      createdAt: new Date().toISOString(),
+    };
 
-  if (serverName) {
-    dbStorage.updateSettings({ serverName });
+    dbStorage.addUser(newUser);
+
+    if (serverName) {
+      dbStorage.updateSettings({ serverName });
+    }
+
+    res.json({ token: signToken(newUser), user: publicUser(newUser) });
+  } finally {
+    setupInProgress = false;
   }
-
-  res.json({ token: signToken(newUser), user: publicUser(newUser) });
 });
 
 // Login with brute-force rate limiting
@@ -123,9 +150,13 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     return;
   }
 
-  const { username, password } = req.body;
-  if (!username || !password) {
+  const { username, password } = req.body || {};
+  if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
     res.status(400).json({ error: 'Usuário e senha são obrigatórios' });
+    return;
+  }
+  if (password.length > MAX_PASSWORD_LENGTH) {
+    res.status(400).json({ error: `A senha não pode exceder ${MAX_PASSWORD_LENGTH} caracteres.` });
     return;
   }
 
@@ -166,13 +197,13 @@ authRouter.get('/me', authMiddleware, (req: AuthRequest, res: Response) => {
 
 // Change own password
 authRouter.post('/change-password', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  const { currentPassword, newPassword } = req.body;
-  if (!currentPassword || !newPassword) {
+  const { currentPassword, newPassword } = req.body || {};
+  if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || !currentPassword || !newPassword) {
     res.status(400).json({ error: 'Senha atual e nova senha são obrigatórias' });
     return;
   }
-  if (typeof newPassword !== 'string' || newPassword.length < 12) {
-    res.status(400).json({ error: 'A nova senha deve ter no mínimo 12 caracteres.' });
+  if (newPassword.length < 12 || newPassword.length > MAX_PASSWORD_LENGTH) {
+    res.status(400).json({ error: `A nova senha deve ter entre 12 e ${MAX_PASSWORD_LENGTH} caracteres.` });
     return;
   }
 
@@ -183,6 +214,7 @@ authRouter.post('/change-password', authMiddleware, async (req: AuthRequest, res
   }
 
   user.passwordHash = await bcrypt.hash(newPassword, 12);
+  user.tokenVersion = (user.tokenVersion ?? 0) + 1;
   dbStorage.saveUser(user);
   res.json({ success: true });
 });
@@ -195,13 +227,10 @@ authRouter.get('/users', authMiddleware, requireAdmin, (req: AuthRequest, res: R
 // Create team user
 authRouter.post('/users', authMiddleware, requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { username, password, email, role } = req.body;
-    if (!username || !password) {
-      res.status(400).json({ error: 'Usuário e senha são obrigatórios' });
-      return;
-    }
-    if (typeof password !== 'string' || password.length < 12) {
-      res.status(400).json({ error: 'A senha deve ter no mínimo 12 caracteres.' });
+    const { username, password, email, role } = req.body || {};
+    const credentialError = validateCredentials(username, password);
+    if (credentialError) {
+      res.status(400).json({ error: credentialError });
       return;
     }
 
@@ -216,6 +245,7 @@ authRouter.post('/users', authMiddleware, requireAdmin, async (req: AuthRequest,
       passwordHash: await bcrypt.hash(password, 12),
       email: email || undefined,
       role: normalizeRole(role),
+      tokenVersion: 0,
       createdAt: new Date().toISOString(),
     };
 

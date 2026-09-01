@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import http from 'http';
+import crypto from 'crypto';
 import { CONFIG } from '../config.js';
 
 export interface GeoLocation {
@@ -20,9 +21,9 @@ const MAX_CACHE_ENTRIES = 50_000;
  * Reverse-resolves visitor IP addresses to a coarse location.
  *
  * Results are cached on disk and every address is looked up at most once, so a
- * returning visitor never leaves the server again. Only the resolved location
- * is kept by the analytics store; the address itself is not retained beyond
- * this cache, which exists to avoid repeat lookups.
+ * returning visitor never leaves the server again. Only a keyed hash of the
+ * address and its coarse location are kept on disk; the address itself is not
+ * retained beyond the in-memory lookup queue.
  *
  * The free ip-api.com endpoint is plain HTTP, so treat the response as
  * untrusted input and never send anything but the address itself.
@@ -34,14 +35,23 @@ export class GeoIpService {
   private static cachePath = path.join(CONFIG.DATA_DIR, 'geoip-cache.json');
   private static dirty = false;
 
+  private static cacheKey(ip: string): string {
+    return crypto.createHmac('sha256', CONFIG.JWT_SECRET).update(ip).digest('hex');
+  }
+
   static load(): void {
     try {
       if (fs.existsSync(this.cachePath)) {
         const raw = JSON.parse(fs.readFileSync(this.cachePath, 'utf-8'));
-        for (const [ip, loc] of Object.entries(raw)) {
-          this.cache.set(ip, loc as GeoLocation | null);
+        for (const [key, loc] of Object.entries(raw)) {
+          // Migrate the old plaintext-IP cache on the next write. New cache
+          // files contain only keyed hashes and therefore do not expose IPs.
+          const cacheKey = /^[a-f0-9]{64}$/i.test(key) ? key : this.cacheKey(key);
+          this.cache.set(cacheKey, loc as GeoLocation | null);
+          if (cacheKey !== key) this.dirty = true;
         }
-        console.log(`🌍 Cache de geolocalização carregado: ${this.cache.size} endereços.`);
+        if (this.dirty) this.persist();
+        console.log(`🌍 Cache de geolocalização carregado: ${this.cache.size} registros.`);
       }
     } catch (err: any) {
       console.warn('Não foi possível carregar o cache de geolocalização:', err.message);
@@ -53,8 +63,11 @@ export class GeoIpService {
     try {
       const entries = [...this.cache.entries()].slice(-MAX_CACHE_ENTRIES);
       const tmp = `${this.cachePath}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(entries)), 'utf-8');
+      fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(entries)), { encoding: 'utf-8', mode: 0o600 });
       fs.renameSync(tmp, this.cachePath);
+      if (!CONFIG.IS_WINDOWS) {
+        try { fs.chmodSync(this.cachePath, 0o600); } catch { /* best effort */ }
+      }
       this.dirty = false;
     } catch (err: any) {
       console.warn('Não foi possível gravar o cache de geolocalização:', err.message);
@@ -83,7 +96,8 @@ export class GeoIpService {
   static lookup(ip: string): GeoLocation | null {
     if (!CONFIG.GEOIP_ENABLED || this.isPrivate(ip)) return null;
 
-    if (this.cache.has(ip)) return this.cache.get(ip) ?? null;
+    const cacheKey = this.cacheKey(ip);
+    if (this.cache.has(cacheKey)) return this.cache.get(cacheKey) ?? null;
 
     if (!this.pending.has(ip)) {
       this.pending.add(ip);
@@ -110,14 +124,14 @@ export class GeoIpService {
     try {
       const results = await this.queryBatch(batch);
       for (const [ip, loc] of results) {
-        this.cache.set(ip, loc);
+        this.cache.set(this.cacheKey(ip), loc);
       }
       this.dirty = true;
       this.persist();
     } catch (err: any) {
       console.warn('Consulta de geolocalização falhou:', err.message);
       // Do not requeue: a failing provider would otherwise be retried forever.
-      for (const ip of batch) this.cache.set(ip, null);
+      for (const ip of batch) this.cache.set(this.cacheKey(ip), null);
     }
 
     if (this.pending.size > 0) this.scheduleFlush();

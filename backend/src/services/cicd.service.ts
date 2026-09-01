@@ -12,14 +12,47 @@ import { PortService } from './port.service.js';
 import { containerNameForApp } from '../utils/naming.js';
 import { emit } from '../realtime.js';
 import { CONFIG } from '../config.js';
+import { assertSafeGitUrl } from '../utils/url-security.js';
 
 const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 const BUILD_TIMEOUT_MS = 30 * 60 * 1000;
+const MAX_LOG_BYTES = 2 * 1024 * 1024;
+const activeDeployments = new Set<string>();
 
 interface RunResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+}
+
+function appendBounded(current: string, chunk: string, limit = MAX_LOG_BYTES): string {
+  if (current.length >= limit) return current;
+  return (current + chunk).slice(-limit);
+}
+
+function safeBranchName(value: unknown): string {
+  const branch = typeof value === 'string' && value.trim() ? value.trim() : 'main';
+  if (
+    branch.length > 255 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch) ||
+    branch.includes('..') ||
+    branch.includes('//') ||
+    branch.includes('@{') ||
+    branch.endsWith('/') ||
+    branch.endsWith('.')
+  ) {
+    throw new Error('Nome de branch inválido. Use apenas o formato padrão do Git, sem opções ou caminhos especiais.');
+  }
+  return branch;
+}
+
+function safeCommitHash(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '' || value === 'unknown') return undefined;
+  const hash = String(value).trim();
+  if (!/^[a-f0-9]{7,64}$/i.test(hash)) {
+    throw new Error('Hash de commit inválido.');
+  }
+  return hash;
 }
 
 /**
@@ -33,13 +66,13 @@ interface RunResult {
 function run(
   command: string,
   args: string[],
-  options: { cwd?: string; timeoutMs?: number; onOutput?: (chunk: string) => void } = {}
+  options: { cwd?: string; timeoutMs?: number; onOutput?: (chunk: string) => void; env?: NodeJS.ProcessEnv } = {}
 ): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
       shell: false,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...options.env },
     });
 
     let stdout = '';
@@ -56,13 +89,13 @@ function run(
 
     child.stdout.on('data', (buf: Buffer) => {
       const text = buf.toString('utf-8');
-      stdout += text;
+      stdout = appendBounded(stdout, text);
       options.onOutput?.(text);
     });
 
     child.stderr.on('data', (buf: Buffer) => {
       const text = buf.toString('utf-8');
-      stderr += text;
+      stderr = appendBounded(stderr, text);
       // Docker and git write progress to stderr; it is part of the build log,
       // not necessarily an error.
       options.onOutput?.(text);
@@ -114,6 +147,14 @@ export class CicdService {
       .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, '***');
   }
 
+  private static redactAppSecrets(text: string, app: AppRecord): string {
+    let safe = this.redactSecrets(text);
+    for (const value of Object.values(app.env || {})) {
+      if (value && value.length >= 4) safe = safe.split(value).join('***');
+    }
+    return safe;
+  }
+
   private static emitProgress(
     appId: string,
     data: { step: number; stepName: string; line: string; status: 'running' | 'success' | 'failed'; percentage: number }
@@ -123,13 +164,35 @@ export class CicdService {
     emit('deploy:stream', { appId, ...safe });
   }
 
-  /** Builds an authenticated clone URL without letting the token reach a log. */
-  private static buildCloneUrl(gitUrl: string, token?: string): string {
-    const clean = gitUrl.trim();
-    if (token && clean.startsWith('https://github.com/')) {
-      return `https://${token}@github.com/${clean.replace('https://github.com/', '')}`;
+  /** Keeps credentials out of git's argv and out of process listings. */
+  private static gitAuthEnv(gitUrl: string, token?: string): NodeJS.ProcessEnv | undefined {
+    if (!token || !gitUrl.trim().startsWith('https://github.com/')) return undefined;
+
+    // GitHub accepts `x-access-token` as the username with a PAT as the
+    // header through GIT_CONFIG_* keeps it out of `ps`/Task Manager, unlike
+    // https://TOKEN@github.com/... in the clone argument.
+    const basic = Buffer.from(`x-access-token:${token}`, 'utf-8').toString('base64');
+    return {
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'http.extraheader',
+      GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}`,
+    };
+  }
+
+  private static buildCloneUrl(gitUrl: string): string {
+    return gitUrl.trim();
+  }
+
+  /** Keeps repository metadata and common secret files out of Docker builds. */
+  private static ensureBuildContextIgnore(buildsDir: string): void {
+    const ignorePath = path.join(buildsDir, '.dockerignore');
+    const required = ['.git', '.env', '.env.*', '*.pem', '*.key', 'data', 'backups'];
+    const existing = fs.existsSync(ignorePath) ? fs.readFileSync(ignorePath, 'utf-8').split(/\r?\n/) : [];
+    const merged = [...existing.filter(Boolean)];
+    for (const entry of required) {
+      if (!merged.includes(entry)) merged.push(entry);
     }
-    return clean;
+    fs.writeFileSync(ignorePath, `${merged.join('\n')}\n`, 'utf-8');
   }
 
   /**
@@ -145,6 +208,7 @@ export class CicdService {
     inspection: ProjectInspectionResult;
     commit?: { hash: string; message: string; author: string; date: string };
   }> {
+    await assertSafeGitUrl(options.gitUrl);
     const tempDir = path.join(
       CONFIG.DATA_DIR,
       'temp',
@@ -154,13 +218,14 @@ export class CicdService {
     try {
       fs.mkdirSync(tempDir, { recursive: true });
 
-      const cloneUrl = this.buildCloneUrl(options.gitUrl, options.githubToken);
-      const branch = options.branch || 'main';
+      const cloneUrl = this.buildCloneUrl(options.gitUrl);
+      const gitEnv = this.gitAuthEnv(options.gitUrl, options.githubToken);
+      const branch = safeBranchName(options.branch);
 
       const cloned = await run(
         'git',
         ['clone', '--depth', '1', '-b', branch, '--single-branch', cloneUrl, tempDir],
-        { timeoutMs: CLONE_TIMEOUT_MS }
+        { timeoutMs: CLONE_TIMEOUT_MS, env: gitEnv }
       );
 
       if (cloned.exitCode !== 0) {
@@ -169,6 +234,7 @@ export class CicdService {
         fs.mkdirSync(tempDir, { recursive: true });
         const fallback = await run('git', ['clone', '--depth', '1', cloneUrl, tempDir], {
           timeoutMs: CLONE_TIMEOUT_MS,
+          env: gitEnv,
         });
         if (fallback.exitCode !== 0) {
           throw new Error(this.redactSecrets(fallback.stderr.trim() || 'git clone falhou'));
@@ -210,13 +276,37 @@ export class CicdService {
       triggeredBy: 'webhook' | 'manual' | 'github_action';
     }
   ): Promise<DeploymentRecord> {
+    if (activeDeployments.has(app.id)) {
+      throw new Error(`Já existe um deploy em execução para a aplicação "${app.name}".`);
+    }
+    activeDeployments.add(app.id);
+    try {
+      return await this.executeDeployUnlocked(app, options);
+    } finally {
+      activeDeployments.delete(app.id);
+    }
+  }
+
+  private static async executeDeployUnlocked(
+    app: AppRecord,
+    options: {
+      commitHash?: string;
+      commitMessage?: string;
+      authorName?: string;
+      branch?: string;
+      triggeredBy: 'webhook' | 'manual' | 'github_action';
+    }
+  ): Promise<DeploymentRecord> {
     const deploymentId = `dep-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
     const startTime = Date.now();
-    const branch = options.branch || app.branch || 'main';
+    const branch = safeBranchName(options.branch || app.branch);
 
-    let commitHash = options.commitHash || 'unknown';
-    let commitMsg = options.commitMessage || 'Manual CI/CD Trigger from AegisPanel';
-    let author = options.authorName || 'Developer';
+    if (app.sourceType === 'git' && app.gitUrl) await assertSafeGitUrl(app.gitUrl);
+
+    const requestedCommitHash = safeCommitHash(options.commitHash);
+    let commitHash = requestedCommitHash || 'unknown';
+    let commitMsg = String(options.commitMessage || 'Manual CI/CD Trigger from AegisPanel').slice(0, 500);
+    let author = String(options.authorName || 'Developer').slice(0, 160);
     let commitDate = new Date().toISOString();
 
     const deployment: DeploymentRecord = {
@@ -243,7 +333,8 @@ export class CicdService {
       line: string,
       progress?: { step: number; stepName: string; percentage: number }
     ) => {
-      logs += line;
+      line = this.redactAppSecrets(line, app);
+      logs = appendBounded(logs, line);
       if (progress) {
         this.emitProgress(app.id, { ...progress, line, status: 'running' });
       } else {
@@ -318,7 +409,8 @@ export class CicdService {
         fs.mkdirSync(buildsDir, { recursive: true });
 
         const token = AppService.getGithubToken(app);
-        const cloneUrl = this.buildCloneUrl(app.gitUrl, token);
+        const cloneUrl = this.buildCloneUrl(app.gitUrl);
+        const gitEnv = this.gitAuthEnv(app.gitUrl, token);
 
         log(
           token
@@ -338,10 +430,14 @@ export class CicdService {
           // fetch + hard reset rather than pull: a rebased or force-pushed
           // branch makes a merge-based pull fail, and the previous fallback was
           // to delete the whole working copy and clone again.
+          // Never leave a PAT in .git/config. It is used only for this fetch,
+          // then the remote is immediately restored to the public URL.
+          await run('git', ['remote', 'set-url', 'origin', cloneUrl], { cwd: buildsDir });
           const fetched = await run('git', ['fetch', '--prune', 'origin', branch], {
             cwd: buildsDir,
             timeoutMs: CLONE_TIMEOUT_MS,
             onOutput: (c) => log(this.redactSecrets(c)),
+            env: gitEnv,
           });
 
           if (fetched.exitCode !== 0) {
@@ -349,14 +445,16 @@ export class CicdService {
             fs.rmSync(buildsDir, { recursive: true, force: true });
             const cloned = await run('git', ['clone', '-b', branch, '--single-branch', cloneUrl, buildsDir], {
               timeoutMs: CLONE_TIMEOUT_MS,
+              env: gitEnv,
             });
             if (cloned.exitCode !== 0) {
               throw new Error(`Falha ao clonar repositório: ${this.redactSecrets(cloned.stderr.trim())}`);
             }
           } else {
             await run('git', ['reset', '--hard', `origin/${branch}`], { cwd: buildsDir });
-            await run('git', ['clean', '-fd'], { cwd: buildsDir });
+            await run('git', ['clean', '-fdx'], { cwd: buildsDir });
           }
+          await run('git', ['remote', 'set-url', 'origin', app.gitUrl], { cwd: buildsDir });
         } else {
           log(`[${new Date().toISOString()}] 🌿 [Step 2/5] Clonando branch [${branch}]...\n`, {
             step: 2,
@@ -365,9 +463,24 @@ export class CicdService {
           });
           const cloned = await run('git', ['clone', '-b', branch, '--single-branch', cloneUrl, buildsDir], {
             timeoutMs: CLONE_TIMEOUT_MS,
+            env: gitEnv,
           });
           if (cloned.exitCode !== 0) {
             throw new Error(`Falha ao clonar repositório: ${this.redactSecrets(cloned.stderr.trim())}`);
+          }
+          await run('git', ['remote', 'set-url', 'origin', app.gitUrl], { cwd: buildsDir });
+        }
+
+        this.ensureBuildContextIgnore(buildsDir);
+
+        if (requestedCommitHash) {
+          const target = await run('git', ['cat-file', '-e', `${requestedCommitHash}^{commit}`], { cwd: buildsDir });
+          if (target.exitCode !== 0) {
+            throw new Error(`O commit solicitado para rollback não está disponível localmente: ${requestedCommitHash}`);
+          }
+          const checkedOut = await run('git', ['reset', '--hard', requestedCommitHash], { cwd: buildsDir });
+          if (checkedOut.exitCode !== 0) {
+            throw new Error(`Não foi possível selecionar o commit ${requestedCommitHash} para o deploy.`);
           }
         }
 
@@ -473,6 +586,7 @@ export class CicdService {
           image: buildImageTag,
           env: envList,
           ports,
+          bindIp: CONFIG.APP_BIND_IP,
         });
         logs += `[${new Date().toISOString()}] 🚀 Container online com ID: ${app.containerId.substring(0, 12)}\n`;
       } else {
@@ -488,6 +602,7 @@ export class CicdService {
           image,
           env: envList,
           ports,
+          bindIp: CONFIG.APP_BIND_IP,
         });
         logs += `[${new Date().toISOString()}] 🚀 Container criado com ID: ${app.containerId.substring(0, 12)}\n`;
       }
@@ -545,7 +660,7 @@ export class CicdService {
 
       return deployment;
     } catch (err: any) {
-      const safeMessage = this.redactSecrets(err.message || String(err));
+      const safeMessage = this.redactAppSecrets(err.message || String(err), app);
       logs += `[${new Date().toISOString()}] ❌ ERRO NO DEPLOY: ${safeMessage}\n`;
 
       deployment.status = 'failed';
@@ -605,6 +720,9 @@ export class CicdService {
     );
 
     if (!hasImage) {
+      if (app.sourceType !== 'git') {
+        throw new Error('A imagem versionada do rollback não existe mais e esta aplicação não possui um repositório Git para recompilação.');
+      }
       await this.executeDeploy(app, {
         commitHash: targetDeployment.commitHash,
         commitMessage: `[Rollback] Revertendo para ${targetDeployment.commitHash}`,
@@ -623,6 +741,7 @@ export class CicdService {
       image: versionedTag,
       env: envList,
       ports,
+      bindIp: CONFIG.APP_BIND_IP,
     });
 
     app.status = 'running';

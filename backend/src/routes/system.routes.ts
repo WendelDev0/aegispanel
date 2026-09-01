@@ -5,6 +5,7 @@ import { AlertService } from '../services/alert.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { dbStorage, PanelSettings, AlertConfig } from '../db/storage.js';
 import { authMiddleware, requireAdmin, AuthRequest } from '../middleware/auth.js';
+import { EncryptionService } from '../utils/crypto.js';
 
 export const systemRouter = Router();
 
@@ -55,6 +56,18 @@ function mergeSettings(current: PanelSettings, patch: Partial<PanelSettings>): P
       whatsappApiKey: keepIfMasked('whatsappApiKey'),
     } as AlertConfig,
   };
+}
+
+function encryptAlertSecrets(patch: Partial<PanelSettings>): Partial<PanelSettings> {
+  if (!patch.alertConfig) return patch;
+  const alert = { ...patch.alertConfig } as AlertConfig;
+  for (const key of ['discordWebhookUrl', 'telegramBotToken', 'whatsappApiKey'] as const) {
+    const value = alert[key];
+    if (value && value !== MASK && !EncryptionService.isEncrypted(value)) {
+      alert[key] = EncryptionService.encrypt(value) as never;
+    }
+  }
+  return { ...patch, alertConfig: alert };
 }
 
 systemRouter.get('/stats', async (req: Request, res: Response) => {
@@ -123,8 +136,21 @@ systemRouter.get('/settings', (req: Request, res: Response) => {
 
 systemRouter.put('/settings', requireAdmin, (req: Request, res: Response) => {
   const current = dbStorage.getSettings();
-  const updated = dbStorage.updateSettings(mergeSettings(current, req.body || {}));
+  const updated = dbStorage.updateSettings(encryptAlertSecrets(mergeSettings(current, req.body || {})));
   res.json(redactSettings(updated));
+
+  // Both of these feed the generated Caddyfile: panelDomain is the panel's own
+  // site block, and notificationEmail is the ACME contact address. Saving them
+  // used to change nothing until the next restart picked them up in the
+  // startup auto-heal, which reads as "the domain setting does not work".
+  if (
+    updated.panelDomain !== current.panelDomain ||
+    updated.notificationEmail !== current.notificationEmail
+  ) {
+    CaddyService.syncCaddyfile().catch((err) => {
+      console.warn('Caddy sync after settings update failed:', err.message);
+    });
+  }
 });
 
 // Export full panel state (migration bundle)

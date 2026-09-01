@@ -1,4 +1,12 @@
 # AegisPanel - Caddyfile local (gerado pelo painel em modo local)
 {
-  local_certs
+    local_certs
+}
+
+:80 {
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
+    respond "AegisPanel Local Reverse Proxy Active" 200
 }

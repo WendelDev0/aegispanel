@@ -62,7 +62,7 @@ nodeRouter.get('/', (req: Request, res: Response) => {
 
 nodeRouter.post('/', requireAdmin, (req: Request, res: Response): void => {
   try {
-    const { name, type, hostIp, location, sshHost, sshPort, sshUser, sshPrivateKey, sshPassphrase } = req.body;
+    const { name, type, hostIp, location, sshHost, sshPort, sshUser, sshPrivateKey, sshPassphrase, sshHostFingerprint } = req.body;
 
     if (!name) {
       res.status(400).json({ error: 'Nome do servidor é obrigatório' });
@@ -85,6 +85,11 @@ nodeRouter.post('/', requireAdmin, (req: Request, res: Response): void => {
       res.status(400).json({
         error: 'Chave privada SSH é obrigatória. O painel se conecta ao Docker do nó por SSH, sem expor nenhuma porta.',
       });
+      return;
+    }
+
+    if (typeof sshHostFingerprint !== 'string' || !sshHostFingerprint.trim()) {
+      res.status(400).json({ error: 'Fingerprint SHA256 da chave do host SSH é obrigatória para impedir ataques MITM.' });
       return;
     }
 
@@ -116,6 +121,7 @@ nodeRouter.post('/', requireAdmin, (req: Request, res: Response): void => {
       sshUser: String(sshUser).trim(),
       sshPrivateKey: EncryptionService.encrypt(String(sshPrivateKey).trim()),
       sshPassphrase: sshPassphrase ? EncryptionService.encrypt(String(sshPassphrase)) : undefined,
+      sshHostFingerprint: String(sshHostFingerprint).trim(),
     };
 
     const saved = dbStorage.saveServerNode(newNode);
@@ -146,7 +152,7 @@ nodeRouter.put('/:id', requireAdmin, (req: Request, res: Response): void => {
       return;
     }
 
-    const { name, location, sshHost, sshPort, sshUser, sshPrivateKey, sshPassphrase } = req.body;
+    const { name, location, sshHost, sshPort, sshUser, sshPrivateKey, sshPassphrase, sshHostFingerprint } = req.body;
 
     if (name) node.name = name;
     if (location !== undefined) node.location = location || undefined;
@@ -187,6 +193,13 @@ nodeRouter.put('/:id', requireAdmin, (req: Request, res: Response): void => {
         return;
       }
       node.sshPrivateKey = EncryptionService.encrypt(String(sshPrivateKey).trim());
+    }
+    if (sshHostFingerprint !== undefined) {
+      if (typeof sshHostFingerprint !== 'string' || !sshHostFingerprint.trim()) {
+        res.status(400).json({ error: 'Fingerprint SSH inválida.' });
+        return;
+      }
+      node.sshHostFingerprint = sshHostFingerprint.trim();
     }
 
     if (sshPassphrase !== undefined) {

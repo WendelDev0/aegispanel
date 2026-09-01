@@ -9,6 +9,8 @@ export interface User {
   passwordHash: string;
   email?: string;
   role: UserRole;
+  /** Incremented whenever the user's credentials or permissions change. */
+  tokenVersion?: number;
   createdAt: string;
 }
 
@@ -183,6 +185,8 @@ export interface ServerNode {
   sshPrivateKey?: string;
   /** Passphrase for the key above, encrypted with the same key. */
   sshPassphrase?: string;
+  /** SHA256 fingerprint of the SSH host key, required to prevent MITM. */
+  sshHostFingerprint?: string;
 
   // --- last health check --------------------------------------------------
   lastCheckedAt?: string;
@@ -249,7 +253,6 @@ const DEFAULT_DATA: DatabaseSchema = {
     { id: 'fw-22', port: 22, protocol: 'tcp', action: 'allow', comment: 'SSH Access', createdAt: new Date().toISOString() },
     { id: 'fw-80', port: 80, protocol: 'tcp', action: 'allow', comment: 'HTTP Web Traffic', createdAt: new Date().toISOString() },
     { id: 'fw-443', port: 443, protocol: 'tcp', action: 'allow', comment: 'HTTPS Secure Web', createdAt: new Date().toISOString() },
-    { id: 'fw-3000', port: 3000, protocol: 'tcp', action: 'allow', comment: 'AegisPanel Web Dashboard', createdAt: new Date().toISOString() },
   ],
   // Only the machine running this process. Additional nodes are registered by
   // the operator; shipping a placeholder for someone else's provider is noise.
@@ -277,7 +280,9 @@ class JsonStorage {
   constructor() {
     const dataDir = CONFIG.DATA_DIR;
     if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+    } else if (!CONFIG.IS_WINDOWS) {
+      try { fs.chmodSync(dataDir, 0o700); } catch { /* best effort */ }
     }
     this.filePath = path.join(dataDir, 'panel_db.json');
     this.data = this.load();
@@ -353,7 +358,7 @@ class JsonStorage {
     );
 
     try {
-      const fd = fs.openSync(tmpPath, 'w');
+      const fd = fs.openSync(tmpPath, 'w', 0o600);
       try {
         fs.writeFileSync(fd, payload, 'utf-8');
         fs.fsyncSync(fd);
@@ -361,6 +366,9 @@ class JsonStorage {
         fs.closeSync(fd);
       }
       fs.renameSync(tmpPath, this.filePath);
+      if (!CONFIG.IS_WINDOWS) {
+        try { fs.chmodSync(this.filePath, 0o600); } catch { /* best effort */ }
+      }
     } catch (err) {
       try {
         if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
@@ -475,6 +483,12 @@ class JsonStorage {
         },
       },
     };
+    // Imported state may contain users from a previous installation. Bump the
+    // session version so tokens issued before the import cannot survive it.
+    this.data.users = this.data.users.map((user) => ({
+      ...user,
+      tokenVersion: (user.tokenVersion ?? 0) + 1,
+    }));
     this.save();
     return this.data;
   }

@@ -1,10 +1,18 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { dockerService } from '../services/docker.service.js';
-import { authMiddleware, requireWrite } from '../middleware/auth.js';
+import { authMiddleware, requireWrite, AuthRequest } from '../middleware/auth.js';
 
 export const dockerRouter = Router();
 
 dockerRouter.use(authMiddleware);
+
+async function requireManagedWorkload(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (!(await dockerService.isManagedWorkload(req.params.id))) {
+    res.status(404).json({ error: 'Contêiner não é um recurso gerenciado pelo AegisPanel.' });
+    return;
+  }
+  next();
+}
 
 dockerRouter.get('/status', async (req: Request, res: Response) => {
   const isAvailable = await dockerService.testConnection();
@@ -31,14 +39,15 @@ dockerRouter.post('/reconnect', requireWrite, async (req: Request, res: Response
 dockerRouter.get('/containers', async (req: Request, res: Response) => {
   try {
     const all = req.query.all !== 'false';
-    const containers = await dockerService.listContainers(all);
+    const user = (req as AuthRequest).user;
+    const containers = await dockerService.listContainersFiltered(all, user?.role !== 'admin');
     res.json(containers);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-dockerRouter.get('/containers/:id/stats', async (req: Request, res: Response) => {
+dockerRouter.get('/containers/:id/stats', requireManagedWorkload, async (req: Request, res: Response) => {
   try {
     const stats = await dockerService.getContainerStats(req.params.id);
     res.json(stats);
@@ -47,7 +56,7 @@ dockerRouter.get('/containers/:id/stats', async (req: Request, res: Response) =>
   }
 });
 
-dockerRouter.post('/containers/:id/start', requireWrite, async (req: Request, res: Response) => {
+dockerRouter.post('/containers/:id/start', requireWrite, requireManagedWorkload, async (req: Request, res: Response) => {
   try {
     await dockerService.startContainer(req.params.id);
     res.json({ success: true });
@@ -56,7 +65,7 @@ dockerRouter.post('/containers/:id/start', requireWrite, async (req: Request, re
   }
 });
 
-dockerRouter.post('/containers/:id/stop', requireWrite, async (req: Request, res: Response) => {
+dockerRouter.post('/containers/:id/stop', requireWrite, requireManagedWorkload, async (req: Request, res: Response) => {
   try {
     await dockerService.stopContainer(req.params.id);
     res.json({ success: true });
@@ -65,7 +74,7 @@ dockerRouter.post('/containers/:id/stop', requireWrite, async (req: Request, res
   }
 });
 
-dockerRouter.post('/containers/:id/restart', requireWrite, async (req: Request, res: Response) => {
+dockerRouter.post('/containers/:id/restart', requireWrite, requireManagedWorkload, async (req: Request, res: Response) => {
   try {
     await dockerService.restartContainer(req.params.id);
     res.json({ success: true });
@@ -74,7 +83,7 @@ dockerRouter.post('/containers/:id/restart', requireWrite, async (req: Request, 
   }
 });
 
-dockerRouter.delete('/containers/:id', requireWrite, async (req: Request, res: Response) => {
+dockerRouter.delete('/containers/:id', requireWrite, requireManagedWorkload, async (req: Request, res: Response) => {
   try {
     await dockerService.removeContainer(req.params.id, true);
     res.json({ success: true });
@@ -83,7 +92,7 @@ dockerRouter.delete('/containers/:id', requireWrite, async (req: Request, res: R
   }
 });
 
-dockerRouter.get('/containers/:id/logs', async (req: Request, res: Response) => {
+dockerRouter.get('/containers/:id/logs', requireManagedWorkload, async (req: Request, res: Response) => {
   try {
     const tail = req.query.tail ? parseInt(req.query.tail as string) : 100;
     const logs = await dockerService.getLogs(req.params.id, tail);

@@ -42,6 +42,7 @@ services:
       - DATA_DIR=/app/data
       - CADDY_CONFIG_PATH=/app/caddy/Caddyfile
       - ACCESS_LOG_PATH=/var/log/caddy/access.log
+      - AEGIS_CADDY_CONTAINER=aegis-caddy
       - DOCKER_SOCKET=/var/run/docker.sock
       - TZ=${TZ:-America/Sao_Paulo}
       # Required. The container refuses to start if these are unset; generate
@@ -72,10 +73,10 @@ services:
     container_name: aegis-frontend
     restart: unless-stopped
     ports:
-      # Bound to all interfaces so the panel is reachable at http://SEU_IP:3000
-      # before a domain exists. Once PANEL_DOMAIN is set up in Caddy, change
-      # this to "127.0.0.1:3000:80" so the panel is only served over HTTPS.
-      - "${PANEL_BIND:-0.0.0.0}:3000:80"
+      # Loopback by default: credentials and JWTs must not travel over plain
+      # HTTP on the public interface. Publish through Caddy/HTTPS or use SSH
+      # port forwarding during bootstrap.
+      - "${PANEL_BIND:-127.0.0.1}:3000:80"
     environment:
       - TZ=${TZ:-America/Sao_Paulo}
     depends_on:

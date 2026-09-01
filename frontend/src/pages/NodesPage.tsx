@@ -28,6 +28,7 @@ interface NodeRecord {
   sshUser?: string;
   hasSshKey?: boolean;
   hasPassphrase?: boolean;
+  hasSshHostFingerprint?: boolean;
   lastCheckedAt?: string;
   lastError?: string;
   dockerVersion?: string;
@@ -60,6 +61,7 @@ export const NodesPage: React.FC = () => {
   const [sshUser, setSshUser] = useState('');
   const [sshPrivateKey, setSshPrivateKey] = useState('');
   const [sshPassphrase, setSshPassphrase] = useState('');
+  const [sshHostFingerprint, setSshHostFingerprint] = useState('');
   const [location, setLocation] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -89,6 +91,7 @@ export const NodesPage: React.FC = () => {
         sshUser,
         sshPrivateKey,
         sshPassphrase: sshPassphrase || undefined,
+        sshHostFingerprint,
         location: location || undefined,
       });
 
@@ -98,6 +101,7 @@ export const NodesPage: React.FC = () => {
       setSshUser('');
       setSshPrivateKey('');
       setSshPassphrase('');
+      setSshHostFingerprint('');
       setLocation('');
       await fetchNodes();
 
@@ -363,6 +367,20 @@ export const NodesPage: React.FC = () => {
                 />
                 <p className="text-2xs text-on-surface-variant/70 mt-1">
                   A conta de login no servidor, não o nome dele. Ex.: <span className="font-mono">aegis</span>.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1">Fingerprint SHA256 do host SSH *</label>
+                <input
+                  required
+                  value={sshHostFingerprint}
+                  onChange={(e) => setSshHostFingerprint(e.target.value.trim())}
+                  placeholder="SHA256:abc123..."
+                  className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3.5 py-2.5 text-on-surface text-sm font-mono focus:outline-none focus:border-primary"
+                />
+                <p className="text-2xs text-on-surface-variant/70 mt-1">
+                  No servidor: <code className="font-mono">ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256</code>
                 </p>
               </div>
 

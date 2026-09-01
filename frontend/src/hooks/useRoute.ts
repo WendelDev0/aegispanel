@@ -25,9 +25,13 @@ const DEFAULT_TAB: NavTab = 'dashboard';
 
 function parsePath(pathname: string): { tab: NavTab; param: string | null } {
   const [segment, param] = pathname.replace(/^\/+/, '').split('/');
+  let decodedParam: string | null = null;
+  if (param) {
+    try { decodedParam = decodeURIComponent(param); } catch { decodedParam = null; }
+  }
   return {
     tab: (TABS as string[]).includes(segment) ? (segment as NavTab) : DEFAULT_TAB,
-    param: param ? decodeURIComponent(param) : null,
+    param: decodedParam,
   };
 }
 

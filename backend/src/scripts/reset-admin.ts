@@ -13,6 +13,7 @@ async function resetAdmin() {
     admin.username = newUsername;
     admin.passwordHash = passwordHash;
     admin.role = 'admin';
+    admin.tokenVersion = (admin.tokenVersion ?? 0) + 1;
     dbStorage.saveUser(admin);
     console.log(`\n==================================================`);
     console.log(`🛡️  AegisPanel - Redefinição de Administrador`);
@@ -26,6 +27,7 @@ async function resetAdmin() {
       username: newUsername,
       passwordHash,
       role: 'admin' as const,
+      tokenVersion: 0,
       createdAt: new Date().toISOString(),
     };
     dbStorage.saveUser(newAdmin);

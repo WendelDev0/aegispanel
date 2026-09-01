@@ -62,6 +62,9 @@ export class PortService {
    * think about it at all.
    */
   static async allocate(preferred?: number, excludeContainerId?: string): Promise<number> {
+    if (preferred !== undefined && (!Number.isInteger(preferred) || preferred < 1024 || preferred > 65535)) {
+      throw new Error('A porta deve ser um número inteiro entre 1024 e 65535.');
+    }
     const used = await this.getUsedPorts(excludeContainerId);
 
     if (preferred && !used.has(preferred)) {
@@ -79,6 +82,7 @@ export class PortService {
 
   /** Whether a specific host port can be used right now. */
   static async isAvailable(port: number, excludeContainerId?: string): Promise<boolean> {
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) return false;
     const used = await this.getUsedPorts(excludeContainerId);
     return !used.has(port);
   }

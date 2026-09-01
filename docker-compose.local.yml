@@ -52,6 +52,11 @@ services:
     environment:
       - NODE_ENV=development
       - AEGIS_LOCAL_MODE=true
+      # This stack names its containers differently from production, so the
+      # panel's own upstream has to be named explicitly.
+      - AEGIS_PANEL_UPSTREAM=aegis-local-frontend:80
+      - AEGIS_CADDY_CONTAINER=aegis-local-caddy
+      - AEGIS_DOCKER_NETWORK=aegis-local-net
       - PORT=4000
       - DATA_DIR=/app/data
       - CADDY_CONFIG_PATH=/app/caddy/Caddyfile.local
@@ -87,6 +92,7 @@ services:
 
 networks:
   aegis-net:
+    name: aegis-local-net
     driver: bridge
 
 volumes:

@@ -1,4 +1,5 @@
 import dns from 'dns';
+import net from 'node:net';
 import tls from 'tls';
 import { dbStorage } from '../db/storage.js';
 import { CaddyService } from './caddy.service.js';
@@ -6,6 +7,23 @@ import { SystemService } from './system.service.js';
 import { normalizeDomain } from '../utils/naming.js';
 
 const resolver = dns.promises;
+
+function isPrivateAddress(address: string): boolean {
+  const normalized = address.toLowerCase();
+  if (normalized === '::1' || normalized.startsWith('127.') || normalized.startsWith('169.254.')) return true;
+  if (normalized.startsWith('10.') || normalized.startsWith('192.168.')) return true;
+  if (normalized.startsWith('172.')) {
+    const second = Number(normalized.split('.')[1]);
+    if (second >= 16 && second <= 31) return true;
+  }
+  if (normalized.startsWith('100.64.') || normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe80:')) return true;
+  return normalized.startsWith('::ffff:') && isPrivateAddress(normalized.slice(7));
+}
+
+function isUnsafeDomain(domain: string): boolean {
+  const lower = domain.toLowerCase();
+  return lower === 'localhost' || lower.endsWith('.localhost') || lower.endsWith('.local') || Boolean(net.isIP(domain));
+}
 
 /** Certificate DN attributes can repeat, so Node types them as string | string[]. */
 function first(value: string | string[] | undefined): string | undefined {
@@ -122,10 +140,28 @@ export class DomainService {
       message,
     });
 
+    if (isUnsafeDomain(cleanDomain)) {
+      return unreachable('O diagnóstico SSL não aceita hosts locais ou literais de IP.');
+    }
+
+    let targetAddress: { address: string; family: number };
+    try {
+      const addresses = await resolver.lookup(cleanDomain, { all: true, verbatim: true });
+      const publicAddress = addresses.find(({ address }) => !isPrivateAddress(address));
+      if (!publicAddress || addresses.some(({ address }) => isPrivateAddress(address))) {
+        return unreachable('O domínio resolve para uma rede privada ou reservada.');
+      }
+      targetAddress = publicAddress;
+    } catch {
+      return unreachable('Não foi possível resolver o domínio para inspecionar o certificado.');
+    }
+
     return new Promise<SslDetails>((resolve) => {
       const socket = tls.connect(
         {
-          host: cleanDomain,
+          // Connect to the already-validated literal IP so a DNS rebinding
+          // between lookup and TLS cannot redirect this server internally.
+          host: targetAddress.address,
           port: 443,
           servername: cleanDomain,
           timeout: 8000,

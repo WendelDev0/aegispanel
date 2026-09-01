@@ -58,8 +58,10 @@ export class FirewallService {
     return dbStorage.getFirewallRules();
   }
 
-  private static portSpec(rule: { port: number; protocol: 'tcp' | 'udp' | 'both' }): string {
-    return `${rule.port}/${rule.protocol === 'both' ? 'tcp' : rule.protocol}`;
+  private static portSpecs(rule: { port: number; protocol: 'tcp' | 'udp' | 'both' }): string[] {
+    return rule.protocol === 'both'
+      ? [`${rule.port}/tcp`, `${rule.port}/udp`]
+      : [`${rule.port}/${rule.protocol}`];
   }
 
   static async addRule(input: {
@@ -99,9 +101,11 @@ export class FirewallService {
 
     try {
       // execFile with an argument array: nothing here reaches a shell.
-      await execFilePromise('ufw', [input.action, this.portSpec(input)], { timeout: 15000 });
+      for (const spec of this.portSpecs(input)) {
+        await execFilePromise('ufw', [input.action, spec], { timeout: 15000 });
+      }
       dbStorage.saveFirewallRule(rule);
-      return { rule, applied: true, message: `Regra ${input.action} ${this.portSpec(input)} aplicada com sucesso.` };
+      return { rule, applied: true, message: `Regra ${input.action} ${this.portSpecs(input).join(' e ')} aplicada com sucesso.` };
     } catch (err: any) {
       throw new Error(`Falha ao aplicar a regra no ufw: ${err.stderr || err.message}`);
     }
@@ -122,7 +126,9 @@ export class FirewallService {
     }
 
     try {
-      await execFilePromise('ufw', ['delete', rule.action, this.portSpec(rule)], { timeout: 15000 });
+      for (const spec of this.portSpecs(rule)) {
+        await execFilePromise('ufw', ['delete', rule.action, spec], { timeout: 15000 });
+      }
       dbStorage.removeFirewallRule(id);
       return { rule, applied: true, message: 'Regra removida com sucesso.' };
     } catch (err: any) {

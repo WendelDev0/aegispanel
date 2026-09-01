@@ -10,7 +10,7 @@ import { AlertService } from './services/alert.service.js';
 import { CaddyService } from './services/caddy.service.js';
 import { CronService } from './services/cron.service.js';
 import { AnalyticsService } from './services/analytics.service.js';
-import { verifyToken, AuthUser } from './middleware/auth.js';
+import { authenticateToken, AuthUser } from './middleware/auth.js';
 
 // Routers
 import { authRouter } from './routes/auth.routes.js';
@@ -60,19 +60,36 @@ io.use((socket, next) => {
   }
 
   try {
-    socket.data.user = verifyToken(token);
+    socket.data.user = authenticateToken(token);
+    socket.data.authToken = token;
     next();
   } catch {
     next(new Error('unauthorized: token inválido ou expirado'));
   }
 });
 
-// Trust the reverse proxy in front of us so req.ip reflects the real client.
-// Without this, rate limiting reads a client-controlled header.
-app.set('trust proxy', 1);
+// Trust only explicitly configured proxy addresses. `1` would also trust a
+// client-controlled X-Forwarded-For header when the API is reached directly.
+app.set('trust proxy', CONFIG.TRUSTED_PROXIES.length ? CONFIG.TRUSTED_PROXIES : false);
 
 app.disable('x-powered-by');
 app.use(cors(corsOptions));
+
+// Capture GitHub's exact request bytes before the general JSON parser runs.
+// Signature verification cannot operate on a re-serialized object.
+app.use(
+  '/api/webhooks',
+  express.json({
+    limit: '512kb',
+    verify: (req, _res, buf) => {
+      (req as express.Request & { rawBody?: string }).rawBody = buf.toString('utf-8');
+    },
+  })
+);
+
+// This router owns a 50 MB parser for administrator uploads. Mount it before
+// the general 1 MB parser so the larger route-specific limit is reachable.
+app.use('/api/files', fileRouter);
 
 // Small default body limit. Routes that legitimately accept large payloads
 // raise it locally, so an unauthenticated endpoint can never be used to buffer
@@ -100,7 +117,6 @@ app.use('/api/templates', templateRouter);
 app.use('/api/cron', cronRouter);
 app.use('/api/domains', domainRouter);
 app.use('/api/backups', backupRouter);
-app.use('/api/files', fileRouter);
 app.use('/api/query', queryRouter);
 app.use('/api/firewall', firewallRouter);
 app.use('/api/webhooks', webhookRouter);

@@ -42,7 +42,13 @@ export function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('aegis_token'));
   const [user, setUser] = useState<User | null>(() => {
     const raw = localStorage.getItem('aegis_user');
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      localStorage.removeItem('aegis_user');
+      return null;
+    }
   });
 
   const [activeTab, setActiveTab, routeParam] = useRoute();
@@ -137,7 +143,7 @@ export function App() {
       case 'querystudio':
         return <QueryStudioPage />;
       case 'filemanager':
-        return <FileManagerPage />;
+        return user?.role === 'admin' ? <FileManagerPage /> : <DashboardPage overview={overview} realtimeStats={realtimeStats} setActiveTab={setActiveTab} />;
       case 'cron':
         return <CronPage />;
       case 'containers':
@@ -167,6 +173,7 @@ export function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         serverName={overview?.settings?.serverName || 'Aegis VPS'}
+        role={user?.role}
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">

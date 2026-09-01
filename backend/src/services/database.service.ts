@@ -1,5 +1,3 @@
-import path from 'path';
-import fs from 'fs';
 import { dbStorage, DatabaseRecord } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
 import { EncryptionService } from '../utils/crypto.js';
@@ -138,21 +136,24 @@ export class DatabaseService {
   }
 
   static async createDatabase(dto: CreateDbDTO): Promise<DatabaseRecord> {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/.test(dto.name)) {
+      throw new Error('Nome do banco inválido. Use apenas letras, números, ponto, hífen ou sublinhado.');
+    }
     const id = `db-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
     const containerName = containerNameForDatabase(dto.name);
     // Applications reach the database by container name on the internal port,
     // so the published host port is only needed for external clients and does
     // not have to be chosen by hand.
     const hostPort = await PortService.allocate(dto.port);
-    const dataPath = path.join(CONFIG.DATA_DIR, 'databases', dto.name);
-
-    if (!fs.existsSync(dataPath)) {
-      fs.mkdirSync(dataPath, { recursive: true });
-    }
+    // The Docker daemon resolves bind paths on the host, not inside the
+    // backend container. A named volume avoids mounting a path such as
+    // /app/data/... on the wrong filesystem and keeps persistence portable.
+    const dataVolume = `aegis-db-${id}`;
 
     let image = '';
     let internalPort = 5432;
     let env: string[] = [];
+    let cmd: string[] | undefined;
     let connString = '';
     let volumeTarget = '';
 
@@ -205,6 +206,7 @@ export class DatabaseService {
         internalPort = 6379;
         volumeTarget = '/data';
         env = [];
+        cmd = ['redis-server', '--requirepass', rawPassword];
         connString = `redis://:${rawPassword}@HOST_IP:${hostPort}`;
         break;
 
@@ -222,7 +224,7 @@ export class DatabaseService {
     }
 
     const volumes: { [hostPath: string]: string } = {};
-    volumes[dataPath] = volumeTarget;
+    volumes[dataVolume] = volumeTarget;
 
     const ports: { [intPort: string]: number } = {};
     ports[`${internalPort}/tcp`] = hostPort;
@@ -235,6 +237,7 @@ export class DatabaseService {
         name: containerName,
         image,
         env,
+        ...(cmd ? { cmd } : {}),
         ports,
         // Databases bind to loopback only. Docker's iptables rules are
         // evaluated before ufw, so a port published on 0.0.0.0 is reachable
@@ -298,7 +301,7 @@ export class DatabaseService {
 
     if (db.containerId) {
       try {
-        await dockerService.removeContainer(db.containerId, true);
+        await dockerService.removeContainer(db.containerId, true, true);
       } catch (err) {
         console.error('Error removing container:', err);
       }

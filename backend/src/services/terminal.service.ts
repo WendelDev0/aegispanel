@@ -1,7 +1,8 @@
 import { Socket } from 'socket.io';
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
 import { CONFIG } from '../config.js';
-import { AuthUser } from '../middleware/auth.js';
+import { AuthUser, authenticateToken } from '../middleware/auth.js';
+import { dockerService } from './docker.service.js';
 
 /** Docker accepts a container id (hex) or a name; both are constrained here. */
 const CONTAINER_REF = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
@@ -18,12 +19,36 @@ export class TerminalService {
   static handleSocketConnection(socket: Socket, user: AuthUser) {
     let ptyProcess: ChildProcessWithoutNullStreams | null = null;
 
+    const currentUser = (): AuthUser | null => {
+      try {
+        const token = socket.data.authToken as string | undefined;
+        return token ? authenticateToken(token) : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const revokeSocket = () => {
+      if (ptyProcess) {
+        ptyProcess.kill();
+        ptyProcess = null;
+      }
+      socket.emit('terminal:data', '\r\n\x1b[31m[Sessão revogada. Faça login novamente.]\x1b[0m\r\n');
+      socket.disconnect(true);
+    };
+
     const deny = (reason: string) => {
       socket.emit('terminal:data', `\r\n\x1b[31m[${reason}]\x1b[0m\r\n`);
       socket.emit('terminal:ready', { success: false, error: reason });
     };
 
-    socket.on('terminal:init', (options: { containerId?: string; shell?: string }) => {
+    socket.on('terminal:init', async (options: { containerId?: string; shell?: string } = {}) => {
+      const sessionUser = currentUser();
+      if (!sessionUser) {
+        revokeSocket();
+        return;
+      }
+
       if (ptyProcess) {
         ptyProcess.kill();
         ptyProcess = null;
@@ -31,12 +56,12 @@ export class TerminalService {
 
       const wantsHostShell = !options?.containerId;
 
-      if (wantsHostShell && user.role !== 'admin') {
+      if (wantsHostShell && sessionUser.role !== 'admin') {
         deny('Permissão negada: o terminal do host é restrito ao perfil admin.');
         return;
       }
 
-      if (!wantsHostShell && user.role === 'viewer') {
+      if (!wantsHostShell && sessionUser.role === 'viewer') {
         deny('Permissão negada: o perfil viewer não pode abrir terminais.');
         return;
       }
@@ -47,6 +72,11 @@ export class TerminalService {
       if (options.containerId) {
         if (!CONTAINER_REF.test(options.containerId)) {
           deny('Identificador de contêiner inválido.');
+          return;
+        }
+        const type = await dockerService.getManagedContainerType(options.containerId);
+        if (!type || (sessionUser.role !== 'admin' && type !== 'app')) {
+          deny('Permissão negada: o terminal só pode acessar workloads gerenciados pelo painel.');
           return;
         }
         command = 'docker';
@@ -68,7 +98,7 @@ export class TerminalService {
         });
 
         console.log(
-          `🖥️  Terminal aberto por "${user.username}" (${user.role}) -> ${options.containerId ? `container ${options.containerId}` : 'host'}`
+          `🖥️  Terminal aberto por "${sessionUser.username}" (${sessionUser.role}) -> ${options.containerId ? `container ${options.containerId}` : 'host'}`
         );
 
         ptyProcess.stdout.on('data', (data: Buffer) => {
@@ -94,6 +124,10 @@ export class TerminalService {
     });
 
     socket.on('terminal:input', (data: string) => {
+      if (!currentUser()) {
+        revokeSocket();
+        return;
+      }
       if (ptyProcess && ptyProcess.stdin.writable) {
         ptyProcess.stdin.write(data);
       }

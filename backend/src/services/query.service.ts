@@ -155,7 +155,7 @@ export class QueryService {
         const result = await dockerService.execInContainer(
           db.containerId,
           ['redis-cli', ...args],
-          { timeoutMs: QUERY_TIMEOUT_MS }
+          { env: [`REDISCLI_AUTH=${rawPassword}`], timeoutMs: QUERY_TIMEOUT_MS }
         );
         rawOutput = result.stdout || result.stderr;
         if (result.exitCode !== 0) {

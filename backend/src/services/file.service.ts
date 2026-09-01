@@ -24,7 +24,7 @@ export class FileService {
   static listFiles(relPath: string = ''): FileItem[] {
     const targetDir = this.resolveSafePath(relPath);
     if (!fs.existsSync(targetDir)) {
-      fs.mkdirSync(targetDir, { recursive: true });
+      fs.mkdirSync(targetDir, { recursive: true, mode: 0o700 });
     }
 
     const items = fs.readdirSync(targetDir, { withFileTypes: true });
@@ -66,9 +66,9 @@ export class FileService {
     const filePath = this.resolveSafePath(relPath);
     const parent = path.dirname(filePath);
     if (!fs.existsSync(parent)) {
-      fs.mkdirSync(parent, { recursive: true });
+      fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
     }
-    fs.writeFileSync(filePath, content, 'utf-8');
+    fs.writeFileSync(filePath, content, { encoding: 'utf-8', mode: 0o600 });
     return true;
   }
 
@@ -76,17 +76,17 @@ export class FileService {
     const filePath = this.resolveSafePath(relPath);
     const parent = path.dirname(filePath);
     if (!fs.existsSync(parent)) {
-      fs.mkdirSync(parent, { recursive: true });
+      fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
     }
     const buffer = Buffer.from(base64Content, 'base64');
-    fs.writeFileSync(filePath, buffer);
+    fs.writeFileSync(filePath, buffer, { mode: 0o600 });
     return true;
   }
 
   static createDirectory(relPath: string): boolean {
     const dirPath = this.resolveSafePath(relPath);
     if (!fs.existsSync(dirPath)) {
-      fs.mkdirSync(dirPath, { recursive: true });
+      fs.mkdirSync(dirPath, { recursive: true, mode: 0o700 });
     }
     return true;
   }

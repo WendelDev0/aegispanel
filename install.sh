@@ -49,11 +49,12 @@ fi
 # qualquer contêiner de aplicação diretamente à internet. Aplicações publicadas
 # devem ser acessadas pelo domínio, através do Caddy nas portas 80/443.
 echo "🔒 [3/6] Configurando firewall UFW..."
-$SUDO ufw allow 22/tcp    comment 'SSH'    || true
-$SUDO ufw allow 80/tcp    comment 'HTTP'   || true
-$SUDO ufw allow 443/tcp   comment 'HTTPS'  || true
-$SUDO ufw allow 3000/tcp  comment 'AegisPanel Dashboard' || true
-$SUDO ufw --force enable || true
+$SUDO ufw default deny incoming
+$SUDO ufw default allow outgoing
+$SUDO ufw allow 22/tcp    comment 'SSH'
+$SUDO ufw allow 80/tcp    comment 'HTTP'
+$SUDO ufw allow 443/tcp   comment 'HTTPS'
+$SUDO ufw --force enable
 
 echo "   ℹ️  Para publicar uma aplicação em uma porta específica, libere-a"
 echo "      manualmente com: sudo ufw allow <porta>/tcp"
@@ -74,6 +75,7 @@ fi
 
 $SUDO mkdir -p "$INSTALL_DIR/caddy" "$INSTALL_DIR/data"
 $SUDO chown -R "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$INSTALL_DIR"
+$SUDO chmod 700 "$INSTALL_DIR/data"
 
 if [ ! -f "$INSTALL_DIR/caddy/Caddyfile" ]; then
     printf '# AegisPanel Default Caddyfile\n' > "$INSTALL_DIR/caddy/Caddyfile"
@@ -123,9 +125,8 @@ SERVER_IP=$(curl -s --max-time 5 ifconfig.me || curl -s --max-time 5 icanhazip.c
 echo ""
 echo "======================================================================"
 echo "🎉 AegisPanel instalado com sucesso!"
-echo "👉 Acesse: http://$SERVER_IP:3000"
+echo "👉 Painel: localhost:3000 (use SSH tunnel: ssh -L 3000:127.0.0.1:3000 usuario@servidor)"
 echo ""
 echo "   No primeiro acesso você define a senha do administrador."
-echo "   Depois de apontar um domínio para o painel, defina PANEL_BIND=127.0.0.1"
-echo "   em $ENV_FILE e sirva o painel por HTTPS através do Caddy."
+echo "   Para acesso externo, aponte um domínio para o servidor e sirva o painel por HTTPS através do Caddy."
 echo "======================================================================"

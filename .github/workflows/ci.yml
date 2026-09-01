@@ -38,6 +38,10 @@ jobs:
         working-directory: backend
         run: npm run build
 
+      - name: Dependency audit
+        working-directory: backend
+        run: npm audit --omit=dev --audit-level=moderate
+
   frontend:
     name: Frontend (typecheck + build)
     runs-on: ubuntu-latest
@@ -61,6 +65,10 @@ jobs:
       - name: Build
         working-directory: frontend
         run: npm run build
+
+      - name: Dependency audit
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=moderate
 
   secrets:
     name: No default secrets committed

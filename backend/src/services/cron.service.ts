@@ -75,17 +75,19 @@ function matchesNow(schedule: string, date: Date): boolean {
   if (!parsed) return false;
 
   const [minutes, hours, daysOfMonth, months, daysOfWeek] = parsed;
-  return (
-    minutes.has(date.getMinutes()) &&
-    hours.has(date.getHours()) &&
-    daysOfMonth.has(date.getDate()) &&
-    months.has(date.getMonth() + 1) &&
-    daysOfWeek.has(date.getDay())
-  );
+  const parts = schedule.trim().split(/\s+/);
+  const domMatch = daysOfMonth.has(date.getDate());
+  const dowMatch = daysOfWeek.has(date.getDay());
+  const domRestricted = parts[2] !== '*';
+  const dowRestricted = parts[4] !== '*';
+  const dayMatch = domRestricted && dowRestricted ? domMatch || dowMatch : domMatch && dowMatch;
+
+  return minutes.has(date.getMinutes()) && hours.has(date.getHours()) && dayMatch && months.has(date.getMonth() + 1);
 }
 
 export class CronService {
   private static timer: NodeJS.Timeout | null = null;
+  private static startupTimer: NodeJS.Timeout | null = null;
   private static running = new Set<string>();
 
   static isValidSchedule(schedule: string): boolean {
@@ -131,15 +133,14 @@ export class CronService {
         if (this.running.has(job.id)) continue;
         if (!matchesNow(job.schedule, now)) continue;
 
-        this.running.add(job.id);
         this.runNow(job.id)
           .catch((err) => console.error(`Cron "${job.name}" falhou:`, err.message))
-          .finally(() => this.running.delete(job.id));
       }
     };
 
     const msToNextMinute = 60_000 - (Date.now() % 60_000);
-    setTimeout(() => {
+    this.startupTimer = setTimeout(() => {
+      this.startupTimer = null;
       tick();
       this.timer = setInterval(tick, 60_000);
     }, msToNextMinute).unref();
@@ -148,13 +149,28 @@ export class CronService {
   }
 
   static stop(): void {
+    if (this.startupTimer) {
+      clearTimeout(this.startupTimer);
+      this.startupTimer = null;
+    }
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
     }
+    this.running.clear();
   }
 
   static async runNow(id: string): Promise<CronJobRecord> {
+    if (this.running.has(id)) throw new Error('Esta tarefa já está em execução.');
+    this.running.add(id);
+    try {
+      return await this.runNowUnlocked(id);
+    } finally {
+      this.running.delete(id);
+    }
+  }
+
+  private static async runNowUnlocked(id: string): Promise<CronJobRecord> {
     const job = dbStorage.getCronJobs().find((j) => j.id === id);
     if (!job) throw new Error('Tarefa cron não encontrada');
 

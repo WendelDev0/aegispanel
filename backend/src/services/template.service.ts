@@ -1,6 +1,7 @@
 import { AppService } from './app.service.js';
 import { dbStorage, AppRecord } from '../db/storage.js';
 import { EncryptionService } from '../utils/crypto.js';
+import { DatabaseService } from './database.service.js';
 
 export interface AppTemplate {
   id: string;
@@ -32,7 +33,7 @@ export const TEMPLATES_CATALOG: AppTemplate[] = [
     author: 'Evolution Community',
     env: {
       SERVER_PORT: '8080',
-      AUTHENTICATION_API_KEY: 'evo_key_placeholder',
+      AUTHENTICATION_API_KEY: '',
       AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: 'true',
       DATABASE_ENABLED: 'false',
       CACHE_REDIS_ENABLED: 'false',
@@ -133,7 +134,7 @@ export const TEMPLATES_CATALOG: AppTemplate[] = [
     env: {
       PORT: '3004',
       FLOWISE_USERNAME: 'admin',
-      FLOWISE_PASSWORD: 'admin_flowise_password_123',
+      FLOWISE_PASSWORD: '',
     },
     features: [
       'Chatbots com RAG (treinados com PDFs e documentos da sua empresa)',
@@ -177,7 +178,7 @@ export const TEMPLATES_CATALOG: AppTemplate[] = [
     env: {
       WORDPRESS_DB_HOST: 'localhost:3306',
       WORDPRESS_DB_USER: 'app_user',
-      WORDPRESS_DB_PASSWORD: 'change_me_secure',
+      WORDPRESS_DB_PASSWORD: '',
       WORDPRESS_DB_NAME: 'wordpress_db',
     },
     features: [
@@ -199,8 +200,8 @@ export const TEMPLATES_CATALOG: AppTemplate[] = [
     version: 'v2024.05',
     author: 'MinIO Inc.',
     env: {
-      MINIO_ROOT_USER: 'minioadmin',
-      MINIO_ROOT_PASSWORD: 'miniopassword123',
+      MINIO_ROOT_USER: '',
+      MINIO_ROOT_PASSWORD: '',
     },
     features: [
       'Armazene imagens, mídias e gravações de áudio do WhatsApp',
@@ -264,10 +265,10 @@ export class TemplateService {
       if (options.postgresDbId) {
         const db = dbStorage.getDatabaseById(options.postgresDbId);
         if (db) {
-          const rawPass = EncryptionService.decrypt(db.dbPassword);
+          const credentials = DatabaseService.getCredentials(db.id);
           env['DATABASE_ENABLED'] = 'true';
           env['DATABASE_PROVIDER'] = 'postgresql';
-          env['DATABASE_CONNECTION_URI'] = `postgresql://${db.dbUser}:${rawPass}@localhost:${db.port}/${db.dbName}`;
+          env['DATABASE_CONNECTION_URI'] = credentials.internalConnectionString;
         }
       }
 
@@ -275,11 +276,24 @@ export class TemplateService {
       if (options.redisDbId) {
         const redisDb = dbStorage.getDatabaseById(options.redisDbId);
         if (redisDb) {
-          const redisPass = EncryptionService.decrypt(redisDb.dbPassword);
+          const credentials = DatabaseService.getCredentials(redisDb.id);
           env['CACHE_REDIS_ENABLED'] = 'true';
-          env['CACHE_REDIS_URI'] = `redis://:${redisPass}@localhost:${redisDb.port}`;
+          env['CACHE_REDIS_URI'] = credentials.internalConnectionString;
         }
       }
+    }
+
+    // Catalog values are examples only. Generate credentials per installation
+    // so a public template cannot ship a shared admin password.
+    if (template.id === 'flowise-ai' && !options.customEnv?.FLOWISE_PASSWORD) {
+      env.FLOWISE_PASSWORD = EncryptionService.generateStrongPassword(24, true);
+    }
+    if (template.id === 'wordpress' && !options.customEnv?.WORDPRESS_DB_PASSWORD) {
+      env.WORDPRESS_DB_PASSWORD = EncryptionService.generateStrongPassword(24, true);
+    }
+    if (template.id === 'minio') {
+      if (!options.customEnv?.MINIO_ROOT_USER) env.MINIO_ROOT_USER = EncryptionService.generateSecureUsername('minio');
+      if (!options.customEnv?.MINIO_ROOT_PASSWORD) env.MINIO_ROOT_PASSWORD = EncryptionService.generateStrongPassword(24, true);
     }
 
     return AppService.createApp({

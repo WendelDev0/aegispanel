@@ -2,7 +2,7 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 COPY package*.json tsconfig.json ./
-RUN npm install
+RUN npm ci
 COPY src ./src
 RUN npm run build
 
@@ -13,7 +13,7 @@ WORKDIR /app
 RUN apk add --no-cache git docker-cli curl bash
 
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 
 EXPOSE 4000

@@ -6,6 +6,9 @@ export const databaseRouter = Router();
 
 databaseRouter.use(authMiddleware);
 
+const VALID_TYPES = new Set(['postgres', 'mysql', 'mariadb', 'redis', 'mongodb']);
+const DATABASE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/;
+
 databaseRouter.get('/', (req: Request, res: Response) => {
   const databases = DatabaseService.getAll();
   res.json(databases);
@@ -31,8 +34,12 @@ databaseRouter.get('/generate-credentials', requireWrite, (req: Request, res: Re
 databaseRouter.post('/', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
     const { name, type, port, dbUser, dbPassword, dbName, withGui } = req.body;
-    if (!name || !type) {
+    if (typeof name !== 'string' || !DATABASE_NAME.test(name) || !type) {
       res.status(400).json({ error: 'Nome e tipo são obrigatórios' });
+      return;
+    }
+    if (!VALID_TYPES.has(type)) {
+      res.status(400).json({ error: 'Tipo de banco inválido.' });
       return;
     }
 

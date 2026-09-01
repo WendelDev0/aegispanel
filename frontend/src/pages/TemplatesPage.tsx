@@ -526,30 +526,21 @@ export const TemplatesPage: React.FC<TemplatesPageProps> = ({ setActiveTab }) =>
             <div className="bg-surface-container-lowest p-4 rounded-lg border border-outline-variant space-y-3 text-xs font-mono">
               <div>
                 <span className="text-on-surface-variant/70 block text-[10px]">ENDEREÇO DE ACESSO</span>
-                <a
-                  href={`http://localhost:${installedApp.port}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-ok hover:underline flex items-center gap-1 font-bold"
-                >
-                  http://localhost:{installedApp.port}
-                  <ExternalLink className="w-3 h-3" />
-                </a>
+                <span className="text-ok flex items-center gap-1 font-bold">
+                  http://127.0.0.1:{installedApp.port}
+                </span>
+                <span className="text-[10px] text-on-surface-variant/70 block mt-1">
+                  Porta protegida no servidor. Vincule um domínio em Aplicações para acesso externo.
+                </span>
               </div>
 
               {installedApp.templateId === 'evolution-api-v2' && (
                 <>
                   <div>
                     <span className="text-on-surface-variant/70 block text-[10px]">DOCUMENTAÇÃO SWAGGER EM TEMPO REAL</span>
-                    <a
-                      href={`http://localhost:${installedApp.port}/docs`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-primary hover:underline flex items-center gap-1"
-                    >
-                      http://localhost:{installedApp.port}/docs
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
+                    <span className="text-primary flex items-center gap-1">
+                      http://127.0.0.1:{installedApp.port}/docs
+                    </span>
                   </div>
 
                   {installedApp.apiKey && (

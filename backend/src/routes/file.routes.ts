@@ -2,11 +2,14 @@ import { Router, Request, Response } from 'express';
 import express from 'express';
 import fs from 'fs';
 import { FileService } from '../services/file.service.js';
-import { authMiddleware, requireWrite } from '../middleware/auth.js';
+import { authMiddleware, requireAdmin, requireWrite } from '../middleware/auth.js';
 
 export const fileRouter = Router();
 
 fileRouter.use(authMiddleware);
+// This explorer is rooted at DATA_DIR, which contains panel_db.json, backups,
+// cached GeoIP data and application secrets. It is an administrator-only API.
+fileRouter.use(requireAdmin);
 
 /** Uploads are the only endpoint that legitimately carries a large payload. */
 const uploadBodyParser = express.json({ limit: '50mb' });
