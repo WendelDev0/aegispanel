@@ -562,7 +562,22 @@ export class CicdService {
           percentage: 65,
         });
 
-        const build = await run('docker', ['build', '-t', buildImageTag, '-t', versionedTag, '.'], {
+        // Inject .env and build-args so Vite/Next/frontend frameworks receive variables during build
+        const buildArgs: string[] = [];
+        let envFileContent = '';
+        for (const [key, val] of Object.entries(app.env || {})) {
+          if (val !== undefined && val !== null) {
+            buildArgs.push('--build-arg', `${key}=${val}`);
+            envFileContent += `${key}=${val}\n`;
+          }
+        }
+        if (envFileContent) {
+          fs.writeFileSync(path.join(buildsDir, '.env'), envFileContent, 'utf-8');
+          fs.writeFileSync(path.join(buildsDir, '.env.production'), envFileContent, 'utf-8');
+          fs.writeFileSync(path.join(buildsDir, '.env.local'), envFileContent, 'utf-8');
+        }
+
+        const build = await run('docker', ['build', ...buildArgs, '-t', buildImageTag, '-t', versionedTag, '.'], {
           cwd: buildsDir,
           timeoutMs: BUILD_TIMEOUT_MS,
           onOutput: (chunk) => log(this.redactSecrets(chunk)),
