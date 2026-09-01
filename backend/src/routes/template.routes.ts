@@ -11,6 +11,30 @@ templateRouter.get('/', (req: Request, res: Response) => {
   res.json(TemplateService.getCatalog());
 });
 
+templateRouter.get('/updates', (req: Request, res: Response) => {
+  try {
+    const summary = TemplateService.getUpdatesSummary();
+    res.json(summary);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+templateRouter.post('/upgrade-app', requireWrite, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { appId } = req.body;
+    if (!appId) {
+      res.status(400).json({ error: 'App ID é obrigatório' });
+      return;
+    }
+
+    const updatedApp = await TemplateService.upgradeInstalledApp(appId);
+    res.json(AppService.toPublic(updatedApp));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 templateRouter.post('/install', requireWrite, async (req: Request, res: Response): Promise<void> => {
   try {
     const { templateId, customPort, customName, apiKey, postgresDbId, redisDbId, customEnv } = req.body;
