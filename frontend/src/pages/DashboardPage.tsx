@@ -23,6 +23,7 @@ import {
   AlertTriangle,
   Clock,
   Radio,
+  ExternalLink,
   Calendar,
   Filter,
   SlidersHorizontal,
@@ -300,6 +301,61 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <Plus className="w-4 h-4" />
             Novo Deploy
           </button>
+        </div>
+      </div>
+
+      {/* Quick Access Services Hub */}
+      <div className="bg-surface-container rounded-lg p-4 border border-outline-variant flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <Zap className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-sm font-bold text-white flex items-center gap-2">
+              Atalhos Rápidos do Ecossistema
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-surface-container-high text-emerald-400 border border-emerald-500/30">
+                1-Click Direct Access
+              </span>
+            </h4>
+            <p className="text-xs text-on-surface-variant">
+              Acesse diretamente os painéis de banco de dados, APIs e aplicações ativas na VPS.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <a
+            href="http://13.140.41.82:8000/"
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#1C1C1C] hover:bg-black text-emerald-400 font-semibold text-xs border border-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.2)] transition-all active:scale-95 group"
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>Supabase Studio</span>
+            <ExternalLink className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+          </a>
+
+          <a
+            href="https://evo.selvamarketing.com"
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#075E54]/20 hover:bg-[#075E54]/40 text-emerald-300 font-semibold text-xs border border-[#25D366]/40 transition-all active:scale-95 group"
+          >
+            <span className="w-2 h-2 rounded-full bg-[#25D366]"></span>
+            <span>Evolution API (WhatsApp)</span>
+            <ExternalLink className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+          </a>
+
+          <a
+            href="https://bomdebolao.com"
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-surface-container-high hover:bg-surface-container text-white font-semibold text-xs border border-outline-variant transition-all active:scale-95 group"
+          >
+            <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
+            <span>BomDeBolão (App)</span>
+            <ExternalLink className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+          </a>
         </div>
       </div>
 

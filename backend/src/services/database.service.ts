@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { dbStorage, DatabaseRecord } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
 import { EncryptionService } from '../utils/crypto.js';
@@ -347,5 +348,78 @@ export class DatabaseService {
       return { ...saved, dbPassword: '' };
     }
     throw new Error('No container associated');
+  }
+
+  static async getSupabaseHub(host: string = 'localhost'): Promise<any> {
+    const envPath = '/opt/supabase/docker/.env';
+    let content = '';
+
+    if (fs.existsSync(envPath)) {
+      try {
+        content = fs.readFileSync(envPath, 'utf8');
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    // Default or parsed values
+    const getVal = (k: string, fallback: string = '') => {
+      const m = content.match(new RegExp(`^${k}=(.*)$`, 'm'));
+      return m ? m[1].trim() : fallback;
+    };
+
+    const isInstalled = fs.existsSync(envPath) || fs.existsSync('/opt/supabase');
+    const anonKey = getVal('ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg4MjgzMDQ3LCJleHAiOjE5NDU5NjMwNDd9.cIZSRI0zpUMbu68UHHnrXfOKUK_qa7ZTMP2t2_zCOyk');
+    const serviceRoleKey = getVal('SERVICE_ROLE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJpYXQiOjE3ODgyODMwNDcsImV4cCI6MTk0NTk2MzA0N30.9Tj2LsVPuHo2G5PXxBdmrxWpSV9VzPF86zKfkcQKdyA');
+    const postgresPassword = getVal('POSTGRES_PASSWORD', 'ef62aea1d96bd9216352a5f684950c65');
+    const dashboardPassword = getVal('DASHBOARD_PASSWORD', '5bcfef1c9f197c7498b929698c709772');
+    const dashboardUser = getVal('DASHBOARD_USERNAME', 'supabase');
+    const organization = getVal('STUDIO_DEFAULT_ORGANIZATION', 'BomDeBolao');
+    const project = getVal('STUDIO_DEFAULT_PROJECT', 'neon-bet');
+
+    let isRunning = true;
+    let services: { name: string; status: string; healthy: boolean }[] = [];
+
+    try {
+      const allContainers = await dockerService.listContainers(true);
+      const supabaseContainers = allContainers.filter(
+        c => c.name.toLowerCase().includes('supabase') || c.name.toLowerCase().includes('realtime')
+      );
+      if (supabaseContainers.length > 0) {
+        isRunning = supabaseContainers.some(c => c.state === 'running');
+        services = supabaseContainers.map(c => ({
+          name: c.name.replace(/^\//, ''),
+          status: c.status,
+          healthy: c.state === 'running',
+        }));
+      }
+    } catch {
+      // ignore
+    }
+
+    const cleanHost = host.replace(/:\d+$/, '');
+    const targetHost = cleanHost === 'localhost' || cleanHost === '127.0.0.1' ? '13.140.41.82' : cleanHost;
+    const studioUrl = `http://${targetHost}:8000/`;
+    const apiUrl = `http://${targetHost}:8000`;
+    const connectionString = `postgresql://postgres:${postgresPassword}@${targetHost}:5432/postgres`;
+
+    return {
+      installed: isInstalled,
+      running: isRunning,
+      studioUrl,
+      apiUrl,
+      dashboardUser,
+      dashboardPassword,
+      anonKey,
+      serviceRoleKey,
+      postgresPort: 5432,
+      postgresUser: 'postgres',
+      postgresPassword,
+      postgresDb: 'postgres',
+      connectionString,
+      organization,
+      project,
+      services,
+    };
   }
 }

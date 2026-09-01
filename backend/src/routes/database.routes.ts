@@ -14,6 +14,16 @@ databaseRouter.get('/', (req: Request, res: Response) => {
   res.json(databases);
 });
 
+databaseRouter.get('/supabase-hub', requireWrite, async (req: Request, res: Response) => {
+  try {
+    const host = (req.headers['x-forwarded-host'] || req.headers.host || req.hostname || '13.140.41.82') as string;
+    const hub = await DatabaseService.getSupabaseHub(host);
+    res.json(hub || { installed: false });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Helper endpoint to generate cryptographic credentials on demand
 // Reveals the stored credentials for one database. Separate from the list
 // endpoint so plaintext passwords are only sent when explicitly requested.
