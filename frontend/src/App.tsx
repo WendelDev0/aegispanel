@@ -2,13 +2,17 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { Sidebar } from './components/Sidebar.js';
 import { Navbar } from './components/Navbar.js';
 import { AuthPage } from './pages/AuthPage.js';
+import { api } from './services/api.js';
+import { socket, connectSocket, disconnectSocket } from './services/socket.js';
+import { useRoute } from './hooks/useRoute.js';
+import { OverviewData, SystemStats, User } from './types/index.js';
+import { ToastProvider } from './components/Toast.js';
+import { ConfirmProvider } from './components/ConfirmModal.js';
 
 /**
  * Sections are code-split.
  *
- * Everything used to be pulled into a single bundle, so opening the login
- * screen downloaded the terminal emulator, the charting library and every
- * management page. Each section now loads on first visit.
+ * Each section loads on first visit for optimum initial load time.
  */
 const DashboardPage = lazy(() => import('./pages/DashboardPage.js').then(m => ({ default: m.DashboardPage })));
 const TemplatesPage = lazy(() => import('./pages/TemplatesPage.js').then(m => ({ default: m.TemplatesPage })));
@@ -33,10 +37,6 @@ const PageFallback = () => (
     <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
   </div>
 );
-import { api } from './services/api.js';
-import { socket, connectSocket, disconnectSocket } from './services/socket.js';
-import { useRoute } from './hooks/useRoute.js';
-import { OverviewData, SystemStats, User } from './types/index.js';
 
 export function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('aegis_token'));
@@ -54,6 +54,7 @@ export function App() {
   const [activeTab, setActiveTab, routeParam] = useRoute();
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [realtimeStats, setRealtimeStats] = useState<SystemStats | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const fetchOverview = async () => {
     if (!token) return;
@@ -75,9 +76,6 @@ export function App() {
     }
 
     fetchOverview();
-
-    // The handshake carries the session token, so the socket is opened only
-    // after login and closed on logout.
     connectSocket();
 
     const onMetrics = (metrics: SystemStats) => setRealtimeStats(metrics);
@@ -107,9 +105,6 @@ export function App() {
     setUser(null);
   };
 
-  // The API client clears the stored token on any 401 and fires this event, so
-  // an expired session drops back to the login screen instead of leaving the
-  // UI stuck on failing requests.
   useEffect(() => {
     const onAuthChange = () => {
       if (!localStorage.getItem('aegis_token')) {
@@ -168,28 +163,35 @@ export function App() {
   };
 
   return (
-    <div className="flex h-screen bg-surface text-on-surface font-sans overflow-hidden">
-      <Sidebar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        serverName={overview?.settings?.serverName || 'Aegis VPS'}
-        role={user?.role}
-      />
+    <ToastProvider>
+      <ConfirmProvider>
+        <div className="flex h-screen bg-surface text-on-surface font-sans overflow-hidden">
+          <Sidebar
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            serverName={overview?.settings?.serverName || 'Aegis VPS'}
+            role={user?.role}
+            isMobileOpen={isMobileMenuOpen}
+            onCloseMobile={() => setIsMobileMenuOpen(false)}
+          />
 
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <Navbar
-          stats={realtimeStats}
-          serverName={overview?.settings?.serverName || 'Aegis VPS'}
-          username={user?.username || 'admin'}
-          onLogout={handleLogout}
-          onRefresh={fetchOverview}
-        />
+          <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+            <Navbar
+              stats={realtimeStats}
+              serverName={overview?.settings?.serverName || 'Aegis VPS'}
+              username={user?.username || 'admin'}
+              onLogout={handleLogout}
+              onRefresh={fetchOverview}
+              onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
+            />
 
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 custom-scrollbar">
-          <Suspense fallback={<PageFallback />}>{renderContent()}</Suspense>
-        </main>
-      </div>
-    </div>
+            <main className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-7 custom-scrollbar">
+              <Suspense fallback={<PageFallback />}>{renderContent()}</Suspense>
+            </main>
+          </div>
+        </div>
+      </ConfirmProvider>
+    </ToastProvider>
   );
 }
 

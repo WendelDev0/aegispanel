@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, LogOut, ShieldCheck, RefreshCw, Cpu, HardDrive } from 'lucide-react';
+import { User, LogOut, ShieldCheck, RefreshCw, Cpu, HardDrive, Menu } from 'lucide-react';
 import { SystemStats } from '../types/index.js';
 
 interface NavbarProps {
@@ -8,6 +8,7 @@ interface NavbarProps {
   username: string;
   onLogout: () => void;
   onRefresh?: () => void;
+  onToggleMobileMenu?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -16,6 +17,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   username,
   onLogout,
   onRefresh,
+  onToggleMobileMenu,
 }) => {
   const formatUptime = (seconds: number) => {
     const days = Math.floor(seconds / 86400);
@@ -27,9 +29,19 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   return (
-    <header className="h-14 bg-surface-container-lowest border-b border-outline-variant px-5 flex items-center justify-between shrink-0 sticky top-0 z-20">
+    <header className="h-14 bg-surface-container-lowest border-b border-outline-variant px-4 sm:px-5 flex items-center justify-between shrink-0 sticky top-0 z-20">
       {/* Left info */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3 sm:gap-4">
+        {onToggleMobileMenu && (
+          <button
+            onClick={onToggleMobileMenu}
+            className="lg:hidden p-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors"
+            title="Abrir menu lateral"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        )}
+
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-ok"></span>
           <span className="font-semibold text-on-surface text-sm tracking-[-0.01em]">{serverName}</span>
