@@ -368,16 +368,7 @@ export class DatabaseService {
       return m ? m[1].trim() : fallback;
     };
 
-    const isInstalled = fs.existsSync(envPath) || fs.existsSync('/opt/supabase');
-    const anonKey = getVal('ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg4MjgzMDQ3LCJleHAiOjE5NDU5NjMwNDd9.cIZSRI0zpUMbu68UHHnrXfOKUK_qa7ZTMP2t2_zCOyk');
-    const serviceRoleKey = getVal('SERVICE_ROLE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJpYXQiOjE3ODgyODMwNDcsImV4cCI6MTk0NTk2MzA0N30.9Tj2LsVPuHo2G5PXxBdmrxWpSV9VzPF86zKfkcQKdyA');
-    const postgresPassword = getVal('POSTGRES_PASSWORD', 'ef62aea1d96bd9216352a5f684950c65');
-    const dashboardPassword = getVal('DASHBOARD_PASSWORD', '5bcfef1c9f197c7498b929698c709772');
-    const dashboardUser = getVal('DASHBOARD_USERNAME', 'supabase');
-    const organization = getVal('STUDIO_DEFAULT_ORGANIZATION', 'BomDeBolao');
-    const project = getVal('STUDIO_DEFAULT_PROJECT', 'neon-bet');
-
-    let isRunning = true;
+    let isRunning = false;
     let services: { name: string; status: string; healthy: boolean }[] = [];
 
     try {
@@ -396,6 +387,15 @@ export class DatabaseService {
     } catch {
       // ignore
     }
+
+    const isInstalled = fs.existsSync(envPath) || fs.existsSync('/opt/supabase') || services.length > 0;
+    const anonKey = getVal('ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg4MjgzMDQ3LCJleHAiOjE5NDU5NjMwNDd9.cIZSRI0zpUMbu68UHHnrXfOKUK_qa7ZTMP2t2_zCOyk');
+    const serviceRoleKey = getVal('SERVICE_ROLE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UiLCJpYXQiOjE3ODgyODMwNDcsImV4cCI6MTk0NTk2MzA0N30.9Tj2LsVPuHo2G5PXxBdmrxWpSV9VzPF86zKfkcQKdyA');
+    const postgresPassword = getVal('POSTGRES_PASSWORD', 'ef62aea1d96bd9216352a5f684950c65');
+    const dashboardPassword = getVal('DASHBOARD_PASSWORD', '5bcfef1c9f197c7498b929698c709772');
+    const dashboardUser = getVal('DASHBOARD_USERNAME', 'supabase');
+    const organization = getVal('STUDIO_DEFAULT_ORGANIZATION', 'BomDeBolao');
+    const project = getVal('STUDIO_DEFAULT_PROJECT', 'neon-bet');
 
     const cleanHost = host.replace(/:\d+$/, '');
     const targetHost = cleanHost === 'localhost' || cleanHost === '127.0.0.1' ? '13.140.41.82' : cleanHost;
