@@ -27,6 +27,36 @@ export interface AppTemplate {
 
 export const TEMPLATES_CATALOG: AppTemplate[] = [
   {
+    id: 'supabase',
+    name: 'Supabase Self-Hosted Stack',
+    category: 'database',
+    description: 'A mais poderosa alternativa open-source ao Firebase: PostgreSQL 17, GoTrue Auth, PostgREST API, Realtime WebSockets, Storage e painel web Supabase Studio.',
+    iconUrl: 'https://supabase.com/favicon/favicon.ico',
+    defaultPort: 8000,
+    image: 'supabase/studio:2026.08.03-sha-022b374',
+    version: 'v2026.08',
+    latestVersion: 'v2026.08',
+    releaseDate: '2026-08',
+    author: 'Supabase Inc.',
+    websiteUrl: 'https://supabase.com',
+    changelogUrl: 'https://github.com/supabase/supabase/releases',
+    env: {
+      API_GW_HTTP_PORT: '8000',
+      POSTGRES_PORT: '5432',
+      STUDIO_DEFAULT_ORGANIZATION: 'BomDeBolao',
+      STUDIO_DEFAULT_PROJECT: 'neon-bet',
+    },
+    features: [
+      'PostgreSQL 17 com pgvector e extensões',
+      'GoTrue Auth com JWT e recuperação de senha',
+      'PostgREST com API REST automática em milissegundos',
+      'Supabase Studio completo para gerenciar tabelas e SQL',
+      'Storage e Realtime WebSockets para dados ao vivo',
+    ],
+    tags: ['Supabase', 'PostgreSQL', 'Auth', 'BaaS', 'Neon-Bet'],
+    docsUrl: 'https://supabase.com/docs',
+  },
+  {
     id: 'evolution-api-v2',
     name: 'Evolution API v2.2 (WhatsApp Master)',
     category: 'whatsapp',

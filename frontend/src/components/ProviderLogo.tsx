@@ -29,6 +29,19 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
   // Render official vector logos for known providers
   const renderSvgLogo = () => {
     switch (true) {
+      case normalizedId.includes('supabase'):
+        return (
+          <div className="w-full h-full flex items-center justify-center">
+            <svg viewBox="0 0 48 48" fill="none" className="w-full h-full">
+              <rect width="48" height="48" rx="10" fill="#1C1C1C" />
+              <path
+                d="M21.36 41.52c-1.12 1.34-3.36.56-3.36-1.18V26.88H8.84c-1.48 0-2.3-1.74-1.34-2.88L24.64 6.48c1.12-1.34 3.36-.56 3.36 1.18v13.46h9.16c1.48 0 2.3 1.74 1.34 2.88L21.36 41.52z"
+                fill="#3ECF8E"
+              />
+            </svg>
+          </div>
+        );
+
       case normalizedId.includes('evolution') || normalizedId.includes('whatsapp'):
         return (
           <div className="w-full h-full flex items-center justify-center relative">
