@@ -182,6 +182,7 @@ export class CronService {
         const dbs = dbStorage.getDatabases();
         const results: string[] = [];
         let failures = 0;
+        const totalSteps = dbs.length + 1; // databases + panel state
 
         for (const db of dbs) {
           try {
@@ -193,10 +194,22 @@ export class CronService {
           }
         }
 
-        output = results.join('\n') || 'Nenhum banco de dados cadastrado.';
+        // Panel state was previously omitted from cron backups: recovering DB
+        // dumps alone left apps/domains/users unrecovered after a disk loss.
+        try {
+          const panelBackup = await BackupService.createPanelStateBackup();
+          results.push(
+            `✅ Estado do painel: ${panelBackup.filename} (${(panelBackup.sizeBytes / 1024).toFixed(1)} KB)`
+          );
+        } catch (err: any) {
+          failures++;
+          results.push(`❌ Estado do painel: ${err.message}`);
+        }
+
+        output = results.join('\n') || 'Nenhum item para backup.';
         // A partial failure must not be reported as a successful backup run.
         if (failures > 0) {
-          throw new Error(`${failures} de ${dbs.length} backup(s) falharam.\n${output}`);
+          throw new Error(`${failures} de ${totalSteps} backup(s) falharam.\n${output}`);
         }
       } else if (job.type === 'shell' && job.command) {
         // Shell jobs are admin-gated at the route; a shell is intentional here.

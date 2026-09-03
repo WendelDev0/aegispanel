@@ -368,4 +368,108 @@ export class BackupService {
     const filePath = path.join(this.backupDir, path.basename(filename));
     return fs.existsSync(filePath) ? filePath : null;
   }
+
+  /**
+   * Snapshots panel_db.json into the backups directory.
+   *
+   * Distinct from /api/system/export-state (operator download): this produces a
+   * dated on-disk copy that cron can include alongside database dumps, so a
+   * failed disk does not leave only container volumes recoverable.
+   */
+  static async createPanelStateBackup(): Promise<BackupRecord> {
+    this.ensureDir();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `backup_panel_state_${timestamp}.json`;
+    const targetPath = path.join(this.backupDir, filename);
+    const backupId = `bkp-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+
+    try {
+      // Force a fresh write so the snapshot matches the in-memory document.
+      const state = dbStorage.exportState();
+      const payload = JSON.stringify(state, null, 2);
+      fs.writeFileSync(targetPath, payload, { encoding: 'utf-8', mode: 0o600 });
+      const stats = fs.statSync(targetPath);
+
+      const record: BackupRecord = {
+        id: backupId,
+        targetType: 'full',
+        targetId: 'panel',
+        targetName: 'Estado do Painel',
+        filename,
+        sizeBytes: stats.size,
+        status: 'completed',
+        createdAt: new Date().toISOString(),
+      };
+
+      dbStorage.addActivity({
+        type: 'backup',
+        title: 'Backup do estado do painel concluído',
+        description: `${filename} (${(stats.size / 1024).toFixed(1)} KB)`,
+        status: 'success',
+        metadata: { backupId },
+      });
+
+      return dbStorage.saveBackup(record);
+    } catch (err: any) {
+      try {
+        if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
+      } catch {
+        /* best effort */
+      }
+
+      const failed: BackupRecord = {
+        id: backupId,
+        targetType: 'full',
+        targetId: 'panel',
+        targetName: 'Estado do Painel',
+        filename,
+        sizeBytes: 0,
+        status: 'failed',
+        createdAt: new Date().toISOString(),
+      };
+      dbStorage.saveBackup(failed);
+      throw new Error(`Falha ao gerar backup do estado do painel: ${err.message}`);
+    }
+  }
+
+  /**
+   * Restores panel_db.json from a prior panel-state backup.
+   *
+   * Goes through importState so the running process and the file cannot diverge.
+   */
+  static async restorePanelStateBackup(backupId: string): Promise<boolean> {
+    const backup = dbStorage.getBackups().find((b) => b.id === backupId);
+    if (!backup) throw new Error('Backup não encontrado');
+    if (backup.targetType !== 'full' || backup.targetId !== 'panel') {
+      throw new Error('Este backup não é um snapshot do estado do painel.');
+    }
+    if (backup.status !== 'completed') {
+      throw new Error('Só é possível restaurar backups concluídos com sucesso.');
+    }
+
+    const filePath = this.getBackupFilePath(backup.filename);
+    if (!filePath) throw new Error('Arquivo de backup não encontrado no disco.');
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    } catch (err: any) {
+      throw new Error(`Backup do painel corrompido: ${err.message}`);
+    }
+
+    const problems = dbStorage.validateState(parsed);
+    if (problems.length) {
+      throw new Error(`Backup inválido: ${problems.join(' ')}`);
+    }
+
+    dbStorage.importState(parsed as Parameters<typeof dbStorage.importState>[0]);
+    dbStorage.addActivity({
+      type: 'backup',
+      title: 'Estado do painel restaurado',
+      description: `Restaurado a partir de ${backup.filename}`,
+      status: 'success',
+      metadata: { backupId },
+    });
+    return true;
+  }
 }

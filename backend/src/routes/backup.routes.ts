@@ -19,8 +19,23 @@ backupRouter.post('/database/:id', requireWrite, async (req: Request, res: Respo
   }
 });
 
+backupRouter.post('/panel', requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const backup = await BackupService.createPanelStateBackup();
+    res.status(201).json(backup);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 backupRouter.post('/:id/restore', requireAdmin, async (req: Request, res: Response): Promise<void> => {
   try {
+    const backup = BackupService.getAll().find((b) => b.id === req.params.id);
+    if (backup && backup.targetType === 'full' && backup.targetId === 'panel') {
+      await BackupService.restorePanelStateBackup(req.params.id);
+      res.json({ success: true, message: 'Estado do painel restaurado com sucesso a partir do backup.' });
+      return;
+    }
     await BackupService.restoreBackup(req.params.id);
     res.json({ success: true, message: 'Banco de dados restaurado com sucesso a partir do backup.' });
   } catch (err: any) {
