@@ -34,7 +34,7 @@ Acesse o terminal SSH da máquina e execute:
 curl -fsSL https://raw.githubusercontent.com/WendelDev0/aegispanel/main/install.sh | bash
 ```
 
-O script instala o Docker, configura o firewall, **gera os segredos exclusivos daquela máquina** em `/opt/aegispanel/.env` e sobe a stack.
+O script instala o Docker, configura o firewall, **gera os segredos exclusivos daquela máquina** em `/opt/aegispanel/.env`, grava `AEGIS_COMPOSE_DIR` (para o self-update achar o compose de dentro do container) e sobe a stack.
 
 O painel fica preso ao loopback durante o bootstrap. Acesse por um túnel SSH:
 
@@ -44,6 +44,14 @@ ssh -L 3000:127.0.0.1:3000 usuario@SEU_IP_DA_VPS
 ```
 
 No primeiro acesso você cria a conta de administrador (senha de no mínimo 12 caracteres).
+
+Instalação em outro diretório:
+
+```bash
+AEGIS_INSTALL_DIR=/srv/aegispanel bash install.sh
+```
+
+O script recusa continuar se não houver `docker-compose.yml` nesse caminho, e grava `AEGIS_COMPOSE_DIR` no `.env` — sem isso o self-update dentro do container não acha o projeto.
 
 ### Portas abertas pelo instalador
 
@@ -74,6 +82,7 @@ chmod 600 .env
 | `PANEL_BIND` | Interface do painel. `127.0.0.1` é o padrão seguro; publique por HTTPS via Caddy ou túnel SSH. |
 | `GEOIP_ENABLED` | Geolocalização externa de IPs. `false` é o padrão; ative apenas após revisar a política de privacidade. |
 | `CORS_ORIGINS` | Origens de navegador permitidas. Vazio = apenas mesma origem (padrão correto). |
+| `AEGIS_COMPOSE_DIR` | Caminho absoluto do clone com `docker-compose.yml`. Necessário para o self-update (o backend no container não vê o compose pelo cwd). O `install.sh` define como o diretório de instalação. Se o compose não existir nesse path, a instalação e o self-update falham em vez de adivinhar. |
 
 > ⚠️ Trocar a `ENCRYPTION_KEY` depois que bancos já foram criados torna as senhas gravadas ilegíveis. O painel avisa em vez de gravar um valor corrompido por cima.
 

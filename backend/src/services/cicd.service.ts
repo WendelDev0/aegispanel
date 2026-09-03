@@ -317,7 +317,12 @@ export class CicdService {
 
     if (app.sourceType === 'git' && app.gitUrl) await assertSafeGitUrl(app.gitUrl);
 
-    await NodeService.assertDeployTarget(app);
+    const target = await NodeService.assertDeployTarget(app);
+    const dockerClient = await NodeService.getClient(target.nodeId);
+    const isRemote = target.isRemote;
+    const portOpts = isRemote
+      ? { client: dockerClient, nodeId: target.nodeId }
+      : { nodeId: target.nodeId };
 
     const requestedCommitHash = safeCommitHash(options.commitHash);
     let commitHash = requestedCommitHash || 'unknown';
@@ -372,7 +377,29 @@ export class CicdService {
       percentage: 10,
     });
 
-    if (!(await dockerService.testConnection())) {
+    if (isRemote) {
+      try {
+        await dockerClient.ping();
+      } catch (err: any) {
+        logs += `[${new Date().toISOString()}] ❌ Erro: Docker remoto indisponível: ${err.message}\n`;
+        deployment.status = 'failed';
+        deployment.buildLogs = logs;
+        dbStorage.saveDeployment(deployment);
+        this.emitProgress(app.id, {
+          step: 1,
+          stepName: 'Falha Docker Remoto',
+          line: 'Docker remoto offline',
+          status: 'failed',
+          percentage: 100,
+        });
+        throw new Error(`Docker Engine offline no nó remoto: ${err.message}`);
+      }
+      log(`[${new Date().toISOString()}] 🖥️ Deploy no nó remoto "${target.nodeId}" (imagem)...\n`, {
+        step: 1,
+        stepName: 'Nó remoto',
+        percentage: 12,
+      });
+    } else if (!(await dockerService.testConnection())) {
       logs += `[${new Date().toISOString()}] ❌ Erro: Docker Engine não está disponível no servidor.\n`;
       deployment.status = 'failed';
       deployment.buildLogs = logs;
@@ -399,10 +426,10 @@ export class CicdService {
     // bookkeeping the panel can redo itself. A port the user chose explicitly
     // is left alone: silently moving it would break whatever they pointed at
     // it, so that case fails with the name of the container holding it.
-    if (!(await PortService.isAvailable(app.port, app.containerId))) {
+    if (!(await PortService.isAvailable(app.port, app.containerId, portOpts))) {
       if (app.autoPort !== false) {
         const previousPort = app.port;
-        app.port = await PortService.allocate(undefined, app.containerId);
+        app.port = await PortService.allocate(undefined, app.containerId, portOpts);
         dbStorage.saveApp(app);
         log(
           `[${new Date().toISOString()}] 🔀 Porta :${previousPort} ocupada; a aplicação foi realocada automaticamente para :${app.port}.
@@ -410,7 +437,7 @@ export class CicdService {
           { step: 1, stepName: 'Porta realocada', percentage: 15 }
         );
       } else {
-        const conflict = await PortService.describeConflict(app.port, app.containerId);
+        const conflict = await PortService.describeConflict(app.port, app.containerId, portOpts);
         throw new Error(
           `${conflict || `A porta :${app.port} está em uso.`} Escolha outra porta nas configurações da aplicação, ou deixe o campo vazio para atribuição automática.`
         );
@@ -620,12 +647,16 @@ export class CicdService {
           percentage: 60,
         });
 
+        // Remote image deploys publish on 0.0.0.0 so panel Caddy can reach the
+        // node's host port; local apps stay on APP_BIND_IP (usually loopback).
         app.containerId = await dockerService.createAndStartContainer({
           name: containerName,
           image,
           env: envList,
           ports,
-          bindIp: CONFIG.APP_BIND_IP,
+          bindIp: isRemote ? '0.0.0.0' : CONFIG.APP_BIND_IP,
+          client: isRemote ? dockerClient : undefined,
+          joinPanelNetwork: !isRemote,
         });
         logs += `[${new Date().toISOString()}] 🚀 Container criado com ID: ${app.containerId.substring(0, 12)}\n`;
       }
@@ -730,6 +761,10 @@ export class CicdService {
     const targetDeployment = dbStorage.getDeployments(appId).find((d) => d.id === deploymentId);
     if (!targetDeployment) throw new Error('Histórico de deploy alvo não encontrado');
 
+    const target = await NodeService.assertDeployTarget(app);
+    const dockerClient = await NodeService.getClient(target.nodeId);
+    const isRemote = target.isRemote;
+
     const containerName = containerNameForApp(app.name);
     const versionedTag = `${containerName}:${deploymentId}`;
     const envList = Object.entries(app.env || {}).map(([k, v]) => `${k}=${v}`);
@@ -737,7 +772,7 @@ export class CicdService {
 
     // Exact tag comparison. A substring match could select an image belonging
     // to a different application whose tag happens to contain this id.
-    const images = await dockerService.listImages();
+    const images = await dockerService.listImages(isRemote ? dockerClient : undefined);
     const hasImage = images.some(
       (img: any) => Array.isArray(img.repoTags) && img.repoTags.includes(versionedTag)
     );
@@ -764,7 +799,9 @@ export class CicdService {
       image: versionedTag,
       env: envList,
       ports,
-      bindIp: CONFIG.APP_BIND_IP,
+      bindIp: isRemote ? '0.0.0.0' : CONFIG.APP_BIND_IP,
+      client: isRemote ? dockerClient : undefined,
+      joinPanelNetwork: !isRemote,
     });
 
     app.status = 'running';

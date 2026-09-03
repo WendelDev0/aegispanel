@@ -58,8 +58,8 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 - [x] Vitest + Testing Library no frontend
 - [x] Testes dos modais de deploy + CreateAppModal (seletor de nó)
 - [x] `ServerNode.status` alinhado a 4 estados (`online | offline | unknown | error`) no tipo compartilhado
-- [ ] Continuar a quebrar `AppsPage` (env/webhook/workflow/live deploy/logs ainda inline)
-- [ ] Cobertura de testes UI além dos modais já extraídos
+- [x] Continuar a quebrar `AppsPage` (env/webhook/workflow/live deploy/logs ainda inline)
+- [x] Cobertura de testes UI além dos modais já extraídos
 
 ---
 
@@ -72,8 +72,8 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 - [x] Recusar nós ausentes / offline / error
 - [x] Remotes git/dockerfile recusados (intent: image-only em remoto)
 - [x] Seletor de nó na UI de criar/editar app
-- [ ] Deploy remoto **real** (build/start no Docker do nó via SSH, não só gate) — **bloco 3**
-- [ ] Sync Caddy / rede quando o app roda em outro host — **bloco 3**
+- [x] Deploy remoto **real** (build/start no Docker do nó via SSH, não só gate) — **bloco 3**
+- [x] Sync Caddy / rede quando o app roda em outro host — **bloco 3** (`reverse_proxy hostIp|sshHost:port`; bind `0.0.0.0` no nó; sem aegis-net remoto)
 
 ---
 
@@ -86,8 +86,8 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 - [x] Self-update bloqueado em `LOCAL_MODE`
 - [x] Seção “Autogestão do Painel” em Settings
 - [x] Testes de bloqueio LOCAL_MODE / alvo de log inválido
-- [ ] Documentar / exigir `AEGIS_COMPOSE_DIR` no install quando o cwd não achar o compose — **bloco 4**
-- [ ] Feedback de progresso do self-update em tempo real (stream), não só resposta HTTP — **bloco 4**
+- [x] Documentar / exigir `AEGIS_COMPOSE_DIR` no install quando o cwd não achar o compose — **bloco 4**
+- [x] Feedback de progresso do self-update em tempo real (stream), não só resposta HTTP — **bloco 4**
 
 ---
 
@@ -103,7 +103,7 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 - [x] Merge do PR #1 em `main`
 - [x] Pull + `docker compose up -d --build` na VPS
 - [x] Checar logs da stack na VPS pós-deploy (backend healthy)
-- [ ] `npm run check` verde no CI do `main` (CI GitHub bloqueado por billing da conta — re-rodar após desbloquear)
+- [ ] `npm run check` verde no CI do `main` — **local verde** (2026-09-03: typecheck backend+frontend + 79 testes backend). GitHub Actions no `main` **não chega a executar jobs**: conta locked por billing (`The job was not started because your account is locked due to a billing issue.`, run [33789764014](https://github.com/WendelDev0/aegispanel/actions/runs/33789764014)). Re-rodar o workflow após desbloquear em Settings → Billing.
 
 ---
 
@@ -115,21 +115,21 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 
 ### Bloco 3 — Deploy remoto real
 
-- [ ] Build/start no Docker do nó via SSH
-- [ ] Sync Caddy / rede cross-host
+- [x] Build/start no Docker do nó via SSH (image-only; git/dockerfile ainda locais)
+- [x] Sync Caddy cross-host (`hostIp|sshHost:port` para apps remotas)
 
 
 
 ### Bloco 4 — Polish Fase 5
 
-- [ ] `AEGIS_COMPOSE_DIR` no install
-- [ ] Stream do self-update
+- [x] `AEGIS_COMPOSE_DIR` no install
+- [x] Stream do self-update
 
 
 
 ### Bloco 5 — Resto / evolução
 
-- [ ] Itens restantes do AppsPage + testes UI
+- [x] Itens restantes do AppsPage + testes UI
 - [ ] Evolução pós-PRD abaixo
 
 ---

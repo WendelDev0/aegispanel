@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { CONFIG } from '../config.js';
 import { dockerService } from './docker.service.js';
+import { emit } from '../realtime.js';
 
 /** Only these container name prefixes may be tailed through PanelService. */
 const ALLOWED_LOG_TARGETS = new Set([
@@ -12,6 +13,18 @@ const ALLOWED_LOG_TARGETS = new Set([
   'aegis-nginx',
 ]);
 
+const COMPOSE_FILENAMES = ['docker-compose.yml', 'compose.yml'] as const;
+
+export type SelfUpdateEvent = {
+  line: string;
+  status: 'running' | 'success' | 'failed';
+  done?: boolean;
+};
+
+function hasComposeFile(dir: string): boolean {
+  return COMPOSE_FILENAMES.some((name) => fs.existsSync(path.join(dir, name)));
+}
+
 /**
  * Operations against the panel's own Compose stack.
  *
@@ -20,10 +33,25 @@ const ALLOWED_LOG_TARGETS = new Set([
  * containers sitting on a shared Docker socket.
  */
 export class PanelService {
+  private static updating = false;
+
+  static hasComposeFile(dir: string): boolean {
+    return hasComposeFile(dir);
+  }
+
   static resolveComposeDir(): string {
-    if (process.env.AEGIS_COMPOSE_DIR) {
-      return path.resolve(process.env.AEGIS_COMPOSE_DIR);
+    const fromEnv = process.env.AEGIS_COMPOSE_DIR?.trim();
+    if (fromEnv) {
+      const dir = path.resolve(fromEnv);
+      if (!hasComposeFile(dir)) {
+        throw new Error(
+          `AEGIS_COMPOSE_DIR aponta para "${dir}", mas docker-compose.yml (ou compose.yml) não foi encontrado. ` +
+            `Ajuste a variável no .env para o diretório do clone (ex: /opt/aegispanel).`
+        );
+      }
+      return dir;
     }
+
     // Default: repo root is one level above backend cwd when running from source,
     // or the install path `/opt/aegispanel` when packaged.
     const candidates = [
@@ -32,15 +60,12 @@ export class PanelService {
       '/opt/aegispanel',
     ];
     for (const dir of candidates) {
-      if (
-        fs.existsSync(path.join(dir, 'docker-compose.yml')) ||
-        fs.existsSync(path.join(dir, 'compose.yml'))
-      ) {
-        return dir;
-      }
+      if (hasComposeFile(dir)) return dir;
     }
     throw new Error(
-      'Não foi possível localizar o docker-compose.yml. Defina AEGIS_COMPOSE_DIR.'
+      'Não foi possível localizar o docker-compose.yml. ' +
+        'Defina AEGIS_COMPOSE_DIR no .env para o diretório do compose ' +
+        '(o install.sh grava isso automaticamente).'
     );
   }
 
@@ -75,6 +100,7 @@ export class PanelService {
   /**
    * Pulls the latest images / rebuilds the panel stack.
    * Blocked in LOCAL_MODE — a local panel_db must never restart production.
+   * Chunks are also emitted on `panel:self-update` so the UI can stream.
    */
   static async selfUpdate(): Promise<{ ok: boolean; output: string }> {
     if (CONFIG.LOCAL_MODE) {
@@ -83,12 +109,57 @@ export class PanelService {
       );
     }
 
+    if (this.updating) {
+      throw new Error('Já existe um self-update em andamento.');
+    }
+
+    this.updating = true;
     const composeDir = this.resolveComposeDir();
-    const output = await this.runCompose(composeDir, ['up', '-d', '--build']);
-    return { ok: true, output };
+    this.emitUpdate({
+      line: `[aegis] Compose: ${composeDir}\n[aegis] docker compose up -d --build\n`,
+      status: 'running',
+    });
+
+    try {
+      const output = await this.runCompose(composeDir, ['up', '-d', '--build'], (chunk) => {
+        this.emitUpdate({ line: chunk, status: 'running' });
+      });
+      const safe = this.redactPanelSecrets(output);
+      this.emitUpdate({ line: `\n[aegis] Concluído.\n`, status: 'success', done: true });
+      return { ok: true, output: safe };
+    } catch (err: any) {
+      const message = this.redactPanelSecrets(err.message || String(err));
+      this.emitUpdate({ line: `\n[aegis] Falhou: ${message}\n`, status: 'failed', done: true });
+      throw err;
+    } finally {
+      this.updating = false;
+    }
   }
 
-  private static runCompose(cwd: string, args: string[]): Promise<string> {
+  /** Strips panel secrets if compose ever echoes them. */
+  static redactPanelSecrets(text: string): string {
+    let safe = text;
+    for (const key of ['JWT_SECRET', 'ENCRYPTION_KEY'] as const) {
+      const value = process.env[key];
+      if (value && value.length >= 8) {
+        safe = safe.split(value).join('***');
+      }
+    }
+    return safe;
+  }
+
+  private static emitUpdate(event: SelfUpdateEvent): void {
+    emit('panel:self-update', {
+      ...event,
+      line: this.redactPanelSecrets(event.line),
+    });
+  }
+
+  private static runCompose(
+    cwd: string,
+    args: string[],
+    onOutput?: (chunk: string) => void
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
       const child = spawn('docker', ['compose', ...args], {
         cwd,
@@ -102,14 +173,20 @@ export class PanelService {
         reject(new Error('Self-update excedeu o tempo limite (10 min).'));
       }, 10 * 60 * 1000);
 
-      child.stdout.on('data', (chunk) => {
-        stdout += chunk.toString();
-        if (stdout.length > 512 * 1024) stdout = stdout.slice(-512 * 1024);
-      });
-      child.stderr.on('data', (chunk) => {
-        stderr += chunk.toString();
-        if (stderr.length > 512 * 1024) stderr = stderr.slice(-512 * 1024);
-      });
+      const consume = (chunk: Buffer, bucket: 'stdout' | 'stderr') => {
+        const text = chunk.toString();
+        if (bucket === 'stdout') {
+          stdout += text;
+          if (stdout.length > 512 * 1024) stdout = stdout.slice(-512 * 1024);
+        } else {
+          stderr += text;
+          if (stderr.length > 512 * 1024) stderr = stderr.slice(-512 * 1024);
+        }
+        onOutput?.(text);
+      };
+
+      child.stdout.on('data', (chunk) => consume(chunk, 'stdout'));
+      child.stderr.on('data', (chunk) => consume(chunk, 'stderr'));
       child.on('error', (err) => {
         clearTimeout(timer);
         reject(err);

@@ -3,7 +3,9 @@ import path from 'path';
 import { CONFIG } from '../config.js';
 import { dbStorage } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
-import { containerNameForApp, isValidDomain } from '../utils/naming.js';
+import { NodeService } from './node.service.js';
+import { isValidDomain } from '../utils/naming.js';
+import { resolveAppUpstream } from '../utils/app-upstream.js';
 
 const CADDY_CONTAINER = CONFIG.CADDY_CONTAINER;
 
@@ -144,7 +146,12 @@ export class CaddyService {
 
     const rendered = new Set<string>();
 
-    const addSite = (rawDomain: string, appName: string | undefined, hostPort: number, internalPort: number) => {
+    const addSite = (
+      rawDomain: string,
+      app: { name: string; nodeId?: string; port: number; internalPort?: number } | undefined,
+      hostPort: number,
+      internalPort: number
+    ) => {
       const domain = rawDomain.toLowerCase().trim();
       if (!domain || rendered.has(domain)) return;
       if (!isValidDomain(domain)) {
@@ -153,10 +160,13 @@ export class CaddyService {
       }
       rendered.add(domain);
 
-      // Prefer the container name over the host port: it stays correct when
-      // the host port changes and keeps traffic on the internal network.
-      const upstream = appName
-        ? `${containerNameForApp(appName)}:${internalPort}`
+      // Prefer container DNS on the panel network; remote apps use hostIp:port
+      // because Caddy cannot resolve names on another Docker daemon.
+      const upstream = app
+        ? resolveAppUpstream(
+            { name: app.name, nodeId: app.nodeId, port: app.port || hostPort, internalPort: app.internalPort || internalPort },
+            app.nodeId ? NodeService.getById(app.nodeId) : null
+          )
         : `host.docker.internal:${hostPort}`;
 
       content += this.renderSite(domain, upstream, CONFIG.LOCAL_MODE || isLocalDomain(domain));
@@ -183,12 +193,12 @@ export class CaddyService {
       const matchingApp =
         allApps.find((a) => a.domain?.toLowerCase().trim() === d.domain.toLowerCase().trim()) ||
         allApps.find((a) => a.port === d.targetPort);
-      addSite(d.domain, matchingApp?.name, d.targetPort, matchingApp?.internalPort || d.targetPort);
+      addSite(d.domain, matchingApp, d.targetPort, matchingApp?.internalPort || d.targetPort);
     }
 
     for (const app of allApps) {
       if (!app.domain) continue;
-      addSite(app.domain, app.name, app.port, app.internalPort || 3000);
+      addSite(app.domain, app, app.port, app.internalPort || 3000);
     }
 
     fs.writeFileSync(this.caddyfilePath, content, 'utf-8');

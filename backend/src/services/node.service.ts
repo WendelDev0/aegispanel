@@ -189,9 +189,8 @@ export class NodeService {
    *
    * Remote git/dockerfile builds are refused: the pipeline still clones and
    * builds against the local Docker socket. Image-only apps may target a remote
-   * node once its health check reports online — the start path will use that
-   * node's client in a later iteration; for now we refuse offline/missing nodes
-   * so the operator cannot silently deploy to the wrong machine.
+   * node once its health check reports online — create/start then uses that
+   * node's Docker client over SSH.
    */
   static async assertDeployTarget(app: {
     nodeId?: string;

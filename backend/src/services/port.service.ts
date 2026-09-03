@@ -1,5 +1,7 @@
+import type Docker from 'dockerode';
 import { dbStorage } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
+import { LOCAL_NODE_ID } from './node.service.js';
 
 /**
  * Host ports that must never be handed out automatically.
@@ -10,6 +12,13 @@ const RESERVED_PORTS = new Set([22, 80, 443, 3000, 4000]);
 
 const RANGE_START = 4100;
 const RANGE_END = 9999;
+
+export interface PortLookupOptions {
+  /** Docker daemon to query for published ports (remote node). Defaults to local. */
+  client?: Docker;
+  /** Only treat panel apps on this node as occupying ports. */
+  nodeId?: string;
+}
 
 export class PortService {
   /**
@@ -23,17 +32,34 @@ export class PortService {
    * `excludeContainerId` lets a redeploy ignore the app's own running
    * container, which legitimately holds the port it is about to reuse.
    */
-  static async getUsedPorts(excludeContainerId?: string): Promise<Set<number>> {
+  static async getUsedPorts(
+    excludeContainerId?: string,
+    opts?: PortLookupOptions
+  ): Promise<Set<number>> {
     const used = new Set<number>(RESERVED_PORTS);
+    const nodeId = opts?.nodeId || LOCAL_NODE_ID;
+    const isRemote = Boolean(opts?.client) || (nodeId !== LOCAL_NODE_ID);
 
     try {
-      const containers = await dockerService.listContainers(false);
-      for (const container of containers) {
-        if (excludeContainerId && container.id.startsWith(excludeContainerId.substring(0, 12))) {
-          continue;
+      if (opts?.client) {
+        const containers = await opts.client.listContainers({ all: false });
+        for (const container of containers) {
+          if (excludeContainerId && container.Id.startsWith(excludeContainerId.substring(0, 12))) {
+            continue;
+          }
+          for (const port of container.Ports || []) {
+            if (port.PublicPort) used.add(port.PublicPort);
+          }
         }
-        for (const port of container.ports) {
-          if (port.publicPort) used.add(port.publicPort);
+      } else {
+        const containers = await dockerService.listContainers(false);
+        for (const container of containers) {
+          if (excludeContainerId && container.id.startsWith(excludeContainerId.substring(0, 12))) {
+            continue;
+          }
+          for (const port of container.ports) {
+            if (port.publicPort) used.add(port.publicPort);
+          }
         }
       }
     } catch {
@@ -43,11 +69,17 @@ export class PortService {
     // Records count as taken even when their container is stopped, so
     // restarting a stopped app does not find its port reassigned.
     for (const app of dbStorage.getApps()) {
+      const appNode = app.nodeId || LOCAL_NODE_ID;
+      if (appNode !== nodeId) continue;
       used.add(app.port);
     }
-    for (const db of dbStorage.getDatabases()) {
-      used.add(db.port);
-      if (db.guiPort) used.add(db.guiPort);
+
+    // Databases always live on the panel host.
+    if (!isRemote) {
+      for (const db of dbStorage.getDatabases()) {
+        used.add(db.port);
+        if (db.guiPort) used.add(db.guiPort);
+      }
     }
 
     return used;
@@ -61,11 +93,15 @@ export class PortService {
    * returned. Callers that pass nothing get a port without the user having to
    * think about it at all.
    */
-  static async allocate(preferred?: number, excludeContainerId?: string): Promise<number> {
+  static async allocate(
+    preferred?: number,
+    excludeContainerId?: string,
+    opts?: PortLookupOptions
+  ): Promise<number> {
     if (preferred !== undefined && (!Number.isInteger(preferred) || preferred < 1024 || preferred > 65535)) {
       throw new Error('A porta deve ser um número inteiro entre 1024 e 65535.');
     }
-    const used = await this.getUsedPorts(excludeContainerId);
+    const used = await this.getUsedPorts(excludeContainerId, opts);
 
     if (preferred && !used.has(preferred)) {
       return preferred;
@@ -81,25 +117,36 @@ export class PortService {
   }
 
   /** Whether a specific host port can be used right now. */
-  static async isAvailable(port: number, excludeContainerId?: string): Promise<boolean> {
+  static async isAvailable(
+    port: number,
+    excludeContainerId?: string,
+    opts?: PortLookupOptions
+  ): Promise<boolean> {
     if (!Number.isInteger(port) || port < 1024 || port > 65535) return false;
-    const used = await this.getUsedPorts(excludeContainerId);
+    const used = await this.getUsedPorts(excludeContainerId, opts);
     return !used.has(port);
   }
 
   /** Explains why a port cannot be used, for a validation message. */
-  static async describeConflict(port: number, excludeContainerId?: string): Promise<string | null> {
+  static async describeConflict(
+    port: number,
+    excludeContainerId?: string,
+    opts?: PortLookupOptions
+  ): Promise<string | null> {
     if (RESERVED_PORTS.has(port)) {
       return `A porta ${port} é reservada pelo sistema ou pelo próprio painel.`;
     }
 
-    const app = dbStorage.getApps().find((a) => a.port === port);
+    const nodeId = opts?.nodeId || LOCAL_NODE_ID;
+    const app = dbStorage.getApps().find((a) => a.port === port && (a.nodeId || LOCAL_NODE_ID) === nodeId);
     if (app) return `A porta ${port} já está atribuída à aplicação "${app.name}".`;
 
-    const db = dbStorage.getDatabases().find((d) => d.port === port || d.guiPort === port);
-    if (db) return `A porta ${port} já está atribuída ao banco de dados "${db.name}".`;
+    if (!opts?.client && nodeId === LOCAL_NODE_ID) {
+      const db = dbStorage.getDatabases().find((d) => d.port === port || d.guiPort === port);
+      if (db) return `A porta ${port} já está atribuída ao banco de dados "${db.name}".`;
+    }
 
-    if (!(await this.isAvailable(port, excludeContainerId))) {
+    if (!(await this.isAvailable(port, excludeContainerId, opts))) {
       return `A porta ${port} já está em uso por outro contêiner nesta máquina.`;
     }
 

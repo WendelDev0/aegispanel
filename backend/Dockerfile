@@ -9,8 +9,9 @@ RUN npm run build
 FROM node:22-alpine
 WORKDIR /app
 
-# Install git, docker CLI and tools for CI/CD builds
-RUN apk add --no-cache git docker-cli curl bash
+# git for CI/CD clones; docker CLI + compose plugin so self-update can
+# rebuild this stack through the mounted daemon socket.
+RUN apk add --no-cache git docker-cli docker-cli-compose curl bash
 
 COPY package*.json ./
 RUN npm ci --omit=dev
