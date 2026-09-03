@@ -78,6 +78,10 @@ systemRouter.get('/stats', async (req: Request, res: Response) => {
   }
 });
 
+systemRouter.get('/storage-health', requireAdmin, (req: Request, res: Response) => {
+  res.json(dbStorage.getStorageHealth());
+});
+
 systemRouter.get('/history', (req: Request, res: Response) => {
   const range = (req.query.range as string) || 'realtime';
   res.json(

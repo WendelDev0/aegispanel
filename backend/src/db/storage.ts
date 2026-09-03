@@ -745,6 +745,81 @@ class JsonStorage {
     return newRecord;
   }
 
+  // Storage health
+  /**
+   * Returns the on-disk size of the panel database and record counts.
+   *
+   * Used by the metrics loop to alert when the file grows beyond a threshold,
+   * which would indicate unbounded growth in deployments or activities.
+   */
+  getStorageHealth(): {
+    fileSizeBytes: number;
+    fileSizeMB: number;
+    recordCounts: Record<string, number>;
+  } {
+    let fileSizeBytes = 0;
+    try {
+      fileSizeBytes = fs.statSync(this.filePath).size;
+    } catch { /* file may not exist yet */ }
+
+    return {
+      fileSizeBytes,
+      fileSizeMB: Math.round((fileSizeBytes / 1024 / 1024) * 100) / 100,
+      recordCounts: {
+        users: this.data.users.length,
+        apps: this.data.apps.length,
+        databases: this.data.databases.length,
+        deployments: this.data.deployments?.length ?? 0,
+        cronJobs: this.data.cronJobs?.length ?? 0,
+        domains: this.data.domains.length,
+        backups: this.data.backups?.length ?? 0,
+        firewallRules: this.data.firewallRules?.length ?? 0,
+        serverNodes: this.data.serverNodes?.length ?? 0,
+        activities: this.data.activities?.length ?? 0,
+      },
+    };
+  }
+
+  /**
+   * Trims old deployment logs that are the main cause of unbounded growth.
+   *
+   * Build logs can be several hundred KB each; with frequent deploys the file
+   * balloons. This keeps the most recent N per app and truncates logs on
+   * older entries to a short summary.
+   */
+  pruneDeployments(maxPerApp: number = 30, logTruncateLength: number = 500): number {
+    if (!this.data.deployments?.length) return 0;
+
+    const byApp = new Map<string, DeploymentRecord[]>();
+    for (const d of this.data.deployments) {
+      const list = byApp.get(d.appId) || [];
+      list.push(d);
+      byApp.set(d.appId, list);
+    }
+
+    let pruned = 0;
+    for (const [, deploys] of byApp) {
+      // Sort newest first.
+      deploys.sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
+      for (let i = 0; i < deploys.length; i++) {
+        if (i >= maxPerApp) {
+          // Remove entirely.
+          this.data.deployments = this.data.deployments.filter(d => d.id !== deploys[i].id);
+          pruned++;
+        } else if (i >= 10 && deploys[i].buildLogs.length > logTruncateLength) {
+          // Keep the record but truncate the log.
+          deploys[i].buildLogs =
+            deploys[i].buildLogs.slice(0, logTruncateLength) +
+            `\n\n[… log truncado — deploy antigo]`;
+          pruned++;
+        }
+      }
+    }
+
+    if (pruned > 0) this.save();
+    return pruned;
+  }
+
   // Settings
   getSettings(): PanelSettings {
     return this.data.settings;

@@ -11,6 +11,7 @@ import { CaddyService } from './services/caddy.service.js';
 import { CronService } from './services/cron.service.js';
 import { AnalyticsService } from './services/analytics.service.js';
 import { authenticateToken, AuthUser } from './middleware/auth.js';
+import { dbStorage } from './db/storage.js';
 
 // Routers
 import { authRouter } from './routes/auth.routes.js';
@@ -165,6 +166,66 @@ const metricsTimer = setInterval(async () => {
   }
 }, METRICS_INTERVAL_MS);
 
+/**
+ * Storage health monitor — checks the panel_db.json size periodically.
+ *
+ * Build logs are the main unbounded growth vector: each deploy can add
+ * hundreds of KB, and the entire document is rewritten on every mutation.
+ * When the file exceeds 10 MB, old deployment logs are pruned automatically.
+ * At 20 MB an alert is sent, because the file is big enough to cause visible
+ * write latency on every state change.
+ */
+const STORAGE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // every 5 min
+const STORAGE_PRUNE_THRESHOLD_MB = 10;
+const STORAGE_ALERT_THRESHOLD_MB = 20;
+let lastStorageAlertAt = 0;
+
+const storageTimer = setInterval(() => {
+  try {
+    const health = dbStorage.getStorageHealth();
+
+    // Auto-prune old deployment logs when the file gets large.
+    if (health.fileSizeMB >= STORAGE_PRUNE_THRESHOLD_MB) {
+      const pruned = dbStorage.pruneDeployments();
+      if (pruned > 0) {
+        console.warn(
+          `📦 Storage auto-prune: ${pruned} registros de deploy antigos limpos ` +
+          `(panel_db.json estava em ${health.fileSizeMB} MB).`
+        );
+      }
+    }
+
+    // Alert when the file is still large after pruning.
+    const now = Date.now();
+    if (
+      health.fileSizeMB >= STORAGE_ALERT_THRESHOLD_MB &&
+      now - lastStorageAlertAt > 60 * 60 * 1000 // at most once per hour
+    ) {
+      lastStorageAlertAt = now;
+      const detail =
+        `panel_db.json atingiu ${health.fileSizeMB} MB. ` +
+        `Registros: ${Object.entries(health.recordCounts).map(([k, v]) => `${k}: ${v}`).join(', ')}.`;
+      console.warn(`⚠️ ${detail}`);
+
+      AlertService.broadcastNotification(
+        '⚠️ Alerta: Armazenamento do painel crescendo',
+        detail,
+        'alert',
+        true
+      );
+      dbStorage.addActivity({
+        type: 'system',
+        title: 'Armazenamento do painel elevado',
+        description: detail,
+        status: 'warning',
+        metadata: { fileSizeMB: health.fileSizeMB, ...health.recordCounts },
+      });
+    }
+  } catch (err: any) {
+    console.warn('Falha ao verificar saúde do storage:', err?.message);
+  }
+}, STORAGE_CHECK_INTERVAL_MS);
+
 server.listen(CONFIG.PORT, () => {
   console.log(`========================================================`);
   console.log(`🛡️  AegisPanel Daemon running on port ${CONFIG.PORT}`);
@@ -196,6 +257,7 @@ server.listen(CONFIG.PORT, () => {
 function shutdown(signal: string) {
   console.log(`\n${signal} recebido, encerrando...`);
   clearInterval(metricsTimer);
+  clearInterval(storageTimer);
   CronService.stop();
   AnalyticsService.stop();
   io.close();
