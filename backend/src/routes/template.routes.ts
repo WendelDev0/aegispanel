@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { TemplateService } from '../services/template.service.js';
 import { AppService } from '../services/app.service.js';
 import { authMiddleware, requireWrite } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import { installTemplateBodySchema, upgradeAppBodySchema } from '../validation/schemas.js';
 
 export const templateRouter = Router();
 
@@ -20,14 +22,9 @@ templateRouter.get('/updates', (req: Request, res: Response) => {
   }
 });
 
-templateRouter.post('/upgrade-app', requireWrite, async (req: Request, res: Response): Promise<void> => {
+templateRouter.post('/upgrade-app', requireWrite, validateBody(upgradeAppBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { appId } = req.body;
-    if (!appId) {
-      res.status(400).json({ error: 'App ID é obrigatório' });
-      return;
-    }
-
     const updatedApp = await TemplateService.upgradeInstalledApp(appId);
     res.json(AppService.toPublic(updatedApp));
   } catch (err: any) {
@@ -35,14 +32,9 @@ templateRouter.post('/upgrade-app', requireWrite, async (req: Request, res: Resp
   }
 });
 
-templateRouter.post('/install', requireWrite, async (req: Request, res: Response): Promise<void> => {
+templateRouter.post('/install', requireWrite, validateBody(installTemplateBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { templateId, customPort, customName, apiKey, postgresDbId, redisDbId, customEnv } = req.body;
-    if (!templateId) {
-      res.status(400).json({ error: 'Template ID é obrigatório' });
-      return;
-    }
-
     const app = await TemplateService.installTemplate(templateId, {
       customPort: customPort ? parseInt(customPort) : undefined,
       customName,

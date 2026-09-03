@@ -3,6 +3,12 @@ import express from 'express';
 import fs from 'fs';
 import { FileService } from '../services/file.service.js';
 import { authMiddleware, requireAdmin, requireWrite } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import {
+  fileWriteBodySchema,
+  fileUploadBodySchema,
+  fileFolderBodySchema,
+} from '../validation/schemas.js';
 
 export const fileRouter = Router();
 
@@ -30,13 +36,9 @@ fileRouter.get('/read', (req: Request, res: Response): void => {
   }
 });
 
-fileRouter.post('/write', requireWrite, (req: Request, res: Response): void => {
+fileRouter.post('/write', requireWrite, validateBody(fileWriteBodySchema), (req: Request, res: Response): void => {
   try {
     const { path: relPath, content } = req.body;
-    if (!relPath) {
-      res.status(400).json({ error: 'Caminho do arquivo é obrigatório' });
-      return;
-    }
     FileService.writeFile(relPath, content || '');
     res.json({ success: true });
   } catch (err: any) {
@@ -44,7 +46,7 @@ fileRouter.post('/write', requireWrite, (req: Request, res: Response): void => {
   }
 });
 
-fileRouter.post('/upload', requireWrite, uploadBodyParser, (req: Request, res: Response): void => {
+fileRouter.post('/upload', requireWrite, uploadBodyParser, validateBody(fileUploadBodySchema), (req: Request, res: Response): void => {
   try {
     const { path: relPath, base64 } = req.body;
     if (!relPath || !base64) {
@@ -71,13 +73,9 @@ fileRouter.get('/download', (req: Request, res: Response): void => {
   }
 });
 
-fileRouter.post('/create-folder', requireWrite, (req: Request, res: Response): void => {
+fileRouter.post('/create-folder', requireWrite, validateBody(fileFolderBodySchema), (req: Request, res: Response): void => {
   try {
     const { path: relPath } = req.body;
-    if (!relPath) {
-      res.status(400).json({ error: 'Caminho da pasta é obrigatório' });
-      return;
-    }
     FileService.createDirectory(relPath);
     res.json({ success: true });
   } catch (err: any) {

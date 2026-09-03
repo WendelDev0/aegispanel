@@ -3,6 +3,8 @@ import { dbStorage, ServerNode } from '../db/storage.js';
 import { NodeService, LOCAL_NODE_ID } from '../services/node.service.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { authMiddleware, requireAdmin } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import { createNodeBodySchema, updateNodeBodySchema } from '../validation/schemas.js';
 
 export const nodeRouter = Router();
 
@@ -60,7 +62,7 @@ nodeRouter.get('/', (req: Request, res: Response) => {
   res.json(NodeService.getAll().map(NodeService.toPublic));
 });
 
-nodeRouter.post('/', requireAdmin, (req: Request, res: Response): void => {
+nodeRouter.post('/', requireAdmin, validateBody(createNodeBodySchema), (req: Request, res: Response): void => {
   try {
     const { name, type, hostIp, location, sshHost, sshPort, sshUser, sshPrivateKey, sshPassphrase, sshHostFingerprint } = req.body;
 
@@ -140,7 +142,7 @@ nodeRouter.post('/', requireAdmin, (req: Request, res: Response): void => {
   }
 });
 
-nodeRouter.put('/:id', requireAdmin, (req: Request, res: Response): void => {
+nodeRouter.put('/:id', requireAdmin, validateBody(updateNodeBodySchema), (req: Request, res: Response): void => {
   try {
     const node = NodeService.getById(req.params.id);
     if (!node) {

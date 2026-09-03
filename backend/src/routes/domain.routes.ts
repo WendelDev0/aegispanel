@@ -4,6 +4,8 @@ import { CaddyService } from '../services/caddy.service.js';
 import { DomainService } from '../services/domain.service.js';
 import { isValidDomain } from '../utils/naming.js';
 import { authMiddleware, requireWrite, AuthRequest } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import { createDomainBodySchema, checkDnsBodySchema } from '../validation/schemas.js';
 
 export const domainRouter = Router();
 
@@ -47,7 +49,7 @@ domainRouter.get('/', (req: Request, res: Response) => {
 });
 
 // Check DNS propagation for any domain
-domainRouter.post('/check-dns', requireWrite, async (req: Request, res: Response): Promise<void> => {
+domainRouter.post('/check-dns', requireWrite, validateBody(checkDnsBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { domain } = req.body;
     if (!domain) {
@@ -88,7 +90,7 @@ domainRouter.post('/:id/renew-ssl', requireWrite, async (req: Request, res: Resp
   }
 });
 
-domainRouter.post('/', requireWrite, async (req: AuthRequest, res: Response): Promise<void> => {
+domainRouter.post('/', requireWrite, validateBody(createDomainBodySchema), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { domain, targetPort, targetContainer } = req.body;
     if (typeof domain !== 'string' || !targetPort) {

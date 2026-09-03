@@ -4,8 +4,8 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 
 **Como usar:** marque `[x]` = feito · `[ ]` = falta. Atualize este arquivo quando fechar um item.
 
-**Onde está o código das fases 1–5:** branch `cursor/prd-operational-maturity-4b81` / [PR #1](https://github.com/WendelDev0/aegispanel/pull/1)  
-**Status de entrega:** código implementado no PR · **ainda falta mergear no `main` e atualizar a VPS**.
+**Entrega fases 1–5:** [PR #1](https://github.com/WendelDev0/aegispanel/pull/1) **mergeado** em `main` (`19f263b`) · VPS atualizada em `/opt/aegispanel`.  
+**Bloco 2 (gaps leves):** branch `cursor/prd-block2-gaps` (Zod expandido + split Create/Edit/Files + seletor de nó).
 
 ---
 
@@ -39,7 +39,8 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 - [x] Middleware `validateBody`
 - [x] Schemas nas mutações principais (auth setup/login/change-password, apps, databases, cron)
 - [x] `createIpLimiter` compartilhado (login / setup / change-password)
-- [ ] Expandir Zod para **todas** as rotas de mutação restantes (nodes, domains, firewall, templates, settings patch, etc.)
+- [x] Expandir Zod nas mutações body-heavy restantes (users, update app/env/domain, inspect-repo, files, nodes, domains, firewall, query, templates, settings, import-state, test-alert)
+- [ ] Rotas só-ação sem body (`start`/`stop`/`restart`/`delete`/`run`/`toggle`) — opcional; baixo risco
 
 ---
 
@@ -47,11 +48,12 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 
 - [x] Extrair `DeployHistoryModal` de `AppsPage`
 - [x] Extrair `BuildLogsModal` de `AppsPage`
+- [x] Extrair `CreateAppModal` / `EditAppModal` / `AppFilesModal`
 - [x] Vitest + Testing Library no frontend
-- [x] Testes dos dois modais
+- [x] Testes dos modais de deploy + CreateAppModal (seletor de nó)
 - [x] `ServerNode.status` alinhado a 4 estados (`online | offline | unknown | error`) no tipo compartilhado
-- [ ] Continuar a quebrar `AppsPage` (ainda grande: create/env/files/webhook/workflow)
-- [ ] Cobertura de testes UI além dos modais de deploy
+- [ ] Continuar a quebrar `AppsPage` (env/webhook/workflow/live deploy/logs ainda inline)
+- [ ] Cobertura de testes UI além dos modais já extraídos
 
 ---
 
@@ -61,9 +63,9 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 - [x] `NodeService.assertDeployTarget`
 - [x] Recusar nós ausentes / offline / error
 - [x] Remotes git/dockerfile recusados (intent: image-only em remoto)
-- [ ] Deploy remoto **real** (build/start no Docker do nó via SSH, não só gate)
-- [ ] Seletor de nó na UI de criar/editar app
-- [ ] Sync Caddy / rede quando o app roda em outro host
+- [x] Seletor de nó na UI de criar/editar app
+- [ ] Deploy remoto **real** (build/start no Docker do nó via SSH, não só gate) — **bloco 3**
+- [ ] Sync Caddy / rede quando o app roda em outro host — **bloco 3**
 
 ---
 
@@ -74,28 +76,42 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 - [x] Self-update bloqueado em `LOCAL_MODE`
 - [x] Seção “Autogestão do Painel” em Settings
 - [x] Testes de bloqueio LOCAL_MODE / alvo de log inválido
-- [ ] Documentar / exigir `AEGIS_COMPOSE_DIR` no install quando o cwd não achar o compose
-- [ ] Feedback de progresso do self-update em tempo real (stream), não só resposta HTTP
+- [ ] Documentar / exigir `AEGIS_COMPOSE_DIR` no install quando o cwd não achar o compose — **bloco 4**
+- [ ] Feedback de progresso do self-update em tempo real (stream), não só resposta HTTP — **bloco 4**
 
 ---
 
 ## Critérios de aceite / entrega
 
-- [x] Typecheck backend OK (na branch do PR)
-- [x] Testes backend OK (na branch do PR)
-- [x] Typecheck frontend OK (na branch do PR)
-- [x] Vitest frontend OK (na branch do PR)
+- [x] Typecheck backend OK
+- [x] Testes backend OK
+- [x] Typecheck frontend OK
+- [x] Vitest frontend OK
 - [x] Commits Conventional Commits por fase
-- [ ] Merge do PR #1 em `main`
-- [ ] Pull + `docker compose up -d --build` na VPS
-- [ ] Checar logs da stack na VPS pós-deploy
-- [ ] `npm run check` verde no CI do `main` após merge
+- [x] Merge do PR #1 em `main`
+- [x] Pull + `docker compose up -d --build` na VPS
+- [x] Checar logs da stack na VPS pós-deploy (backend healthy)
+- [ ] `npm run check` verde no CI do `main` (CI GitHub bloqueado por billing da conta — re-rodar após desbloquear)
+
+---
+
+## Próximos blocos (ainda no PRD)
+
+### Bloco 3 — Deploy remoto real
+- [ ] Build/start no Docker do nó via SSH
+- [ ] Sync Caddy / rede cross-host
+
+### Bloco 4 — Polish Fase 5
+- [ ] `AEGIS_COMPOSE_DIR` no install
+- [ ] Stream do self-update
+
+### Bloco 5 — Resto / evolução
+- [ ] Itens restantes do AppsPage + testes UI
+- [ ] Evolução pós-PRD abaixo
 
 ---
 
 ## Próxima evolução (fora deste PRD)
-
-Prioridade sugerida depois de merge + VPS:
 
 ### Alta
 - [ ] Cluster multi-servidor completo (deploy remoto de verdade)
@@ -116,7 +132,7 @@ Prioridade sugerida depois de merge + VPS:
 
 | Símbolo | Significado |
 |---------|-------------|
-| `[x]` | Implementado (código no PR / branch) |
+| `[x]` | Implementado |
 | `[ ]` | Ainda falta |
 | Baseline | Já estava no `main` antes deste PRD |
-| Entrega | Só fecha de verdade após merge + update na VPS |
+| Bloco 3–5 | Próximas frentes após gaps leves |

@@ -34,16 +34,10 @@ import {
   Settings2,
   GitCommit,
   User,
-  Folder,
-  FolderOpen,
-  File,
-  Save,
-  ChevronRight,
-  ArrowLeft,
-  Sparkles,
-  Cpu,
   RotateCcw,
   Globe2,
+  Sparkles,
+  Save,
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { socket } from '../services/socket.js';
@@ -51,6 +45,9 @@ import { AppRecord, DeploymentRecord } from '../types/index.js';
 import { EnvEditor } from '../components/EnvEditor.js';
 import { DeployHistoryModal } from '../components/apps/DeployHistoryModal.js';
 import { BuildLogsModal } from '../components/apps/BuildLogsModal.js';
+import { CreateAppModal } from '../components/apps/CreateAppModal.js';
+import { EditAppModal } from '../components/apps/EditAppModal.js';
+import { AppFilesModal } from '../components/apps/AppFilesModal.js';
 
 interface AppsPageProps {
   /** Opens the analytics view already focused on this application. */
@@ -76,15 +73,6 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
   // Settings / Port Edit Modal
   const [selectedEditApp, setSelectedEditApp] = useState<AppRecord | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editPort, setEditPort] = useState('');
-  const [editInternalPort, setEditInternalPort] = useState('');
-  const [editImageName, setEditImageName] = useState('');
-  const [editGitUrl, setEditGitUrl] = useState('');
-  const [editBranch, setEditBranch] = useState('');
-  const [editGithubToken, setEditGithubToken] = useState('');
-  const [showTokenEdit, setShowTokenEdit] = useState(false);
-  const [savingEdit, setSavingEdit] = useState(false);
 
   // Env Editor modal
   const [selectedEnvApp, setSelectedEnvApp] = useState<AppRecord | null>(null);
@@ -98,16 +86,8 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
   const [domainInput, setDomainInput] = useState('');
   const [savingDomain, setSavingDomain] = useState(false);
 
-  // File Explorer Modal State
+  // File Explorer Modal
   const [selectedFileApp, setSelectedFileApp] = useState<AppRecord | null>(null);
-  const [currentSubPath, setCurrentSubPath] = useState('');
-  const [appFiles, setAppFiles] = useState<Array<{ name: string; path: string; isDirectory: boolean; sizeBytes: number; modifiedAt: string; extension?: string }>>([]);
-  const [selectedFileContent, setSelectedFileContent] = useState<{ filename: string; path: string; content: string; sizeBytes: number } | null>(null);
-  const [fileContentDraft, setFileContentDraft] = useState('');
-  const [savingFile, setSavingFile] = useState(false);
-  const [loadingFiles, setLoadingFiles] = useState(false);
-  const [fileFilterSearch, setFileFilterSearch] = useState('');
-  const [copiedFileCode, setCopiedFileCode] = useState(false);
 
   const [logsText, setLogsText] = useState('');
   const [logsLoading, setLogsLoading] = useState(false);
@@ -127,81 +107,9 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
   const [rollingBackId, setRollingBackId] = useState<string | null>(null);
 
-  // Create Form state
-  const [appName, setAppName] = useState('');
-  const [sourceType, setSourceType] = useState<'image' | 'git'>('git');
-  const [imageName, setImageName] = useState('nginx:alpine');
-  const [gitUrl, setGitUrl] = useState('https://github.com/usuario/meu-app.git');
-  const [branch, setBranch] = useState('main');
-  const [githubToken, setGithubToken] = useState('');
-  const [showTokenCreate, setShowTokenCreate] = useState(false);
-  const [port, setPort] = useState('');
-  const [internalPort, setInternalPort] = useState('3000');
-  const [createDomain, setCreateDomain] = useState('');
-  const [createEnvString, setCreateEnvString] = useState('NODE_ENV=production\nPORT=3000');
-  const [submitting, setSubmitting] = useState(false);
-
-  // Pre-Deploy Inspector State (Vercel Style)
-  const [inspectingRepo, setInspectingRepo] = useState(false);
-  const [inspectionResult, setInspectionResult] = useState<{
-    inspection: {
-      type: string;
-      frameworkName: string;
-      packageManager: string;
-      hasDockerfile: boolean;
-      buildCommand: string;
-      outputDir: string;
-      startCommand: string;
-      recommendedPort: number;
-      recommendedInternalPort: number;
-    };
-    commit?: {
-      hash: string;
-      message: string;
-      author: string;
-      date: string;
-    };
-  } | null>(null);
-
   // AI Prompt Help Modal
   const [showAiHelpModal, setShowAiHelpModal] = useState(false);
   const [copiedAiPrompt, setCopiedAiPrompt] = useState(false);
-
-  const handleInspectRepo = async (urlToInspect?: string) => {
-    const targetUrl = urlToInspect || gitUrl;
-    if (!targetUrl || targetUrl.includes('usuario/meu-app')) return;
-
-    try {
-      setInspectingRepo(true);
-      setInspectionResult(null);
-      const res = await api.post('/apps/inspect-repo', {
-        gitUrl: targetUrl.trim(),
-        branch: branch || 'main',
-        githubToken: githubToken || undefined,
-      });
-
-      if (res.data?.success && res.data.inspection) {
-        setInspectionResult(res.data);
-        if (res.data.inspection.recommendedInternalPort) {
-          setInternalPort(res.data.inspection.recommendedInternalPort.toString());
-        }
-        if (res.data.inspection.suggestedEnv && Object.keys(res.data.inspection.suggestedEnv).length > 0) {
-          const envLines = Object.entries(res.data.inspection.suggestedEnv)
-            .map(([k, v]) => `${k}=${v}`)
-            .join('\n');
-          setCreateEnvString(envLines);
-        }
-        if (!appName || appName.includes('meu-app')) {
-          const cleanName = targetUrl.split('/').pop()?.replace('.git', '') || '';
-          if (cleanName) setAppName(cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, '-'));
-        }
-      }
-    } catch (err: any) {
-      console.warn('Repo inspection notice:', err.message);
-    } finally {
-      setInspectingRepo(false);
-    }
-  };
 
   const fetchApps = async () => {
     try {
@@ -238,102 +146,17 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
     };
   }, []);
 
-  const handleCreateApp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    // Only the name is required. The port field is optional by design - left
-    // blank, the server allocates a free one - and requiring it here made the
-    // button do nothing at all for the case the field itself recommends.
-    if (!appName) return;
-
-    try {
-      setSubmitting(true);
-      const envObj: Record<string, string> = {};
-      createEnvString.split('\n').forEach(line => {
-        const parts = line.split('=');
-        if (parts.length >= 2) {
-          const key = parts[0].trim();
-          const val = parts.slice(1).join('=').trim();
-          if (key) envObj[key] = val;
-        }
-      });
-
-      const res = await api.post('/apps', {
-        name: appName,
-        sourceType,
-        imageName: sourceType === 'image' ? imageName : undefined,
-        gitUrl: sourceType === 'git' ? gitUrl : undefined,
-        branch: sourceType === 'git' ? branch : undefined,
-        githubToken: sourceType === 'git' && githubToken ? githubToken : undefined,
-        // Omitted when blank, so the server assigns a free host port.
-        port: port ? parseInt(port) : undefined,
-        internalPort: parseInt(internalPort),
-        domain: createDomain.trim() || undefined,
-        env: envObj,
-      });
-
-      const createdApp = res.data;
-      setShowCreateModal(false);
-      setAppName('');
-      setGithubToken('');
-      setCreateDomain('');
-      setInspectionResult(null);
-      fetchApps();
-
-      // Instantly open Live Streaming Build Progress Modal
-      setLiveDeployModal({
-        app: createdApp,
-        step: 1,
-        stepName: 'Inicializando Pipeline',
-        logs: `[${new Date().toLocaleTimeString('pt-BR')}] 🚀 Disparando build inicial para "${createdApp.name}"...\n`,
-        percentage: 10,
-        status: 'running',
-      });
-    } catch (err: any) {
-      alert('Erro ao criar aplicação: ' + (err.response?.data?.error || err.message));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const openEditModal = (app: AppRecord) => {
-    setSelectedEditApp(app);
-    setEditName(app.name);
-    setEditPort(app.port.toString());
-    setEditInternalPort(app.internalPort.toString());
-    setEditImageName(app.imageName || '');
-    setEditGitUrl(app.gitUrl || '');
-    setEditBranch(app.branch || 'main');
-    // Write-only: the stored token is never sent to the browser, so the field
-    // starts empty and only overwrites the stored value when filled in.
-    setEditGithubToken('');
-  };
-
-  const handleSaveEdit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedEditApp) return;
-
-    try {
-      setSavingEdit(true);
-      // An empty field is sent as '' so the server hands the app back to
-      // automatic assignment, rather than being dropped as "unchanged".
-      const res = await api.put(`/apps/${selectedEditApp.id}`, {
-        name: editName,
-        port: editPort === '' ? '' : parseInt(editPort),
-        internalPort: parseInt(editInternalPort || '3000'),
-        imageName: editImageName || undefined,
-        gitUrl: editGitUrl || undefined,
-        branch: editBranch || undefined,
-        githubToken: editGithubToken || undefined,
-      });
-
-      setSelectedEditApp(null);
-      fetchApps();
-      alert(`🎉 Aplicação atualizada. Porta no host: :${res.data?.port ?? editPort}`);
-    } catch (err: any) {
-      alert('Erro ao atualizar: ' + (err.response?.data?.error || err.message));
-    } finally {
-      setSavingEdit(false);
-    }
+  const handleAppCreated = (createdApp: AppRecord) => {
+    setShowCreateModal(false);
+    fetchApps();
+    setLiveDeployModal({
+      app: createdApp,
+      step: 1,
+      stepName: 'Inicializando Pipeline',
+      logs: `[${new Date().toLocaleTimeString('pt-BR')}] 🚀 Disparando build inicial para "${createdApp.name}"...\n`,
+      percentage: 10,
+      status: 'running',
+    });
   };
 
   const handleTriggerDeploy = async (app: AppRecord) => {
@@ -447,59 +270,6 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
         buildLogs: `Erro ao carregar logs: ${err.response?.data?.error || err.message}`,
       });
     }
-  };
-
-  const openFilesModal = async (app: AppRecord, subPath = '') => {
-    setSelectedFileApp(app);
-    setCurrentSubPath(subPath);
-    setSelectedFileContent(null);
-    setFileFilterSearch('');
-    try {
-      setLoadingFiles(true);
-      const res = await api.get(`/apps/${app.id}/files`, { params: { subPath } });
-      setAppFiles(res.data.items || []);
-    } catch (err: any) {
-      alert('Erro ao listar arquivos da aplicação: ' + (err.response?.data?.error || err.message));
-    } finally {
-      setLoadingFiles(false);
-    }
-  };
-
-  const handleOpenFileContent = async (app: AppRecord, filePath: string) => {
-    try {
-      setLoadingFiles(true);
-      const res = await api.get(`/apps/${app.id}/files/content`, { params: { filePath } });
-      setSelectedFileContent(res.data);
-      setFileContentDraft(res.data.content);
-    } catch (err: any) {
-      alert('Erro ao ler arquivo: ' + (err.response?.data?.error || err.message));
-    } finally {
-      setLoadingFiles(false);
-    }
-  };
-
-  const handleSaveFileContent = async () => {
-    if (!selectedFileApp || !selectedFileContent) return;
-    try {
-      setSavingFile(true);
-      await api.put(`/apps/${selectedFileApp.id}/files/content`, {
-        filePath: selectedFileContent.path,
-        content: fileContentDraft,
-      });
-      alert('✅ Arquivo salvo com sucesso!');
-      setSelectedFileContent(prev => prev ? { ...prev, content: fileContentDraft } : null);
-    } catch (err: any) {
-      alert('Erro ao salvar arquivo: ' + (err.response?.data?.error || err.message));
-    } finally {
-      setSavingFile(false);
-    }
-  };
-
-  const handleCopyFileCode = () => {
-    if (!fileContentDraft) return;
-    navigator.clipboard.writeText(fileContentDraft);
-    setCopiedFileCode(true);
-    setTimeout(() => setCopiedFileCode(false), 2000);
   };
 
   const openWorkflowModal = async (app: AppRecord) => {
@@ -825,7 +595,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                         Host <strong className="text-ok">:{app.port}</strong> &rarr; Container :{app.internalPort}
                       </span>
                       <button
-                        onClick={() => openEditModal(app)}
+                        onClick={() => setSelectedEditApp(app)}
                         title="Mudar porta do host (ex: 5000, 8080)"
                         className="text-[11px] text-primary hover:underline font-sans"
                       >
@@ -929,7 +699,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
                   {/* Edit Config / Port */}
                   <button
-                    onClick={() => openEditModal(app)}
+                    onClick={() => setSelectedEditApp(app)}
                     title="Editar configurações (Porta, Nome, Imagem, Token GitHub)"
                     className="p-2 rounded bg-surface-container-high text-on-surface-variant hover:text-white hover:bg-surface-container-highest transition-colors"
                   >
@@ -938,7 +708,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
                   {/* View Files Explorer Button */}
                   <button
-                    onClick={() => openFilesModal(app)}
+                    onClick={() => setSelectedFileApp(app)}
                     title="Explorar e editar arquivos do código-fonte da aplicação"
                     className="flex items-center gap-1.5 px-3 py-2 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-semibold border border-outline-variant transition-colors"
                   >
@@ -999,154 +769,15 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
         </div>
       )}
 
-      {/* Modal: Editar Configurações & Porta da Aplicação */}
       {selectedEditApp && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-lg overflow-hidden p-6 space-y-4 max-h-[85vh] overflow-y-auto custom-scrollbar">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Settings2 className="w-5 h-5 text-primary" />
-                <h3 className="font-bold text-white text-base">Configurações: {selectedEditApp.name}</h3>
-              </div>
-              <button onClick={() => setSelectedEditApp(null)} className="text-on-surface-variant hover:text-white">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveEdit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                  Nome da Aplicação *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                    Porta no Host
-                  </label>
-                  <input
-                    type="number"
-                    placeholder="Automática"
-                    value={editPort}
-                    onChange={(e) => setEditPort(e.target.value)}
-                    className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3.5 py-2.5 text-on-surface font-mono text-sm focus:outline-none focus:border-primary"
-                  />
-                  <p className="text-[10px] text-on-surface-variant/70 mt-1">
-                    Vazio = automática. Um valor fixa a porta e o painel nunca a move sozinho.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                    Porta Interna
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    value={editInternalPort}
-                    onChange={(e) => setEditInternalPort(e.target.value)}
-                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-primary"
-                  />
-                </div>
-              </div>
-
-              {selectedEditApp.sourceType === 'git' && (
-                <>
-                  <div>
-                    <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                      URL do Repositório GitHub
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={editGitUrl}
-                      onChange={(e) => setEditGitUrl(e.target.value)}
-                      className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-primary"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-warn uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                      <span className="flex items-center gap-1.5">
-                        <Lock className="w-3.5 h-3.5" /> GitHub Token (PAT para Repositórios Privados)
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowTokenEdit(!showTokenEdit)}
-                        className="text-[10px] text-on-surface-variant hover:text-white"
-                      >
-                        {showTokenEdit ? 'Ocultar' : 'Mostrar'}
-                      </button>
-                    </label>
-                    <input
-                      type={showTokenEdit ? 'text' : 'password'}
-                      placeholder="ghp_seu_token_aqui (necessário para repos privados)"
-                      value={editGithubToken}
-                      onChange={(e) => setEditGithubToken(e.target.value)}
-                      className="w-full bg-surface-container-lowest border border-warn/30 rounded px-3.5 py-2.5 text-warn font-mono text-xs focus:outline-none focus:border-amber-500"
-                    />
-                    <p className="text-[10px] text-on-surface-variant/70 mt-1">
-                      💡 Para repositórios privados, crie um token em GitHub &rarr; Settings &rarr; Developer Settings &rarr; Personal Access Tokens (classic) com permissão <code>repo</code>.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                      Branch de Deploy
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={editBranch}
-                      onChange={(e) => setEditBranch(e.target.value)}
-                      className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-primary"
-                    />
-                  </div>
-                </>
-              )}
-
-              {selectedEditApp.sourceType === 'image' && (
-                <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                    Imagem Docker *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editImageName}
-                    onChange={(e) => setEditImageName(e.target.value)}
-                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-primary"
-                  />
-                </div>
-              )}
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedEditApp(null)}
-                  className="px-4 py-2 text-on-surface-variant hover:text-white text-xs font-medium"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingEdit}
-                  className="px-5 py-2.5 bg-ok/90 hover:bg-ok text-white rounded text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
-                >
-                  {savingEdit ? 'Salvando & Aplicando...' : 'Salvar & Fazer Deploy'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <EditAppModal
+          app={selectedEditApp}
+          onClose={() => setSelectedEditApp(null)}
+          onSaved={() => {
+            setSelectedEditApp(null);
+            fetchApps();
+          }}
+        />
       )}
 
       {/* Modal: Editar Variáveis de Ambiente (.env) */}
@@ -1599,239 +1230,11 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
         </div>
       )}
 
-      {/* Modal: Novo Deploy */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-lg overflow-hidden">
-            <div className="p-5 border-b border-outline-variant flex items-center justify-between bg-surface-container-low">
-              <h3 className="font-bold text-white text-lg flex items-center gap-2">
-                <Plus className="w-5 h-5 text-primary" />
-                Novo Deploy de Aplicação
-              </h3>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="text-on-surface-variant hover:text-white p-1 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateApp} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
-              <div>
-                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                  Nome da Aplicação *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="ex: minha-api-node ou frontend-react"
-                  value={appName}
-                  onChange={(e) => setAppName(e.target.value)}
-                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                    Origem do Projeto
-                  </label>
-                  <select
-                    value={sourceType}
-                    onChange={(e: any) => setSourceType(e.target.value)}
-                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary"
-                  >
-                    <option value="git">GitHub / Repositório Git</option>
-                    <option value="image">Imagem Docker / Hub</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                    Porta no Host
-                  </label>
-                  <input
-                    type="number"
-                    placeholder="Automática"
-                    value={port}
-                    onChange={(e) => setPort(e.target.value)}
-                    className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3.5 py-2.5 text-on-surface text-sm focus:outline-none focus:border-primary font-mono"
-                  />
-                  <p className="text-[10px] text-on-surface-variant/70 mt-1">
-                    Deixe vazio: o painel escolhe uma porta livre. Seu site é servido pelo domínio, não por esta porta.
-                  </p>
-                </div>
-              </div>
-
-              {sourceType === 'git' ? (
-                <div className="space-y-3">
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
-                        URL do Repositório GitHub *
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => handleInspectRepo()}
-                        disabled={inspectingRepo || !gitUrl || gitUrl.includes('usuario/meu-app')}
-                        className="text-[11px] text-primary hover:text-primary font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-40"
-                      >
-                        <Cpu className={`w-3.5 h-3.5 ${inspectingRepo ? 'animate-spin' : ''}`} />
-                        <span>{inspectingRepo ? 'Inspecionando...' : 'Auto-Detectar Stack'}</span>
-                      </button>
-                    </div>
-                    <input
-                      type="text"
-                      required
-                      placeholder="https://github.com/usuario/meu-projeto.git"
-                      value={gitUrl}
-                      onChange={(e) => setGitUrl(e.target.value)}
-                      onBlur={() => handleInspectRepo()}
-                      className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary font-mono"
-                    />
-                  </div>
-
-                  {/* Framework Auto-Detection Preview Card (Aegis Style) */}
-                  {inspectingRepo ? (
-                    <div className="p-4 rounded-lg bg-primary/10 border border-primary/30 flex items-center gap-3 animate-pulse text-xs text-primary">
-                      <RefreshCw className="w-4 h-4 animate-spin text-primary shrink-0" />
-                      <span>Inspecionando arquivos do repositório e identificando framework...</span>
-                    </div>
-                  ) : inspectionResult ? (
-                    <div className="p-4 rounded-lg bg-surface-container-lowest border border-primary/40 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Sparkles className="w-4 h-4 text-warn" />
-                          <span className="text-xs font-bold text-white uppercase tracking-wider">Framework Detectado</span>
-                        </div>
-                        <span className="px-2.5 py-0.5 rounded-full bg-primary/20 border border-primary/40 text-primary text-[11px] font-bold font-mono">
-                          {inspectionResult.inspection.frameworkName}
-                        </span>
-                      </div>
-
-                      {inspectionResult.commit && (
-                        <div className="p-2.5 rounded bg-surface-container-low border border-outline-variant text-[11px] font-mono text-on-surface-variant space-y-1">
-                          <div className="text-on-surface-variant flex items-center justify-between">
-                            <span>Último commit ({inspectionResult.commit.hash}):</span>
-                            <span>{inspectionResult.commit.author}</span>
-                          </div>
-                          <div className="text-ok font-semibold truncate">"{inspectionResult.commit.message}"</div>
-                        </div>
-                      )}
-
-                      <div className="grid grid-cols-2 gap-2 text-[11px] font-mono text-on-surface-variant">
-                        <div className="p-2 rounded bg-surface-container-low border border-outline-variant">
-                          <span className="text-on-surface-variant/70 block text-[10px] uppercase">Package Manager</span>
-                          <span className="text-white font-bold">{inspectionResult.inspection.packageManager.toUpperCase()}</span>
-                        </div>
-                        <div className="p-2 rounded bg-surface-container-low border border-outline-variant">
-                          <span className="text-on-surface-variant/70 block text-[10px] uppercase">Comando de Build</span>
-                          <span className="text-white font-bold truncate">{inspectionResult.inspection.buildCommand || 'N/A'}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div>
-                    <label className="block text-xs font-semibold text-warn uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                      <span className="flex items-center gap-1.5">
-                        <Lock className="w-3.5 h-3.5" /> GitHub Token (Para Repositórios Privados)
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowTokenCreate(!showTokenCreate)}
-                        className="text-[10px] text-on-surface-variant hover:text-white"
-                      >
-                        {showTokenCreate ? 'Ocultar' : 'Mostrar'}
-                      </button>
-                    </label>
-                    <input
-                      type={showTokenCreate ? 'text' : 'password'}
-                      placeholder="ghp_seu_token_aqui (apenas se o repositório for PRIVADO)"
-                      value={githubToken}
-                      onChange={(e) => setGithubToken(e.target.value)}
-                      className="w-full bg-surface-container-lowest border border-warn/30 rounded px-3.5 py-2.5 text-warn font-mono text-xs focus:outline-none focus:border-amber-500"
-                    />
-                    <p className="text-[10px] text-on-surface-variant mt-1 flex items-center gap-1">
-                      <ShieldCheck className="w-3.5 h-3.5 text-warn shrink-0" />
-                      <span>Para repositórios privados, informe seu Personal Access Token (PAT).</span>
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                      Branch de Deploy
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="main"
-                      value={branch}
-                      onChange={(e) => setBranch(e.target.value)}
-                      className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary font-mono"
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                    Imagem Docker *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="nginx:alpine ou node:20-alpine"
-                    value={imageName}
-                    onChange={(e) => setImageName(e.target.value)}
-                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary font-mono"
-                  />
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                  Domínio ou Subdomínio (Opcional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="ex: app.meusite.com.br (pode deixar vazio e vincular depois)"
-                  value={createDomain}
-                  onChange={(e) => setCreateDomain(e.target.value)}
-                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary font-mono"
-                />
-                <p className="text-[11px] text-on-surface-variant/70 mt-1 flex items-center gap-1">
-                  <Globe className="w-3.5 h-3.5 text-primary shrink-0" />
-                  <span>O domínio é opcional. Você pode testar pelo IP:Porta e vincular o domínio Hostinger depois.</span>
-                </p>
-              </div>
-
-              <div className="pt-2">
-                <EnvEditor
-                  initialEnv={createEnvString}
-                  onChange={(_, str) => setCreateEnvString(str)}
-                  compact={true}
-                  title="Variáveis de Ambiente Iniciais (.env)"
-                />
-              </div>
-
-              <div className="pt-2 flex items-center justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2.5 rounded text-on-surface-variant hover:text-white text-sm font-medium"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="px-5 py-2.5 rounded bg-primary-container hover:bg-primary text-white font-semibold text-sm transition-all disabled:opacity-50"
-                >
-                  {submitting ? 'Criando pipeline...' : 'Iniciar Deploy'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <CreateAppModal
+          onCancel={() => setShowCreateModal(false)}
+          onCreated={handleAppCreated}
+        />
       )}
 
       {/* Modal: Live Logs */}
@@ -1867,209 +1270,11 @@ Revise meus arquivos de configuração e me entregue o código pronto para deplo
         </div>
       )}
 
-      {/* Modal: Application File Explorer & Code Editor */}
       {selectedFileApp && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-surface rounded-lg border border-outline-variant w-full max-w-5xl h-[85vh] overflow-hidden flex flex-col">
-            {/* Header */}
-            <div className="p-4 bg-surface-container-low/90 border-b border-outline-variant flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded bg-warn/10 text-warn">
-                  <FolderTree className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-white text-base flex items-center gap-2">
-                    <span>Arquivos da Aplicação: {selectedFileApp.name}</span>
-                    <span className="text-[10px] font-mono text-primary bg-primary/20 px-2 py-0.5 rounded border border-primary/30">
-                      {selectedFileApp.branch || 'main'}
-                    </span>
-                  </h3>
-                  {/* Breadcrumbs */}
-                  <div className="flex items-center gap-1.5 text-xs text-on-surface-variant font-mono mt-0.5">
-                    <button
-                      onClick={() => openFilesModal(selectedFileApp, '')}
-                      className="hover:text-white underline"
-                    >
-                      raiz
-                    </button>
-                    {currentSubPath &&
-                      currentSubPath.split('/').map((seg, idx, arr) => {
-                        const sub = arr.slice(0, idx + 1).join('/');
-                        return (
-                          <React.Fragment key={sub}>
-                            <ChevronRight className="w-3 h-3 text-outline" />
-                            <button
-                              onClick={() => openFilesModal(selectedFileApp, sub)}
-                              className="hover:text-white underline"
-                            >
-                              {seg}
-                            </button>
-                          </React.Fragment>
-                        );
-                      })}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => openFilesModal(selectedFileApp, currentSubPath)}
-                  title="Atualizar lista de arquivos"
-                  className="p-2 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant transition-colors"
-                >
-                  <RefreshCw className={`w-4 h-4 ${loadingFiles ? 'animate-spin text-warn' : ''}`} />
-                </button>
-                <button
-                  onClick={() => setSelectedFileApp(null)}
-                  className="p-2 rounded text-on-surface-variant hover:text-white hover:bg-surface-container-high transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Split Pane: Sidebar File Tree & Main Code Editor */}
-            <div className="flex-1 flex overflow-hidden">
-              {/* Left Column: Files & Directories */}
-              <div className="w-72 bg-surface-container-lowest/90 border-r border-outline-variant flex flex-col">
-                {/* Search in files */}
-                <div className="p-3 border-b border-outline-variant">
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/70" />
-                    <input
-                      type="text"
-                      placeholder="Buscar arquivo..."
-                      value={fileFilterSearch}
-                      onChange={(e) => setFileFilterSearch(e.target.value)}
-                      className="w-full bg-surface-container-low border border-outline-variant rounded pl-8 pr-3 py-1.5 text-xs text-on-surface focus:outline-none focus:border-amber-500 font-mono"
-                    />
-                  </div>
-                </div>
-
-                {/* Back button if inside subfolder */}
-                {currentSubPath && (
-                  <button
-                    onClick={() => {
-                      const parent = currentSubPath.split('/').slice(0, -1).join('/');
-                      openFilesModal(selectedFileApp, parent);
-                    }}
-                    className="flex items-center gap-2 px-4 py-2.5 text-xs font-mono text-warn hover:bg-surface-container-low border-b border-outline-variant transition-colors text-left"
-                  >
-                    <ArrowLeft className="w-3.5 h-3.5" /> .. (Voltar pasta)
-                  </button>
-                )}
-
-                {/* File list */}
-                <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
-                  {loadingFiles && appFiles.length === 0 ? (
-                    <div className="p-6 text-center text-xs text-on-surface-variant/70">
-                      <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-2 text-warn" />
-                      Carregando arquivos...
-                    </div>
-                  ) : appFiles.length === 0 ? (
-                    <div className="p-6 text-center text-xs text-on-surface-variant/70">
-                      Nenhum arquivo encontrado após o deploy.
-                    </div>
-                  ) : (
-                    appFiles
-                      .filter((f) => f.name.toLowerCase().includes(fileFilterSearch.toLowerCase()))
-                      .map((f) => {
-                        const isSelected = selectedFileContent?.path === f.path;
-                        return (
-                          <div
-                            key={f.path}
-                            onClick={() => {
-                              if (f.isDirectory) {
-                                openFilesModal(selectedFileApp, f.path);
-                              } else {
-                                handleOpenFileContent(selectedFileApp, f.path);
-                              }
-                            }}
-                            className={`flex items-center justify-between px-3 py-2 rounded text-xs font-mono cursor-pointer transition-all ${
-                              isSelected
-                                ? 'bg-warn/15 text-warn border border-warn/30 font-bold'
-                                : f.isDirectory
-                                ? 'text-on-surface hover:bg-surface-container-low hover:text-white'
-                                : 'text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 truncate">
-                              {f.isDirectory ? (
-                                <Folder className="w-4 h-4 text-warn shrink-0" />
-                              ) : (
-                                <File className="w-4 h-4 text-primary shrink-0" />
-                              )}
-                              <span className="truncate">{f.name}</span>
-                            </div>
-                            {!f.isDirectory && f.sizeBytes > 0 && (
-                              <span className="text-[10px] text-outline shrink-0 ml-1">
-                                {(f.sizeBytes / 1024).toFixed(1)}k
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })
-                  )}
-                </div>
-              </div>
-
-              {/* Right Column: Code Viewer / Editor */}
-              <div className="flex-1 bg-surface-container-lowest flex flex-col overflow-hidden">
-                {selectedFileContent ? (
-                  <>
-                    {/* Toolbar */}
-                    <div className="p-3 bg-surface-container-lowest/80 border-b border-outline-variant flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-xs font-mono text-on-surface-variant truncate">
-                        <File className="w-4 h-4 text-primary shrink-0" />
-                        <span className="font-bold text-white">{selectedFileContent.path}</span>
-                        <span className="text-[11px] text-on-surface-variant/70">
-                          ({(selectedFileContent.sizeBytes / 1024).toFixed(2)} KB)
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          onClick={handleCopyFileCode}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-mono transition-colors"
-                        >
-                          {copiedFileCode ? <Check className="w-3.5 h-3.5 text-ok" /> : <Copy className="w-3.5 h-3.5" />}
-                          <span>{copiedFileCode ? 'Copiado!' : 'Copiar'}</span>
-                        </button>
-
-                        <button
-                          onClick={handleSaveFileContent}
-                          disabled={savingFile}
-                          className="flex items-center gap-1 px-4 py-1.5 rounded bg-warn hover:bg-amber-400 text-surface font-bold text-xs transition-all disabled:opacity-50"
-                        >
-                          <Save className="w-3.5 h-3.5" />
-                          <span>{savingFile ? 'Salvando...' : 'Salvar Alterações'}</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Code Editor */}
-                    <div className="flex-1 p-4 overflow-auto">
-                      <textarea
-                        value={fileContentDraft}
-                        onChange={(e) => setFileContentDraft(e.target.value)}
-                        spellCheck={false}
-                        className="w-full h-full bg-transparent text-ok font-mono text-xs leading-relaxed focus:outline-none resize-none selection:bg-primary-container/40 custom-scrollbar"
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-on-surface-variant/70">
-                    <FolderTree className="w-12 h-12 text-outline-variant mb-3" />
-                    <h4 className="font-bold text-white text-sm mb-1">Nenhum arquivo selecionado</h4>
-                    <p className="text-xs text-on-surface-variant max-w-sm">
-                      Navegue pelas pastas à esquerda e clique em qualquer arquivo de código-fonte (HTML, JS, TS, JSON, .env) para visualizar e editar.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        <AppFilesModal
+          app={selectedFileApp}
+          onClose={() => setSelectedFileApp(null)}
+        />
       )}
     </div>
   );

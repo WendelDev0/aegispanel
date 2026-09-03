@@ -15,7 +15,15 @@ import { isValidDomain } from '../utils/naming.js';
 import { getPublicBaseUrl } from '../utils/public-url.js';
 import { authMiddleware, requireWrite, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
-import { createAppBodySchema } from '../validation/schemas.js';
+import {
+  createAppBodySchema,
+  updateAppBodySchema,
+  inspectRepoBodySchema,
+  updateEnvBodySchema,
+  updateDomainBodySchema,
+  deployAppBodySchema,
+  fileContentBodySchema,
+} from '../validation/schemas.js';
 
 export const appRouter = Router();
 
@@ -56,14 +64,9 @@ appRouter.get('/', (req: Request, res: Response) => {
 });
 
 // Pre-Deploy Repo Inspector (Vercel Style Auto-Discovery)
-appRouter.post('/inspect-repo', requireWrite, async (req: Request, res: Response): Promise<void> => {
+appRouter.post('/inspect-repo', requireWrite, validateBody(inspectRepoBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { gitUrl, branch, githubToken } = req.body;
-    if (!gitUrl) {
-      res.status(400).json({ error: 'URL do repositório Git é obrigatória' });
-      return;
-    }
-
     const result = await CicdService.inspectRepository({ gitUrl, branch, githubToken });
     res.json(result);
   } catch (err: any) {
@@ -120,7 +123,7 @@ appRouter.post('/', requireWrite, validateBody(createAppBodySchema), async (req:
 });
 
 // Update app settings
-appRouter.put('/:id', requireWrite, async (req: Request, res: Response): Promise<void> => {
+appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const app = dbStorage.getAppById(req.params.id);
     if (!app) {
@@ -128,7 +131,7 @@ appRouter.put('/:id', requireWrite, async (req: Request, res: Response): Promise
       return;
     }
 
-    const { name, port, internalPort, imageName, gitUrl, branch, domain, githubToken, autoDeploy, deployBranch } = req.body;
+    const { name, port, internalPort, imageName, gitUrl, branch, domain, githubToken, autoDeploy, deployBranch, nodeId } = req.body;
 
     const previousName = app.name;
     const previousPort = app.port;
@@ -178,6 +181,9 @@ appRouter.put('/:id', requireWrite, async (req: Request, res: Response): Promise
     }
     if (domain !== undefined) {
       app.domain = domain ? domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '') : undefined;
+    }
+    if (nodeId !== undefined) {
+      app.nodeId = nodeId || undefined;
     }
 
     app.updatedAt = new Date().toISOString();
@@ -243,7 +249,7 @@ appRouter.get('/:id/env', requireWrite, (req: Request, res: Response): void => {
   res.json({ env: app.env || {} });
 });
 
-appRouter.put('/:id/env', requireWrite, async (req: Request, res: Response): Promise<void> => {
+appRouter.put('/:id/env', requireWrite, validateBody(updateEnvBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const app = dbStorage.getAppById(req.params.id);
     if (!app) {
@@ -277,7 +283,7 @@ appRouter.put('/:id/env', requireWrite, async (req: Request, res: Response): Pro
 });
 
 // Update domain for a specific app
-appRouter.put('/:id/domain', requireWrite, async (req: Request, res: Response): Promise<void> => {
+appRouter.put('/:id/domain', requireWrite, validateBody(updateDomainBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const app = dbStorage.getAppById(req.params.id);
     if (!app) {
@@ -325,7 +331,7 @@ appRouter.get('/:id/deployments/:depId/logs', requireWrite, (req: Request, res: 
 });
 
 // Manual deploy
-appRouter.post('/:id/deploy', requireWrite, async (req: Request, res: Response): Promise<void> => {
+appRouter.post('/:id/deploy', requireWrite, validateBody(deployAppBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const app = dbStorage.getAppById(req.params.id);
     if (!app) {
@@ -518,7 +524,7 @@ appRouter.get('/:id/files/content', requireWrite, (req: Request, res: Response):
 });
 
 // File explorer: write
-appRouter.put('/:id/files/content', requireWrite, (req: Request, res: Response): void => {
+appRouter.put('/:id/files/content', requireWrite, validateBody(fileContentBodySchema), (req: Request, res: Response): void => {
   try {
     const app = dbStorage.getAppById(req.params.id);
     if (!app) {

@@ -7,6 +7,12 @@ import { dbStorage, PanelSettings, AlertConfig } from '../db/storage.js';
 import { authMiddleware, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { PanelService } from '../services/panel.service.js';
+import { validateBody } from '../middleware/validate.js';
+import {
+  updateSettingsBodySchema,
+  importStateBodySchema,
+  testAlertBodySchema,
+} from '../validation/schemas.js';
 
 export const systemRouter = Router();
 
@@ -139,7 +145,7 @@ systemRouter.get('/settings', (req: Request, res: Response) => {
   res.json(redactSettings(dbStorage.getSettings()));
 });
 
-systemRouter.put('/settings', requireAdmin, (req: Request, res: Response) => {
+systemRouter.put('/settings', requireAdmin, validateBody(updateSettingsBodySchema), (req: Request, res: Response) => {
   const current = dbStorage.getSettings();
   const updated = dbStorage.updateSettings(encryptAlertSecrets(mergeSettings(current, req.body || {})));
   res.json(redactSettings(updated));
@@ -173,7 +179,7 @@ systemRouter.get('/export-state', requireAdmin, (req: Request, res: Response): v
 });
 
 // Import full panel state
-systemRouter.post('/import-state', requireAdmin, (req: AuthRequest, res: Response): void => {
+systemRouter.post('/import-state', requireAdmin, validateBody(importStateBodySchema), (req: AuthRequest, res: Response): void => {
   try {
     const stateData = req.body;
 
@@ -236,7 +242,7 @@ systemRouter.get('/activities', (req: Request, res: Response): void => {
 });
 
 // Test a notification channel
-systemRouter.post('/test-alert', requireAdmin, async (req: Request, res: Response): Promise<void> => {
+systemRouter.post('/test-alert', requireAdmin, validateBody(testAlertBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { channel } = req.body;
     const stored = dbStorage.getSettings().alertConfig || ({} as AlertConfig);
