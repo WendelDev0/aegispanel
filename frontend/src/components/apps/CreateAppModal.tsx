@@ -239,10 +239,11 @@ export const CreateAppModal: React.FC<CreateAppModalProps> = ({ onCreated, onCan
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                Porta no Host
+              <label htmlFor="create-host-port" className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
+                Porta
               </label>
               <input
+                id="create-host-port"
                 type="number"
                 placeholder="Automática"
                 value={port}
@@ -250,7 +251,7 @@ export const CreateAppModal: React.FC<CreateAppModalProps> = ({ onCreated, onCan
                 className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3.5 py-2.5 text-on-surface text-sm focus:outline-none focus:border-primary font-mono"
               />
               <p className="text-[10px] text-on-surface-variant/70 mt-1">
-                Deixe vazio: o painel escolhe uma porta livre. Seu site é servido pelo domínio, não por esta porta.
+                Deixe vazio: o painel escolhe. O site entra pelo domínio, não por esta porta.
               </p>
             </div>
           </div>

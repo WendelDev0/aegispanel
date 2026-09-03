@@ -453,19 +453,25 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                     )}
                   </div>
 
-                  {/* Port Mapping with Edit shortcut */}
+                  {/* Public host port; internal listen port only when it differs. */}
                   <div className="flex items-center justify-between text-on-surface-variant">
-                    <span>Mapeamento de Portas:</span>
+                    <span>Porta:</span>
                     <div className="flex items-center gap-2">
                       <span className="text-on-surface font-semibold select-all">
-                        Host <strong className="text-ok">:{app.port}</strong> &rarr; Container :{app.internalPort}
+                        <strong className="text-ok">:{app.port}</strong>
+                        {app.internalPort && app.internalPort !== app.port && (
+                          <span className="text-on-surface-variant font-normal">
+                            {' '}
+                            (app :{app.internalPort})
+                          </span>
+                        )}
                       </span>
                       <button
                         onClick={() => setSelectedEditApp(app)}
-                        title="Mudar porta do host (ex: 5000, 8080)"
+                        title="Mudar porta"
                         className="text-[11px] text-primary hover:underline font-sans"
                       >
-                        (Mudar Porta)
+                        (Mudar)
                       </button>
                     </div>
                   </div>
