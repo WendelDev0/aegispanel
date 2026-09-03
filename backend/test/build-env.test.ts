@@ -1,7 +1,7 @@
 import './setup.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { injectPublicBuildArgs, publicBuildArgs } from '../src/utils/build-env.js';
+import { injectPublicBuildArgs, publicBuildArgMap, publicBuildArgs } from '../src/utils/build-env.js';
 
 test('somente variáveis explicitamente públicas entram no build Docker', () => {
   const env = {
@@ -19,6 +19,14 @@ test('somente variáveis explicitamente públicas entram no build Docker', () =>
     'NEXT_PUBLIC_ANALYTICS=enabled',
   ]);
   assert.equal(args.some((arg) => arg.includes('secret')), false);
+});
+
+test('publicBuildArgMap keeps the same public-only filter for dockerode', () => {
+  const map = publicBuildArgMap({
+    VITE_API_URL: 'https://api.example.com',
+    DATABASE_URL: 'postgres://secret',
+  });
+  assert.deepEqual(map, { VITE_API_URL: 'https://api.example.com' });
 });
 
 test('Dockerfile gerado recebe apenas ARG/ENV públicos', () => {

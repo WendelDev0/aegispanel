@@ -10,6 +10,7 @@ import { AlertService } from './services/alert.service.js';
 import { CaddyService } from './services/caddy.service.js';
 import { CronService } from './services/cron.service.js';
 import { AnalyticsService } from './services/analytics.service.js';
+import { CicdService } from './services/cicd.service.js';
 import { authenticateToken, AuthUser } from './middleware/auth.js';
 import { dbStorage } from './db/storage.js';
 
@@ -242,6 +243,13 @@ server.listen(CONFIG.PORT, () => {
 
   CronService.start();
   AnalyticsService.start();
+
+  const abandoned = CicdService.abandonInFlightDeploys();
+  if (abandoned > 0) {
+    console.warn(
+      `⚠️ ${abandoned} deploy(s) interrompido(s) na inicialização (ficaram em building após um restart).`
+    );
+  }
 
   // Auto-heal: Sync Caddyfile with correct email and domains on every startup
   setTimeout(async () => {

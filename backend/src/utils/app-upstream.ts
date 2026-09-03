@@ -36,3 +36,22 @@ export function isRemoteTarget(nodeId: string | undefined, node?: ServerNode | n
   if (node) return !node.isLocal;
   return true;
 }
+
+/**
+ * How a workload is published once the image exists on the target daemon.
+ *
+ * Remote nodes have no aegis-net and Caddy on the panel reaches them via the
+ * host port, so the container must listen on 0.0.0.0. Local apps stay on
+ * loopback and join the panel network by name.
+ */
+export function remoteWorkloadPlacement(isRemote: boolean): {
+  useRemoteDocker: boolean;
+  publishOnAllInterfaces: boolean;
+  joinPanelNetwork: boolean;
+} {
+  return {
+    useRemoteDocker: isRemote,
+    publishOnAllInterfaces: isRemote,
+    joinPanelNetwork: !isRemote,
+  };
+}

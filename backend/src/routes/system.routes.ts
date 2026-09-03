@@ -242,6 +242,11 @@ systemRouter.get('/activities', (req: Request, res: Response): void => {
   res.json(dbStorage.getActivities(limit));
 });
 
+systemRouter.get('/alert-history', (req: Request, res: Response): void => {
+  const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
+  res.json(dbStorage.getAlertHistory(undefined, limit));
+});
+
 // Test a notification channel
 systemRouter.post('/test-alert', requireAdmin, validateBody(testAlertBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {

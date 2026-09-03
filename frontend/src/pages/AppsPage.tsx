@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Layers,
   Plus,
@@ -24,10 +24,11 @@ import {
   User,
   Globe2,
   Sparkles,
+  Activity,
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { socket } from '../services/socket.js';
-import { AppRecord, DeploymentRecord } from '../types/index.js';
+import { AppRecord, AppMetricsSnapshot, DeploymentRecord } from '../types/index.js';
 import { DeployHistoryModal } from '../components/apps/DeployHistoryModal.js';
 import { BuildLogsModal } from '../components/apps/BuildLogsModal.js';
 import { CreateAppModal } from '../components/apps/CreateAppModal.js';
@@ -40,6 +41,13 @@ import { WorkflowModal } from '../components/apps/WorkflowModal.js';
 import { AppLogsModal } from '../components/apps/AppLogsModal.js';
 import { LiveDeployModal, type LiveDeployState } from '../components/apps/LiveDeployModal.js';
 import { AiHelpModal } from '../components/apps/AiHelpModal.js';
+import { AppObservabilityModal } from '../components/apps/AppObservabilityModal.js';
+
+function formatRam(bytes: number): string {
+  if (!bytes) return '0 B';
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 interface AppsPageProps {
   /** Opens the analytics view already focused on this application. */
@@ -63,6 +71,8 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
   const [selectedEnvApp, setSelectedEnvApp] = useState<AppRecord | null>(null);
   const [selectedDomainApp, setSelectedDomainApp] = useState<AppRecord | null>(null);
   const [selectedFileApp, setSelectedFileApp] = useState<AppRecord | null>(null);
+  const [selectedObservabilityApp, setSelectedObservabilityApp] = useState<AppRecord | null>(null);
+  const [appMetrics, setAppMetrics] = useState<Record<string, AppMetricsSnapshot>>({});
   const [deployingId, setDeployingId] = useState<string | null>(null);
   const [liveDeployModal, setLiveDeployModal] = useState<LiveDeployState | null>(null);
   const [rollingBackId, setRollingBackId] = useState<string | null>(null);
@@ -103,6 +113,27 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadMetrics = async () => {
+      try {
+        const res = await api.get('/apps/metrics');
+        if (cancelled || !Array.isArray(res.data)) return;
+        const next: Record<string, AppMetricsSnapshot> = {};
+        for (const row of res.data as AppMetricsSnapshot[]) next[row.appId] = row;
+        setAppMetrics(next);
+      } catch (err) {
+        console.error('Failed to load app metrics:', err);
+      }
+    };
+    void loadMetrics();
+    const timer = setInterval(() => void loadMetrics(), 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+
   const handleAppCreated = (createdApp: AppRecord) => {
     setShowCreateModal(false);
     fetchApps();
@@ -110,7 +141,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       app: createdApp,
       step: 1,
       stepName: 'Inicializando Pipeline',
-      logs: `[${new Date().toLocaleTimeString('pt-BR')}] ðŸš€ Disparando build inicial para "${createdApp.name}"...\n`,
+      logs: `[${new Date().toLocaleTimeString('pt-BR')}] 🚀 Disparando build inicial para "${createdApp.name}"...\n`,
       percentage: 10,
       status: 'running',
     });
@@ -123,7 +154,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
         app,
         step: 1,
         stepName: 'Inicializando Pipeline',
-        logs: `[${new Date().toLocaleTimeString('pt-BR')}] ðŸš€ Disparando pipeline de build em tempo real...\n`,
+        logs: `[${new Date().toLocaleTimeString('pt-BR')}] 🚀 Disparando pipeline de build em tempo real...\n`,
         percentage: 15,
         status: 'running',
       });
@@ -139,11 +170,11 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
   };
 
   const handleRollback = async (appId: string, deploymentId: string) => {
-    if (!confirm('Deseja realmente reverter a aplicaÃ§Ã£o para esta versÃ£o anterior? O contÃªiner serÃ¡ restaurado em segundos.')) return;
+    if (!confirm('Deseja realmente reverter a aplicação para esta versão anterior? O contêiner será restaurado em segundos.')) return;
     try {
       setRollingBackId(deploymentId);
       const res = await api.post(`/apps/${appId}/rollback/${deploymentId}`);
-      alert('âœ… ' + res.data.message);
+      alert('✅ ' + res.data.message);
       fetchApps();
       if (selectedDeploymentsApp) {
         openDeploymentsHistory(selectedDeploymentsApp);
@@ -161,14 +192,14 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       const res = await api.get(`/apps/${app.id}/deployments`);
       setDeploymentsList(res.data);
     } catch (err: any) {
-      alert('Erro ao carregar histÃ³rico: ' + err.message);
+      alert('Erro ao carregar histórico: ' + err.message);
     }
   };
 
   const openBuildLogs = async (dep: DeploymentRecord) => {
     if (!selectedDeploymentsApp) return;
     try {
-      setSelectedBuildLogs({ ...dep, buildLogs: 'Carregando logsâ€¦' });
+      setSelectedBuildLogs({ ...dep, buildLogs: 'Carregando logs…' });
       const res = await api.get(`/apps/${selectedDeploymentsApp.id}/deployments/${dep.id}/logs`);
       setSelectedBuildLogs({ ...dep, buildLogs: res.data.buildLogs || '' });
     } catch (err: any) {
@@ -207,7 +238,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Tem certeza que deseja deletar a aplicaÃ§Ã£o "${name}"?`)) return;
+    if (!confirm(`Tem certeza que deseja deletar a aplicação "${name}"?`)) return;
     try {
       await api.delete(`/apps/${id}`);
       fetchApps();
@@ -230,10 +261,10 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-2">
             <Layers className="w-6 h-6 text-primary" />
-            AplicaÃ§Ãµes & CI/CD â€” ExperiÃªncia Cloud Profissional (Aegis Style)
+            Aplicações & CI/CD — Experiência Cloud Profissional (Aegis Style)
           </h2>
           <p className="text-sm text-on-surface-variant mt-1">
-            Controle de ponta a ponta dos seus projetos com deploy em tempo real, rollback instantÃ¢neo, repositÃ³rios pÃºblicos e privados do GitHub e domÃ­nios com SSL.
+            Controle de ponta a ponta dos seus projetos com deploy em tempo real, rollback instantâneo, repositórios públicos e privados do GitHub e domínios com SSL.
           </p>
         </div>
 
@@ -244,12 +275,12 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
             className="flex items-center gap-1.5 px-3.5 py-2.5 rounded bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 font-semibold text-xs border border-purple-500/40 transition-all active:scale-95 shrink-0"
           >
             <Sparkles className="w-4 h-4 text-purple-400" />
-            <span>Prompt para IA âœ¨</span>
+            <span>Prompt para IA ✨</span>
           </button>
 
           <button
             onClick={() => setShowCreateModal(true)}
-            title="Fazer deploy de um novo projeto do GitHub (PÃºblico ou Privado) ou Imagem Docker"
+            title="Fazer deploy de um novo projeto do GitHub (Público ou Privado) ou Imagem Docker"
             className="flex items-center gap-2 px-4 py-2.5 rounded bg-primary-container hover:bg-primary text-white font-semibold text-sm transition-all active:scale-95 shrink-0"
           >
             <Plus className="w-4 h-4" />
@@ -264,7 +295,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
           <Search className="w-4 h-4 text-on-surface-variant absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Buscar por nome do app, domÃ­nio, branch ou porta..."
+            placeholder="Buscar por nome do app, domínio, branch ou porta..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full bg-surface-container border border-outline-variant rounded-lg pl-10 pr-4 py-2.5 text-xs text-white placeholder-on-surface-variant/50 focus:outline-none focus:border-primary transition-colors"
@@ -292,9 +323,9 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
           <div className="w-12 h-12 rounded-lg bg-primary/10 text-primary flex items-center justify-center mx-auto mb-4">
             <Layers className="w-6 h-6" />
           </div>
-          <h3 className="text-lg font-bold text-white mb-1">Nenhuma aplicaÃ§Ã£o encontrada</h3>
+          <h3 className="text-lg font-bold text-white mb-1">Nenhuma aplicação encontrada</h3>
           <p className="text-sm text-on-surface-variant max-w-md mx-auto mb-6">
-            Conecte seu repositÃ³rio do GitHub ou escolha uma imagem Docker para fazer seu primeiro deploy.
+            Conecte seu repositório do GitHub ou escolha uma imagem Docker para fazer seu primeiro deploy.
           </p>
           <button
             onClick={() => setShowCreateModal(true)}
@@ -327,7 +358,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                           <span className="text-[10px] font-mono text-primary bg-primary/20 px-2 py-0.5 rounded-md flex items-center gap-1 border border-primary/30">
                             <GitBranch className="w-3 h-3" /> {app.branch || 'main'}
                             {app.hasGithubToken && (
-                              <span title="RepositÃ³rio Privado com Token">
+                              <span title="Repositório Privado com Token">
                                 <Lock className="w-2.5 h-2.5 text-warn" />
                               </span>
                             )}
@@ -374,7 +405,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                       >
                         <div className="flex items-center gap-2 text-xs font-mono font-bold">
                           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                          <span className="text-ok">ðŸŒ Acesso Direto (IP:Porta):</span>
+                          <span className="text-ok">🌐 Acesso Direto (IP:Porta):</span>
                           <span className="text-white underline underline-offset-2">{directUrl}</span>
                         </div>
                         <span className="text-xs flex items-center gap-1 font-sans font-semibold text-ok group-hover:translate-x-0.5 transition-transform">
@@ -390,7 +421,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   {/* Assigned Domain */}
                   <div className="flex items-center justify-between">
                     <span className="text-on-surface-variant flex items-center gap-1.5">
-                      <Globe className="w-3.5 h-3.5 text-primary" /> DomÃ­nio Hostinger / SSL:
+                      <Globe className="w-3.5 h-3.5 text-primary" /> Domínio Hostinger / SSL:
                     </span>
                     {app.domain ? (
                       <div className="flex items-center gap-2">
@@ -406,7 +437,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                         </a>
                         <button
                           onClick={() => setSelectedDomainApp(app)}
-                          title="Alterar domÃ­nio ou subdomÃ­nio"
+                          title="Alterar domínio ou subdomínio"
                           className="text-[10px] text-on-surface-variant/70 hover:text-white"
                         >
                           (Editar)
@@ -417,7 +448,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                         onClick={() => setSelectedDomainApp(app)}
                         className="text-primary hover:text-primary hover:underline font-sans text-xs flex items-center gap-1"
                       >
-                        + Vincular DomÃ­nio Hostinger
+                        + Vincular Domínio Hostinger
                       </button>
                     )}
                   </div>
@@ -439,16 +470,32 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                     </div>
                   </div>
 
+                  {appMetrics[app.id] && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedObservabilityApp(app)}
+                      className="w-full grid grid-cols-2 gap-2 text-[11px] font-mono bg-surface-container-low/60 border border-outline-variant rounded-lg px-3 py-2 text-left hover:border-primary/40"
+                      title="Métricas, logs retidos e histórico de alertas"
+                    >
+                      <span className="text-on-surface-variant">
+                        CPU <strong className="text-white">{appMetrics[app.id].cpuPercent}%</strong>
+                      </span>
+                      <span className="text-on-surface-variant">
+                        RAM <strong className="text-white">{formatRam(appMetrics[app.id].memoryUsedBytes)}</strong>
+                      </span>
+                    </button>
+                  )}
+
                   {/* Environment Variables Count */}
                   <div className="flex items-center justify-between text-on-surface-variant pt-1 border-t border-outline-variant">
                     <span className="flex items-center gap-1">
-                      <Sliders className="w-3.5 h-3.5 text-warn" /> VariÃ¡veis de Ambiente:
+                      <Sliders className="w-3.5 h-3.5 text-warn" /> Variáveis de Ambiente:
                     </span>
                     <button
                       onClick={() => setSelectedEnvApp(app)}
                       className="text-warn hover:underline font-sans text-xs font-semibold flex items-center gap-1"
                     >
-                      {Object.keys(app.env || {}).length} variÃ¡vel(is) .env &rarr; Editar
+                      {Object.keys(app.env || {}).length} variável(is) .env &rarr; Editar
                     </button>
                   </div>
                 </div>
@@ -459,7 +506,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5 text-xs">
                         <GitCommit className="w-4 h-4 text-primary" />
-                        <span className="font-bold text-white">Ãšltimo Commit Real:</span>
+                        <span className="font-bold text-white">Último Commit Real:</span>
                       </div>
                       {app.lastCommitHash && (
                         <span className="text-[10px] font-mono font-bold bg-primary/20 text-primary px-2 py-0.5 rounded border border-primary/30">
@@ -487,15 +534,15 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs pt-1">
                   <button
                     onClick={() => openDeploymentsHistory(app)}
-                    title="Ver histÃ³rico de todos os builds e deploys anteriores"
+                    title="Ver histórico de todos os builds e deploys anteriores"
                     className="text-ok hover:underline flex items-center gap-1 font-mono text-[11px]"
                   >
-                    <Clock className="w-3.5 h-3.5" /> HistÃ³rico de Builds
+                    <Clock className="w-3.5 h-3.5" /> Histórico de Builds
                   </button>
 
                   <button
                     onClick={() => setSelectedWorkflowApp(app)}
-                    title="Ver arquivo de configuraÃ§Ã£o do GitHub Actions"
+                    title="Ver arquivo de configuração do GitHub Actions"
                     className="text-primary hover:underline flex items-center gap-1 font-mono text-[11px]"
                   >
                     <FileCode2 className="w-3.5 h-3.5" /> GitHub Actions YAML
@@ -503,7 +550,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
                                     <button
                     onClick={() => onOpenAnalytics?.(app.id)}
-                    title="Ver analytics: visitas, paÃ­ses de origem e erros"
+                    title="Ver analytics: visitas, países de origem e erros"
                     className="p-2 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-ok transition-colors"
                   >
                     <Globe2 className="w-4 h-4" />
@@ -535,7 +582,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   {/* Edit Config / Port */}
                   <button
                     onClick={() => setSelectedEditApp(app)}
-                    title="Editar configuraÃ§Ãµes (Porta, Nome, Imagem, Token GitHub)"
+                    title="Editar configurações (Porta, Nome, Imagem, Token GitHub)"
                     className="p-2 rounded bg-surface-container-high text-on-surface-variant hover:text-white hover:bg-surface-container-highest transition-colors"
                   >
                     <Settings2 className="w-4 h-4" />
@@ -544,7 +591,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   {/* View Files Explorer Button */}
                   <button
                     onClick={() => setSelectedFileApp(app)}
-                    title="Explorar e editar arquivos do cÃ³digo-fonte da aplicaÃ§Ã£o"
+                    title="Explorar e editar arquivos do código-fonte da aplicação"
                     className="flex items-center gap-1.5 px-3 py-2 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-semibold border border-outline-variant transition-colors"
                   >
                     <FolderTree className="w-3.5 h-3.5 text-warn" />
@@ -555,7 +602,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   {app.status === 'running' ? (
                     <button
                       onClick={() => handleStop(app.id)}
-                      title="Parar aplicaÃ§Ã£o"
+                      title="Parar aplicação"
                       className="p-2 rounded bg-warn/10 text-warn hover:bg-warn/15 transition-colors"
                     >
                       <Square className="w-4 h-4" />
@@ -563,7 +610,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   ) : (
                     <button
                       onClick={() => handleStart(app.id)}
-                      title="Iniciar aplicaÃ§Ã£o"
+                      title="Iniciar aplicação"
                       className="p-2 rounded bg-ok/10 text-ok hover:bg-ok/15 transition-colors"
                     >
                       <Play className="w-4 h-4" />
@@ -573,7 +620,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   {/* Restart */}
                   <button
                     onClick={() => handleRestart(app.id)}
-                    title="Reiniciar contÃªiner da aplicaÃ§Ã£o"
+                    title="Reiniciar contêiner da aplicação"
                     className="p-2 rounded bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest transition-colors"
                   >
                     <RefreshCw className="w-4 h-4" />
@@ -582,18 +629,26 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                   {/* Logs Button */}
                   <button
                     onClick={() => setSelectedLogsApp(app)}
-                    title="Visualizar logs em tempo real da aplicaÃ§Ã£o"
+                    title="Visualizar logs em tempo real da aplicação"
                     className="flex items-center gap-1.5 px-3 py-2 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-white text-xs font-medium transition-colors"
                   >
                     <FileText className="w-3.5 h-3.5 text-primary" />
                     Logs
+                  </button>
+                  <button
+                    onClick={() => setSelectedObservabilityApp(app)}
+                    title="CPU, memória, logs retidos e histórico de alertas"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-white text-xs font-medium transition-colors"
+                  >
+                    <Activity className="w-3.5 h-3.5 text-ok" />
+                    Métricas
                   </button>
                 </div>
 
                 {/* Delete */}
                 <button
                   onClick={() => handleDelete(app.id, app.name)}
-                  title="Deletar aplicaÃ§Ã£o permanentemente"
+                  title="Deletar aplicação permanentemente"
                   className="p-2 rounded text-crit hover:bg-crit/10 transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -672,6 +727,13 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
       {selectedLogsApp && (
         <AppLogsModal app={selectedLogsApp} onClose={() => setSelectedLogsApp(null)} />
+      )}
+
+      {selectedObservabilityApp && (
+        <AppObservabilityModal
+          app={selectedObservabilityApp}
+          onClose={() => setSelectedObservabilityApp(null)}
+        />
       )}
 
       {selectedFileApp && (

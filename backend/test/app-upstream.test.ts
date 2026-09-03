@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import './setup.js';
-import { resolveAppUpstream, isRemoteTarget } from '../src/utils/app-upstream.js';
+import { remoteWorkloadPlacement, resolveAppUpstream, isRemoteTarget } from '../src/utils/app-upstream.js';
 import type { ServerNode } from '../src/db/storage.js';
 
 describe('resolveAppUpstream', () => {
@@ -86,5 +86,20 @@ describe('isRemoteTarget', () => {
     assert.equal(isRemoteTarget('node-1'), true);
     assert.equal(isRemoteTarget('node-1', { isLocal: true } as ServerNode), false);
     assert.equal(isRemoteTarget('node-1', { isLocal: false } as ServerNode), true);
+  });
+});
+
+describe('remoteWorkloadPlacement', () => {
+  it('keeps local apps on the panel network and remote apps off it', () => {
+    assert.deepEqual(remoteWorkloadPlacement(false), {
+      useRemoteDocker: false,
+      publishOnAllInterfaces: false,
+      joinPanelNetwork: true,
+    });
+    assert.deepEqual(remoteWorkloadPlacement(true), {
+      useRemoteDocker: true,
+      publishOnAllInterfaces: true,
+      joinPanelNetwork: false,
+    });
   });
 });

@@ -1,6 +1,7 @@
 import Docker from 'dockerode';
 import { PassThrough, Readable } from 'stream';
 import { CONFIG } from '../config.js';
+import { collectBuildContextFiles } from '../utils/build-context.js';
 
 export interface ExecResult {
   stdout: string;
@@ -283,35 +284,54 @@ class DockerManager {
     return (await this.getManagedContainerType(containerId)) !== null;
   }
 
-  async getContainerStats(containerId: string) {
+  async getContainerStats(containerId: string, client?: Docker) {
+    const empty = { cpuPercent: 0, memoryUsedBytes: 0, memoryLimitBytes: 0, memoryPercent: 0 };
     try {
-      if (!(await this.isManagedWorkload(containerId))) {
+      const docker = client || this.docker;
+      if (!(await this.isManagedOn(docker, containerId))) {
         throw new Error('Contêiner não gerenciado pelo AegisPanel.');
       }
-      const container = this.docker.getContainer(containerId);
+      const container = docker.getContainer(containerId);
       const statsStream = await container.stats({ stream: false });
-
-      const cpuDelta = statsStream.cpu_stats.cpu_usage.total_usage - (statsStream.precpu_stats.cpu_usage.total_usage || 0);
-      const systemDelta = statsStream.cpu_stats.system_cpu_usage - (statsStream.precpu_stats.system_cpu_usage || 0);
-      const numCores = statsStream.cpu_stats.online_cpus || 1;
-
-      let cpuPercent = 0;
-      if (systemDelta > 0 && cpuDelta > 0) {
-        cpuPercent = (cpuDelta / systemDelta) * numCores * 100;
-      }
-
-      const memUsed = (statsStream.memory_stats.usage || 0) - (statsStream.memory_stats.stats?.cache || 0);
-      const memLimit = statsStream.memory_stats.limit || 1;
-      const memPercent = (memUsed / memLimit) * 100;
-
-      return {
-        cpuPercent: Math.round(cpuPercent * 10) / 10,
-        memoryUsedBytes: memUsed,
-        memoryLimitBytes: memLimit,
-        memoryPercent: Math.round(memPercent * 10) / 10,
-      };
+      return this.parseContainerStats(statsStream);
     } catch {
-      return { cpuPercent: 0, memoryUsedBytes: 0, memoryLimitBytes: 0, memoryPercent: 0 };
+      return empty;
+    }
+  }
+
+  private parseContainerStats(statsStream: {
+    cpu_stats: { cpu_usage: { total_usage: number }; system_cpu_usage: number; online_cpus?: number };
+    precpu_stats: { cpu_usage: { total_usage: number }; system_cpu_usage: number };
+    memory_stats: { usage?: number; limit?: number; stats?: { cache?: number } };
+  }) {
+    const cpuDelta = statsStream.cpu_stats.cpu_usage.total_usage - (statsStream.precpu_stats.cpu_usage.total_usage || 0);
+    const systemDelta = statsStream.cpu_stats.system_cpu_usage - (statsStream.precpu_stats.system_cpu_usage || 0);
+    const numCores = statsStream.cpu_stats.online_cpus || 1;
+
+    let cpuPercent = 0;
+    if (systemDelta > 0 && cpuDelta > 0) {
+      cpuPercent = (cpuDelta / systemDelta) * numCores * 100;
+    }
+
+    const memUsed = (statsStream.memory_stats.usage || 0) - (statsStream.memory_stats.stats?.cache || 0);
+    const memLimit = statsStream.memory_stats.limit || 1;
+    const memPercent = (memUsed / memLimit) * 100;
+
+    return {
+      cpuPercent: Math.round(cpuPercent * 10) / 10,
+      memoryUsedBytes: memUsed,
+      memoryLimitBytes: memLimit,
+      memoryPercent: Math.round(memPercent * 10) / 10,
+    };
+  }
+
+  private async isManagedOn(docker: Docker, containerId: string): Promise<boolean> {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(containerId)) return false;
+    try {
+      const info = await docker.getContainer(containerId).inspect();
+      return info.Config?.Labels?.['aegis.managed'] === 'true';
+    } catch {
+      return false;
     }
   }
 
@@ -546,6 +566,64 @@ class DockerManager {
       // diagnostics only
     }
     return null;
+  }
+
+  /**
+   * Builds an image on the given daemon (local socket or remote SSH client).
+   *
+   * The context is packed on the panel and uploaded to that daemon, so a git
+   * deploy targeting a worker never `docker build`s against the panel socket
+   * and never starts the resulting container there.
+   */
+  async buildImage(options: {
+    contextDir: string;
+    tags: string[];
+    buildArgs?: Record<string, string>;
+    client?: Docker;
+    onOutput?: (chunk: string) => void;
+    timeoutMs?: number;
+  }): Promise<void> {
+    const docker = options.client || this.docker;
+    const src = collectBuildContextFiles(options.contextDir);
+    const timeoutMs = options.timeoutMs ?? 30 * 60 * 1000;
+    const primaryTag = options.tags[0];
+    if (!primaryTag) throw new Error('Informe ao menos uma tag de imagem.');
+
+    const stream = await docker.buildImage(
+      { context: options.contextDir, src },
+      {
+        t: primaryTag,
+        dockerfile: 'Dockerfile',
+        buildargs: options.buildArgs && Object.keys(options.buildArgs).length ? options.buildArgs : undefined,
+      }
+    );
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`docker build excedeu ${Math.round(timeoutMs / 60000)} minutos.`));
+      }, timeoutMs);
+
+      docker.modem.followProgress(
+        stream as NodeJS.ReadableStream,
+        (err: Error | null) => {
+          clearTimeout(timer);
+          if (err) reject(err);
+          else resolve();
+        },
+        (event: { stream?: string; status?: string; error?: string; errorDetail?: { message?: string } }) => {
+          const line = event.stream || event.status || event.error || event.errorDetail?.message;
+          if (line) options.onOutput?.(line);
+        }
+      );
+    });
+
+    for (const extra of options.tags.slice(1)) {
+      if (typeof docker.getImage !== 'function') break;
+      const lastColon = extra.lastIndexOf(':');
+      const repo = lastColon > 0 ? extra.slice(0, lastColon) : extra;
+      const tag = lastColon > 0 ? extra.slice(lastColon + 1) : 'latest';
+      await docker.getImage(primaryTag).tag({ repo, tag });
+    }
   }
 
   /**

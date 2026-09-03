@@ -18,6 +18,24 @@ export interface PortLookupOptions {
   client?: Docker;
   /** Only treat panel apps on this node as occupying ports. */
   nodeId?: string;
+  /** Redeploy / edit of this app must not treat its own record as a conflict. */
+  excludeAppId?: string;
+}
+
+function sameContainerId(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  const shortA = a.substring(0, 12);
+  const shortB = b.substring(0, 12);
+  return shortA === shortB;
+}
+
+function isExcludedApp(
+  app: { id: string; containerId?: string },
+  excludeContainerId?: string,
+  excludeAppId?: string
+): boolean {
+  if (excludeAppId && app.id === excludeAppId) return true;
+  return Boolean(excludeContainerId && sameContainerId(app.containerId, excludeContainerId));
 }
 
 export class PortService {
@@ -67,8 +85,12 @@ export class PortService {
     }
 
     // Records count as taken even when their container is stopped, so
-    // restarting a stopped app does not find its port reassigned.
+    // restarting a stopped app does not find its port reassigned. The app
+    // being redeployed is skipped: its own row always holds the port it is
+    // about to reuse, and treating that as a conflict aborted every deploy
+    // of a pinned port (the modal stuck on "Inicializando").
     for (const app of dbStorage.getApps()) {
+      if (isExcludedApp(app, excludeContainerId, opts?.excludeAppId)) continue;
       const appNode = app.nodeId || LOCAL_NODE_ID;
       if (appNode !== nodeId) continue;
       used.add(app.port);
@@ -138,7 +160,12 @@ export class PortService {
     }
 
     const nodeId = opts?.nodeId || LOCAL_NODE_ID;
-    const app = dbStorage.getApps().find((a) => a.port === port && (a.nodeId || LOCAL_NODE_ID) === nodeId);
+    const app = dbStorage.getApps().find(
+      (a) =>
+        a.port === port &&
+        (a.nodeId || LOCAL_NODE_ID) === nodeId &&
+        !isExcludedApp(a, excludeContainerId, opts?.excludeAppId)
+    );
     if (app) return `A porta ${port} já está atribuída à aplicação "${app.name}".`;
 
     if (!opts?.client && nodeId === LOCAL_NODE_ID) {

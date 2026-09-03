@@ -187,10 +187,8 @@ export class NodeService {
   /**
    * Ensures an app may be deployed to its configured node.
    *
-   * Remote git/dockerfile builds are refused: the pipeline still clones and
-   * builds against the local Docker socket. Image-only apps may target a remote
-   * node once its health check reports online — create/start then uses that
-   * node's Docker client over SSH.
+   * Git/dockerfile clones happen on the panel; docker build and start use this
+   * node's daemon over SSH. Image-only apps skip the clone and pull there.
    */
   static async assertDeployTarget(app: {
     nodeId?: string;
@@ -208,13 +206,6 @@ export class NodeService {
     if (!node) {
       throw new Error(
         `O nó "${nodeId}" configurado na aplicação "${app.name}" não existe mais. Atualize o destino do deploy.`
-      );
-    }
-
-    if (app.sourceType === 'git' || app.sourceType === 'dockerfile') {
-      throw new Error(
-        `Deploy remoto ainda não suporta fonte "${app.sourceType}". ` +
-          `Use sourceType "image" para nós remotos, ou remova o nodeId para buildar neste servidor.`
       );
     }
 

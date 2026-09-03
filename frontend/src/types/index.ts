@@ -179,6 +179,28 @@ export interface ActivityRecord {
   metadata?: Record<string, any>;
 }
 
+export interface AlertHistoryRecord {
+  id: string;
+  title: string;
+  message: string;
+  type: 'deploy' | 'alert' | 'backup';
+  isError: boolean;
+  appId?: string;
+  createdAt: string;
+}
+
+export interface AppMetricsSnapshot {
+  appId: string;
+  appName: string;
+  status: AppRecord['status'];
+  available: boolean;
+  cpuPercent: number;
+  memoryUsedBytes: number;
+  memoryLimitBytes: number;
+  memoryPercent: number;
+  retainedLogBytes: number;
+}
+
 export interface AlertConfig {
   enabled: boolean;
   discordWebhookUrl?: string;
