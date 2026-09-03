@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { FirewallService } from '../services/firewall.service.js';
 import { authMiddleware, requireAdmin } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import { createFirewallBodySchema } from '../validation/schemas.js';
 
 export const firewallRouter = Router();
 
@@ -18,16 +20,12 @@ firewallRouter.get('/rules', (req: Request, res: Response) => {
   res.json(FirewallService.getRules());
 });
 
-firewallRouter.post('/rules', requireAdmin, async (req: Request, res: Response): Promise<void> => {
+firewallRouter.post('/rules', requireAdmin, validateBody(createFirewallBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const { port, protocol, action, comment } = req.body;
-    if (!port) {
-      res.status(400).json({ error: 'Porta é obrigatória' });
-      return;
-    }
 
     const result = await FirewallService.addRule({
-      port: parseInt(port),
+      port: parseInt(String(port), 10),
       protocol: protocol || 'tcp',
       action: action || 'allow',
       comment: comment || 'Custom Rule',

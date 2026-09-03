@@ -29,6 +29,13 @@ export const changePasswordBodySchema = z
   })
   .strict();
 
+export const createUserBodySchema = z.object({
+  username,
+  password,
+  email: z.string().email().optional().or(z.literal('')),
+  role: z.enum(['admin', 'developer', 'viewer']).optional(),
+});
+
 export const createAppBodySchema = z.object({
   name: z.string().min(1).max(64),
   sourceType: z.enum(['git', 'dockerfile', 'image']).optional(),
@@ -43,6 +50,43 @@ export const createAppBodySchema = z.object({
   autoDeploy: z.boolean().optional(),
   deployBranch: z.string().optional(),
   nodeId: z.string().optional(),
+});
+
+export const updateAppBodySchema = z.object({
+  name: z.string().min(1).max(64).optional(),
+  port: z.union([z.number(), z.string(), z.literal('')]).optional().nullable(),
+  internalPort: z.union([z.number(), z.string()]).optional().nullable(),
+  imageName: z.string().optional(),
+  gitUrl: z.string().optional(),
+  branch: z.string().max(200).optional(),
+  domain: z.string().optional().nullable(),
+  githubToken: z.string().optional(),
+  autoDeploy: z.boolean().optional(),
+  deployBranch: z.string().optional(),
+  nodeId: z.string().optional().nullable(),
+});
+
+export const inspectRepoBodySchema = z.object({
+  gitUrl: z.string().min(1),
+  branch: z.string().optional(),
+  githubToken: z.string().optional(),
+});
+
+export const updateEnvBodySchema = z.object({
+  env: z.record(z.string()),
+});
+
+export const updateDomainBodySchema = z.object({
+  domain: z.string().optional().nullable(),
+});
+
+export const deployAppBodySchema = z.object({
+  commitMessage: z.string().max(500).optional(),
+});
+
+export const fileContentBodySchema = z.object({
+  filePath: z.string().min(1),
+  content: z.string(),
 });
 
 export const createDatabaseBodySchema = z.object({
@@ -62,3 +106,97 @@ export const createCronBodySchema = z.object({
   command: z.string().optional(),
   webhookUrl: z.string().optional(),
 });
+
+export const createNodeBodySchema = z.object({
+  name: z.string().min(1).max(120),
+  type: z.enum(['vps', 'local', 'cloud']).optional(),
+  hostIp: z.string().optional(),
+  location: z.string().optional(),
+  sshHost: z.string().optional(),
+  sshPort: z.union([z.number(), z.string()]).optional(),
+  sshUser: z.string().optional(),
+  sshPrivateKey: z.string().optional(),
+  sshPassphrase: z.string().optional(),
+  sshHostFingerprint: z.string().optional(),
+});
+
+export const updateNodeBodySchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  location: z.string().optional(),
+  sshHost: z.string().optional(),
+  sshPort: z.union([z.number(), z.string()]).optional(),
+  sshUser: z.string().optional(),
+  sshPrivateKey: z.string().optional(),
+  sshPassphrase: z.string().optional(),
+  sshHostFingerprint: z.string().optional(),
+});
+
+export const createDomainBodySchema = z.object({
+  domain: z.string().min(1),
+  targetPort: z.union([z.number(), z.string()]),
+  targetContainer: z.string().optional(),
+});
+
+export const checkDnsBodySchema = z.object({
+  domain: z.string().min(1),
+});
+
+export const createFirewallBodySchema = z.object({
+  port: z.union([z.number(), z.string()]),
+  protocol: z.enum(['tcp', 'udp', 'both']).optional(),
+  action: z.enum(['allow', 'deny']).optional(),
+  comment: z.string().max(200).optional(),
+});
+
+export const executeQueryBodySchema = z.object({
+  databaseId: z.string().min(1),
+  sql: z.string().min(1),
+});
+
+export const fileWriteBodySchema = z.object({
+  path: z.string().min(1),
+  content: z.string().optional(),
+});
+
+export const fileUploadBodySchema = z.object({
+  path: z.string().min(1),
+  base64: z.string().min(1),
+});
+
+export const fileFolderBodySchema = z.object({
+  path: z.string().min(1),
+});
+
+export const installTemplateBodySchema = z.object({
+  templateId: z.string().min(1),
+  customPort: z.union([z.number(), z.string()]).optional(),
+  customName: z.string().optional(),
+  apiKey: z.string().optional(),
+  postgresDbId: z.string().optional(),
+  redisDbId: z.string().optional(),
+  customEnv: z.record(z.string()).optional(),
+});
+
+export const upgradeAppBodySchema = z.object({
+  appId: z.string().min(1),
+});
+
+export const testAlertBodySchema = z.object({
+  channel: z.enum(['discord', 'telegram', 'whatsapp']),
+  webhookUrl: z.string().optional(),
+  botToken: z.string().optional(),
+  chatId: z.string().optional(),
+  apiUrl: z.string().optional(),
+  apiKey: z.string().optional(),
+  instance: z.string().optional(),
+  recipientNumber: z.string().optional(),
+});
+
+/** Settings is a large nested patch; keep unknown keys for forward-compat. */
+export const updateSettingsBodySchema = z.record(z.any());
+
+/**
+ * Import replaces the whole panel document. Shape is validated in-depth by
+ * dbStorage.validateState after parse — Zod only ensures we received an object.
+ */
+export const importStateBodySchema = z.object({ users: z.array(z.any()).min(1) }).passthrough();

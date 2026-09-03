@@ -14,6 +14,7 @@ import {
   changePasswordBodySchema,
   loginBodySchema,
   setupBodySchema,
+  createUserBodySchema,
 } from '../validation/schemas.js';
 
 export const authRouter = Router();
@@ -187,15 +188,9 @@ authRouter.get('/users', authMiddleware, requireAdmin, (req: AuthRequest, res: R
 });
 
 // Create team user
-authRouter.post('/users', authMiddleware, requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+authRouter.post('/users', authMiddleware, requireAdmin, validateBody(createUserBodySchema), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { username, password, email, role } = req.body || {};
-    const credentialError = validateCredentials(username, password);
-    if (credentialError) {
-      res.status(400).json({ error: credentialError });
-      return;
-    }
-
+    const { username, password, email, role } = req.body;
     if (dbStorage.getUserByUsername(username)) {
       res.status(400).json({ error: 'Nome de usuário já cadastrado' });
       return;
