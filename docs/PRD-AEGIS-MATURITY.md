@@ -4,8 +4,8 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 
 **Como usar:** marque `[x]` = feito · `[ ]` = falta. Atualize este arquivo quando fechar um item.
 
-**Entrega fases 1–5:** [PR #1](https://github.com/WendelDev0/aegispanel/pull/1) **mergeado** em `main` (`19f263b`) · VPS atualizada em `/opt/aegispanel`.  
-**Bloco 2 (gaps leves):** branch `cursor/prd-block2-gaps` (Zod expandido + split Create/Edit/Files + seletor de nó).
+**Entrega fases 1–5:** [PR #1](https://github.com/WendelDev0/aegispanel/pull/1) **mergeado** em `main` · VPS atualizada em `/opt/aegispanel`.  
+**Bloco 2 (gaps leves):** [PR #2](https://github.com/WendelDev0/aegispanel/pull/2) **mergeado** (Zod expandido + split Create/Edit/Files + seletor de nó) · VPS atualizada.
 
 ---
 
@@ -20,6 +20,8 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 
 ---
 
+
+
 ## Fase 1 — Persistência saudável
 
 - [x] `DeployLogStore` gravando em `DATA_DIR/deploy-logs`
@@ -33,6 +35,8 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 
 ---
 
+
+
 ## Fase 2 — Validação e rate limit
 
 - [x] Dependência `zod` no backend
@@ -43,6 +47,8 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 - [ ] Rotas só-ação sem body (`start`/`stop`/`restart`/`delete`/`run`/`toggle`) — opcional; baixo risco
 
 ---
+
+
 
 ## Fase 3 — Frontend sustentável
 
@@ -57,6 +63,8 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 
 ---
 
+
+
 ## Fase 4 — Deploy por nó
 
 - [x] `AppRecord.nodeId` opcional
@@ -69,6 +77,8 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 
 ---
 
+
+
 ## Fase 5 — Autogestão do painel
 
 - [x] `PanelService` com logs allowlisted (`aegis-backend`, `aegis-frontend`, `aegis-caddy`, `aegis-nginx`)
@@ -80,6 +90,8 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 - [ ] Feedback de progresso do self-update em tempo real (stream), não só resposta HTTP — **bloco 4**
 
 ---
+
+
 
 ## Critérios de aceite / entrega
 
@@ -95,44 +107,71 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 
 ---
 
+
+
 ## Próximos blocos (ainda no PRD)
 
+
+
 ### Bloco 3 — Deploy remoto real
+
 - [ ] Build/start no Docker do nó via SSH
 - [ ] Sync Caddy / rede cross-host
 
+
+
 ### Bloco 4 — Polish Fase 5
+
 - [ ] `AEGIS_COMPOSE_DIR` no install
 - [ ] Stream do self-update
 
+
+
 ### Bloco 5 — Resto / evolução
+
 - [ ] Itens restantes do AppsPage + testes UI
 - [ ] Evolução pós-PRD abaixo
 
 ---
 
+
+
 ## Próxima evolução (fora deste PRD)
 
+
+
 ### Alta
+
 - [ ] Cluster multi-servidor completo (deploy remoto de verdade)
 - [ ] Observabilidade por app (métricas, retenção de logs, histórico de alertas)
 
+
+
 ### Média
+
 - [ ] Auth mais forte (2FA, sessão revogável, audit log)
 - [ ] Backup offsite (S3/R2) + restore testado
 - [ ] Mais templates 1-click no marketplace
 
+
+
 ### Baixa
+
 - [ ] Polish de UI (mobile, empty states, onboarding pós-install)
 - [ ] CLI local espelhando o painel
 
 ---
 
+
+
 ## Legenda rápida
 
-| Símbolo | Significado |
-|---------|-------------|
-| `[x]` | Implementado |
-| `[ ]` | Ainda falta |
-| Baseline | Já estava no `main` antes deste PRD |
-| Bloco 3–5 | Próximas frentes após gaps leves |
+
+| Símbolo   | Significado                         |
+| --------- | ----------------------------------- |
+| `[x]`     | Implementado                        |
+| `[ ]`     | Ainda falta                         |
+| Baseline  | Já estava no `main` antes deste PRD |
+| Bloco 3–5 | Próximas frentes após gaps leves    |
+
+
