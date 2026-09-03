@@ -65,10 +65,29 @@ export class CaddyService {
    * inside the Caddy container resolves to Caddy itself, so a share of the
    * requests were proxied back into the proxy.
    */
-  private static renderSite(domain: string, upstream: string, useInternalTls: boolean): string {
+  private static renderSite(
+    domain: string,
+    upstream: string,
+    useInternalTls: boolean,
+    extras?: { securityHeaders?: boolean }
+  ): string {
     const lines = [`${domain} {`];
     if (useInternalTls) {
       lines.push('  tls internal');
+    }
+    if (extras?.securityHeaders) {
+      // The panel is a control plane. Apps keep their own headers; locking
+      // these down on every site would break embeds and third-party fonts.
+      lines.push('  header {');
+      lines.push('    Strict-Transport-Security "max-age=31536000; includeSubDomains"');
+      lines.push('    X-Frame-Options DENY');
+      lines.push('    X-Content-Type-Options nosniff');
+      lines.push('    Referrer-Policy no-referrer');
+      lines.push(
+        '    Content-Security-Policy "default-src \'self\'; img-src \'self\' data:; style-src \'self\' \'unsafe-inline\'; script-src \'self\'; connect-src \'self\' wss: ws:; frame-ancestors \'none\'"'
+      );
+      lines.push('    -Server');
+      lines.push('  }');
     }
     lines.push(`  reverse_proxy ${upstream} {`);
     lines.push('    header_up Host {host}');
@@ -182,7 +201,8 @@ export class CaddyService {
         content += this.renderSite(
           panelDomain,
           CONFIG.PANEL_UPSTREAM,
-          CONFIG.LOCAL_MODE || isLocalDomain(panelDomain)
+          CONFIG.LOCAL_MODE || isLocalDomain(panelDomain),
+          { securityHeaders: true }
         );
       } else {
         console.warn(`⚠️ Caddy: domínio do painel ignorado por formato inválido: "${panelDomain}"`);

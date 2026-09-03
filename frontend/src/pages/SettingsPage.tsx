@@ -22,9 +22,11 @@ import {
   AlertTriangle,
   Database,
 } from 'lucide-react';
-import { api } from '../services/api.js';
+import { api, persistSession } from '../services/api.js';
 import { socket } from '../services/socket.js';
 import { User } from '../types/index.js';
+import { SecuritySection } from '../components/settings/SecuritySection.js';
+import { AuditSection } from '../components/settings/AuditSection.js';
 
 /** Placeholder the API sends in place of a stored secret. */
 const SECRET_MASK = '••••••••';
@@ -64,9 +66,10 @@ const ROLE_LEGEND = [
 
 interface SettingsPageProps {
   currentUser: User | null;
+  onUserUpdate?: (user: User) => void;
 }
 
-export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
+export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserUpdate }) => {
   const isAdmin = currentUser?.role === 'admin';
 
   const [serverName, setServerName] = useState('');
@@ -255,7 +258,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
 
     try {
       setChangingPassword(true);
-      await api.post('/auth/change-password', { currentPassword, newPassword: newOwnPassword });
+      const res = await api.post('/auth/change-password', { currentPassword, newPassword: newOwnPassword });
+      if (res.data?.token) {
+        persistSession(res.data.token, currentUser);
+      }
       setCurrentPassword('');
       setNewOwnPassword('');
       alert('✅ Senha alterada. Ela já vale para os próximos logins.');
@@ -834,6 +840,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
         </div>
       </form>
 
+      <SecuritySection
+        currentUser={currentUser}
+        onUserUpdate={(user) => onUserUpdate?.(user)}
+      />
+
       {/* Change own password: available to every role, including viewers. */}
       <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
         <div className="flex items-center gap-2.5">
@@ -1192,6 +1203,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
           </div>
         </div>
       )}
+
+      {isAdmin && <AuditSection />}
     </div>
   );
 };

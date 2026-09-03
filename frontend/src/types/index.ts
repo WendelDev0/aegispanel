@@ -255,6 +255,7 @@ export interface User {
   username: string;
   email?: string;
   role: 'admin' | 'developer' | 'viewer';
+  totpEnabled?: boolean;
   createdAt?: string;
 }
 

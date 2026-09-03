@@ -122,6 +122,20 @@ ensure_secret() {
 ensure_secret JWT_SECRET
 ensure_secret ENCRYPTION_KEY
 
+# Optional panel hostname. The installer never binds :3000 on 0.0.0.0;
+# HTTPS is published by Caddy after the operator sets panelDomain in Settings.
+PANEL_DOMAIN_HINT=""
+if [ -t 0 ]; then
+    echo ""
+    echo "🌐 Domínio HTTPS do painel (opcional)."
+    echo "   Enter para manter só o túnel SSH (ssh -L 3000:127.0.0.1:3000)."
+    printf "   Domínio: "
+    read -r PANEL_DOMAIN_HINT || true
+    PANEL_DOMAIN_HINT="${PANEL_DOMAIN_HINT#https://}"
+    PANEL_DOMAIN_HINT="${PANEL_DOMAIN_HINT#http://}"
+    PANEL_DOMAIN_HINT="${PANEL_DOMAIN_HINT%%/*}"
+fi
+
 # Same path on the host and inside the backend container. Without this,
 # `docker compose` from the panel cannot find the project (cwd is /app).
 if grep -qE "^AEGIS_COMPOSE_DIR=" "$ENV_FILE"; then
@@ -143,8 +157,15 @@ SERVER_IP=$(curl -s --max-time 5 ifconfig.me || curl -s --max-time 5 icanhazip.c
 echo ""
 echo "======================================================================"
 echo "🎉 AegisPanel instalado com sucesso!"
-echo "👉 Painel: localhost:3000 (use SSH tunnel: ssh -L 3000:127.0.0.1:3000 usuario@servidor)"
+echo "👉 Painel (local): ssh -L 3000:127.0.0.1:3000 usuario@${SERVER_IP}"
+echo "   A porta 3000 continua em 127.0.0.1 — curl de fora deve recusar conexão."
+if [ -n "$PANEL_DOMAIN_HINT" ]; then
+    echo "👉 Depois do primeiro login: Configurações → Domínio próprio do painel = ${PANEL_DOMAIN_HINT}"
+    echo "   O Caddy emite HTTPS nesse hostname. Não altere PANEL_BIND para 0.0.0.0."
+else
+    echo "   Sem domínio, o acesso público fica só por túnel SSH. Você pode definir"
+    echo "   o hostname depois em Configurações → Domínio próprio do painel."
+fi
 echo ""
 echo "   No primeiro acesso você define a senha do administrador."
-echo "   Para acesso externo, aponte um domínio para o servidor e sirva o painel por HTTPS através do Caddy."
 echo "======================================================================"

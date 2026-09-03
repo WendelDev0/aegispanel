@@ -29,6 +29,19 @@ export const changePasswordBodySchema = z
   })
   .strict();
 
+export const totpConfirmBodySchema = z
+  .object({
+    code: z.string().min(4).max(16),
+  })
+  .strict();
+
+export const totpDisableBodySchema = z
+  .object({
+    password: z.string().min(1).max(512),
+    code: z.string().min(4).max(16),
+  })
+  .strict();
+
 export const createUserBodySchema = z.object({
   username,
   password,

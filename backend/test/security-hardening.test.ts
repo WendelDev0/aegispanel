@@ -18,8 +18,12 @@ test('revoga tokens quando o papel do usuário muda', () => {
   };
 
   dbStorage.saveUser(user);
+  const session = dbStorage.createSession({
+    userId: user.id,
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+  });
   try {
-    const token = signToken(user);
+    const token = signToken({ ...user, sid: session.id, tokenVersion: 0 });
     assert.equal(authenticateToken(token).role, 'admin');
 
     user.role = 'viewer';

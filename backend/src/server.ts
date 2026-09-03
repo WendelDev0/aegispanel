@@ -1,5 +1,6 @@
 import express from 'express';
 import http from 'http';
+import path from 'path';
 import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
 import { CONFIG } from './config.js';
@@ -13,6 +14,7 @@ import { AnalyticsService } from './services/analytics.service.js';
 import { CicdService } from './services/cicd.service.js';
 import { authenticateToken, AuthUser } from './middleware/auth.js';
 import { dbStorage } from './db/storage.js';
+import { AuditStore } from './utils/audit.store.js';
 
 // Routers
 import { authRouter } from './routes/auth.routes.js';
@@ -36,14 +38,28 @@ const server = http.createServer(app);
 
 // An empty allowlist means same-origin only, which is the deployed topology:
 // the browser talks to Caddy/nginx, which proxies /api to this process.
-const corsOptions: cors.CorsOptions = CONFIG.CORS_ORIGINS.length
-  ? { origin: CONFIG.CORS_ORIGINS, credentials: true }
-  : { origin: false };
+function allowedBrowserOrigin(origin: string | undefined): boolean {
+  if (!origin) return false;
+  if (CONFIG.CORS_ORIGINS.includes(origin)) return true;
+  if (CONFIG.CORS_ORIGINS.length) return false;
+  const domain = dbStorage.getSettings().panelDomain?.toLowerCase().trim();
+  if (!domain) return false;
+  if (origin === `https://${domain}`) return true;
+  return CONFIG.LOCAL_MODE && origin === `http://${domain}`;
+}
+
+const corsOrigin: cors.CorsOptions['origin'] = (origin, cb) => {
+  if (!origin) {
+    cb(null, true);
+    return;
+  }
+  cb(null, allowedBrowserOrigin(origin));
+};
+
+const corsOptions: cors.CorsOptions = { origin: corsOrigin, credentials: true };
 
 export const io = new SocketIOServer(server, {
-  cors: CONFIG.CORS_ORIGINS.length
-    ? { origin: CONFIG.CORS_ORIGINS, methods: ['GET', 'POST'], credentials: true }
-    : { origin: false },
+  cors: { origin: corsOrigin, methods: ['GET', 'POST'], credentials: true },
 });
 setIo(io);
 
@@ -138,6 +154,27 @@ io.on('connection', (socket) => {
 });
 
 /**
+ * Re-check the session on every connected socket. A revoke in the UI must
+ * drop the terminal within one interval, not at the next JWT expiry.
+ */
+const SESSION_WATCH_MS = 30_000;
+const sessionWatchTimer = setInterval(() => {
+  for (const socket of io.sockets.sockets.values()) {
+    const token = socket.data.authToken as string | undefined;
+    if (!token) {
+      socket.disconnect(true);
+      continue;
+    }
+    try {
+      socket.data.user = authenticateToken(token);
+    } catch {
+      socket.emit('session:revoked');
+      socket.disconnect(true);
+    }
+  }
+}, SESSION_WATCH_MS);
+
+/**
  * Broadcast realtime system metrics.
  *
  * Skips the sample entirely when nobody is listening, and never lets two
@@ -183,6 +220,9 @@ let lastStorageAlertAt = 0;
 
 const storageTimer = setInterval(() => {
   try {
+    dbStorage.pruneSessions();
+    AuditStore.archiveAndPrune(12, path.join(CONFIG.DATA_DIR, 'backups', 'audit-archive'));
+
     const health = dbStorage.getStorageHealth();
 
     // Auto-prune old deployment logs when the file gets large.
@@ -266,6 +306,7 @@ function shutdown(signal: string) {
   console.log(`\n${signal} recebido, encerrando...`);
   clearInterval(metricsTimer);
   clearInterval(storageTimer);
+  clearInterval(sessionWatchTimer);
   CronService.stop();
   AnalyticsService.stop();
   io.close();

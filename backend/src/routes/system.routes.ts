@@ -4,9 +4,10 @@ import { CaddyService } from '../services/caddy.service.js';
 import { AlertService } from '../services/alert.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { dbStorage, PanelSettings, AlertConfig } from '../db/storage.js';
-import { authMiddleware, requireAdmin, AuthRequest } from '../middleware/auth.js';
+import { authMiddleware, requireAdmin, AuthRequest, clientIp } from '../middleware/auth.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { PanelService } from '../services/panel.service.js';
+import { AuditStore } from '../utils/audit.store.js';
 import { validateBody } from '../middleware/validate.js';
 import {
   updateSettingsBodySchema,
@@ -206,6 +207,14 @@ systemRouter.post('/import-state', requireAdmin, validateBody(importStateBodySch
 
     dbStorage.importState(stateData);
 
+    AuditStore.append({
+      actor: { id: req.user!.id, username: req.user!.username, role: req.user!.role },
+      sid: req.user!.sid,
+      ip: clientIp(req),
+      action: 'system.import',
+      outcome: 'success',
+    });
+
     res.json({
       success: true,
       warning: importedUsers.some((u) => u.id === req.user!.id)
@@ -245,6 +254,42 @@ systemRouter.get('/activities', (req: Request, res: Response): void => {
 systemRouter.get('/alert-history', (req: Request, res: Response): void => {
   const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
   res.json(dbStorage.getAlertHistory(undefined, limit));
+});
+
+systemRouter.get('/audit', requireAdmin, (req: Request, res: Response): void => {
+  const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 200;
+  const from = typeof req.query.from === 'string' ? new Date(req.query.from) : undefined;
+  const to = typeof req.query.to === 'string' ? new Date(req.query.to) : undefined;
+  const actor = typeof req.query.actor === 'string' ? req.query.actor : undefined;
+  const action = typeof req.query.action === 'string' ? req.query.action : undefined;
+  const events = AuditStore.query({
+    from: from && !Number.isNaN(from.getTime()) ? from : undefined,
+    to: to && !Number.isNaN(to.getTime()) ? to : undefined,
+    actor,
+    action,
+    limit,
+  });
+  if (req.query.format === 'csv') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=aegis-audit.csv');
+    const csvCell = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const header = 'ts,actor,role,ip,action,outcome\n';
+    const rows = events
+      .map((e) =>
+        [
+          csvCell(e.ts),
+          csvCell(e.actor?.username || ''),
+          csvCell(e.actor?.role || ''),
+          csvCell(e.ip || ''),
+          csvCell(e.action),
+          csvCell(e.outcome),
+        ].join(',')
+      )
+      .join('\n');
+    res.send(header + rows);
+    return;
+  }
+  res.json(events);
 });
 
 // Test a notification channel
@@ -304,15 +349,30 @@ systemRouter.get('/panel/logs/:target', requireAdmin, async (req: Request, res: 
   }
 });
 
-systemRouter.post('/panel/self-update', requireAdmin, validateBody(emptyBodySchema), async (_req: Request, res: Response): Promise<void> => {
+systemRouter.post('/panel/self-update', requireAdmin, validateBody(emptyBodySchema), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const result = await PanelService.selfUpdate();
+    AuditStore.append({
+      actor: req.user ? { id: req.user.id, username: req.user.username, role: req.user.role } : undefined,
+      sid: req.user?.sid,
+      ip: clientIp(req),
+      action: 'panel.self-update',
+      outcome: 'success',
+    });
     res.json({
       success: true,
       message: 'Self-update da stack iniciado/concluído.',
       output: result.output,
     });
   } catch (err: any) {
+    AuditStore.append({
+      actor: req.user ? { id: req.user.id, username: req.user.username, role: req.user.role } : undefined,
+      sid: req.user?.sid,
+      ip: clientIp(req),
+      action: 'panel.self-update',
+      outcome: 'failure',
+      meta: { error: err.message },
+    });
     res.status(400).json({ error: err.message });
   }
 });

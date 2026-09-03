@@ -4,6 +4,7 @@ import { CONFIG } from '../config.js';
 import { dbStorage, BackupRecord, DatabaseRecord } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
 import { EncryptionService } from '../utils/crypto.js';
+import { AuditStore } from '../utils/audit.store.js';
 
 const DUMP_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_RESTORE_BYTES = 512 * 1024 * 1024;
@@ -388,6 +389,7 @@ export class BackupService {
       const state = dbStorage.exportState();
       const payload = JSON.stringify(state, null, 2);
       fs.writeFileSync(targetPath, payload, { encoding: 'utf-8', mode: 0o600 });
+      AuditStore.snapshotTo(path.join(this.backupDir, `audit_${timestamp}`));
       const stats = fs.statSync(targetPath);
 
       const record: BackupRecord = {

@@ -141,4 +141,22 @@ export const CONFIG = {
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean),
+
+  /**
+   * Admins must enroll TOTP before opening a host shell. Default on in
+   * production: the host shell is root via the Docker socket.
+   *
+   * Read at access time so tests can flip the env without reloading the module.
+   */
+  get REQUIRE_2FA_ADMIN() {
+    return isRequire2faAdmin();
+  },
 };
+
+/** Whether admins must enroll TOTP before privileged host actions. */
+export function isRequire2faAdmin(): boolean {
+  return (
+    process.env.AEGIS_REQUIRE_2FA_ADMIN === 'true' ||
+    (process.env.AEGIS_REQUIRE_2FA_ADMIN !== 'false' && process.env.NODE_ENV === 'production')
+  );
+}

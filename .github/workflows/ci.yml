@@ -84,7 +84,7 @@ jobs:
       # into the repository is identical on every installation.
       - name: Reject hardcoded secret defaults
         run: |
-          if grep -rnE "(JWT_SECRET|ENCRYPTION_KEY)\s*[:=]\s*['\"][^'\"$]{8,}" \
+          if grep -rnE "(JWT_SECRET|ENCRYPTION_KEY|TOTP_SECRET|AWS_SECRET_ACCESS_KEY|S3_SECRET(_ACCESS_KEY)?)\s*[:=]\s*['\"][^'\"$]{8,}" \
               --include='*.ts' --include='*.yml' --include='*.yaml' \
               backend/src docker-compose.yml; then
             echo "::error::Segredo com valor padrão embutido no código."

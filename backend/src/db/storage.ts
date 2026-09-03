@@ -13,7 +13,23 @@ export interface User {
   role: UserRole;
   /** Incremented whenever the user's credentials or permissions change. */
   tokenVersion?: number;
+  /** Encrypted TOTP secret (`aegis.v1:`). Never returned by the API. */
+  totpSecret?: string;
+  totpEnabled?: boolean;
+  /** bcrypt hashes of one-time recovery codes. */
+  totpRecoveryHashes?: string[];
   createdAt: string;
+}
+
+export interface SessionRecord {
+  id: string;
+  userId: string;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  ip?: string;
+  userAgent?: string;
+  revokedAt?: string;
 }
 
 export interface DatabaseRecord {
@@ -236,6 +252,7 @@ export interface DatabaseSchema {
   serverNodes: ServerNode[];
   activities: ActivityRecord[];
   alertHistory: AlertHistoryRecord[];
+  sessions: SessionRecord[];
   settings: PanelSettings;
 }
 
@@ -246,6 +263,7 @@ const DEFAULT_DATA: DatabaseSchema = {
   deployments: [],
   activities: [],
   alertHistory: [],
+  sessions: [],
   cronJobs: [
     {
       id: 'cron-daily-backup',
@@ -426,6 +444,95 @@ class JsonStorage {
     return user;
   }
 
+  private ensureSessions(): SessionRecord[] {
+    if (!this.data.sessions) this.data.sessions = [];
+    return this.data.sessions;
+  }
+
+  createSession(entry: Omit<SessionRecord, 'id' | 'createdAt' | 'lastSeenAt'> & { id?: string }): SessionRecord {
+    const now = new Date().toISOString();
+    const session: SessionRecord = {
+      id: entry.id || `ses-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 8)}`,
+      userId: entry.userId,
+      createdAt: now,
+      lastSeenAt: now,
+      expiresAt: entry.expiresAt,
+      ip: entry.ip,
+      userAgent: entry.userAgent,
+    };
+    const list = this.ensureSessions();
+    list.push(session);
+    const mine = list.filter((s) => s.userId === entry.userId && !s.revokedAt);
+    if (mine.length > 20) {
+      const oldest = mine.sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+      oldest.revokedAt = now;
+    }
+    this.save();
+    return session;
+  }
+
+  getSession(id: string): SessionRecord | undefined {
+    return this.ensureSessions().find((s) => s.id === id);
+  }
+
+  listSessions(userId?: string): SessionRecord[] {
+    const list = this.ensureSessions();
+    return userId ? list.filter((s) => s.userId === userId) : [...list];
+  }
+
+  touchSession(id: string): void {
+    const session = this.getSession(id);
+    if (!session || session.revokedAt) return;
+    const now = Date.now();
+    if (now - Date.parse(session.lastSeenAt) < 60_000) return;
+    session.lastSeenAt = new Date(now).toISOString();
+    this.save();
+  }
+
+  revokeSession(id: string): SessionRecord | undefined {
+    const session = this.getSession(id);
+    if (!session || session.revokedAt) return session;
+    session.revokedAt = new Date().toISOString();
+    this.save();
+    return session;
+  }
+
+  revokeUserSessions(userId: string, exceptId?: string): number {
+    const now = new Date().toISOString();
+    let n = 0;
+    for (const session of this.ensureSessions()) {
+      if (session.userId !== userId || session.revokedAt) continue;
+      if (exceptId && session.id === exceptId) continue;
+      session.revokedAt = now;
+      n++;
+    }
+    if (n) this.save();
+    return n;
+  }
+
+  pruneSessions(): number {
+    const now = Date.now();
+    const cutoff = now - 7 * 24 * 60 * 60 * 1000;
+    const before = this.ensureSessions().length;
+    this.data.sessions = this.ensureSessions().filter((s) => {
+      if (s.revokedAt && Date.parse(s.revokedAt) < cutoff) return false;
+      if (!s.revokedAt && Date.parse(s.expiresAt) < now) return false;
+      return true;
+    });
+    const removed = before - this.data.sessions.length;
+    if (removed) this.save();
+    return removed;
+  }
+
+  extendSession(id: string, expiresAt: string): SessionRecord | undefined {
+    const session = this.getSession(id);
+    if (!session || session.revokedAt) return undefined;
+    session.expiresAt = expiresAt;
+    session.lastSeenAt = new Date().toISOString();
+    this.save();
+    return session;
+  }
+
   /** Snapshot of the in-memory document, for the migration export. */
   exportState(): DatabaseSchema {
     return structuredClone(this.data);
@@ -454,6 +561,8 @@ class JsonStorage {
       'firewallRules',
       'serverNodes',
       'activities',
+      'alertHistory',
+      'sessions',
     ];
 
     for (const key of arrayKeys) {
@@ -509,6 +618,10 @@ class JsonStorage {
       ...user,
       tokenVersion: (user.tokenVersion ?? 0) + 1,
     }));
+    const now = new Date().toISOString();
+    this.data.sessions = (this.data.sessions || []).map((s) =>
+      s.revokedAt ? s : { ...s, revokedAt: now }
+    );
     this.save();
     return this.data;
   }
@@ -778,6 +891,7 @@ class JsonStorage {
     const initialLen = this.data.users.length;
     this.data.users = this.data.users.filter(u => u.id !== id);
     if (this.data.users.length !== initialLen) {
+      this.revokeUserSessions(id);
       this.save();
       return true;
     }
@@ -861,6 +975,7 @@ class JsonStorage {
         serverNodes: this.data.serverNodes?.length ?? 0,
         activities: this.data.activities?.length ?? 0,
         alertHistory: this.data.alertHistory?.length ?? 0,
+        sessions: this.data.sessions?.length ?? 0,
       },
     };
   }
@@ -873,6 +988,7 @@ class JsonStorage {
    * older entries to a short summary.
    */
   pruneDeployments(maxPerApp: number = 30, _logTruncateLength: number = 500): number {
+    this.pruneSessions();
     if (!this.data.deployments?.length) return 0;
 
     const byApp = new Map<string, DeploymentRecord[]>();

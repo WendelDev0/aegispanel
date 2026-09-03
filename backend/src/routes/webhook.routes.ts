@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { dbStorage } from '../db/storage.js';
 import { CicdService } from '../services/cicd.service.js';
 import { AppService } from '../services/app.service.js';
+import { AuditStore } from '../utils/audit.store.js';
 
 export const webhookRouter = Router();
 
@@ -20,6 +21,11 @@ function safeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
   const bufB = Buffer.from(b);
   return bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
+}
+
+function webhookIp(req: Request): string | undefined {
+  const ip = req.ip || req.socket.remoteAddress;
+  return ip?.replace(/^::ffff:/, '') || undefined;
 }
 
 // Simple per-app throttle so a leaked URL cannot be used to spin the build
@@ -46,6 +52,13 @@ webhookRouter.post('/deploy/:appId', async (req: RawBodyRequest, res: Response):
      * panel, rather than being left open.
      */
     if (!app.webhookSecret) {
+      AuditStore.append({
+        ip: webhookIp(req),
+        action: 'webhook.deploy.reject',
+        outcome: 'forbidden',
+        target: { type: 'app', id: app.id, name: app.name },
+        meta: { reason: 'missing_secret' },
+      });
       res.status(403).json({
         error:
           'Esta aplicação não possui segredo de webhook configurado. Gere um no painel em Aplicações > Webhook antes de usar o deploy automático.',
@@ -62,6 +75,13 @@ webhookRouter.post('/deploy/:appId', async (req: RawBodyRequest, res: Response):
 
     if (!authorized) {
       console.warn(`⛔ Webhook rejeitado para "${app.name}": credencial inválida.`);
+      AuditStore.append({
+        ip: webhookIp(req),
+        action: 'webhook.deploy.reject',
+        outcome: 'forbidden',
+        target: { type: 'app', id: app.id, name: app.name },
+        meta: { reason: 'invalid_credential' },
+      });
       res.status(403).json({ error: 'Credencial de webhook inválida' });
       return;
     }
@@ -92,6 +112,14 @@ webhookRouter.post('/deploy/:appId', async (req: RawBodyRequest, res: Response):
     }
 
     console.log(`🚀 [CI/CD] Webhook aceito para "${app.name}" na branch "${branch}" - commit ${commitHash}`);
+
+    AuditStore.append({
+      ip: webhookIp(req),
+      action: 'webhook.deploy.accept',
+      outcome: 'success',
+      target: { type: 'app', id: app.id, name: app.name },
+      meta: { branch, commitHash },
+    });
 
     CicdService.executeDeploy(app, {
       commitHash,

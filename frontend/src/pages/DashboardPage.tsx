@@ -41,7 +41,7 @@ import {
   CartesianGrid,
   Legend
 } from 'recharts';
-import { OverviewData, SystemStats, ActivityRecord } from '../types/index.js';
+import { OverviewData, SystemStats, ActivityRecord, User } from '../types/index.js';
 import { NavTab } from '../components/Sidebar.js';
 import { api } from '../services/api.js';
 import { toneForUsage } from '../components/ui.js';
@@ -50,6 +50,7 @@ interface DashboardPageProps {
   overview: OverviewData | null;
   realtimeStats: SystemStats | null;
   setActiveTab: (tab: NavTab) => void;
+  currentUser?: User | null;
 }
 
 interface MetricHistoryPoint {
@@ -131,6 +132,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   overview,
   realtimeStats,
   setActiveTab,
+  currentUser,
 }) => {
   const stats = realtimeStats || overview?.system;
 
@@ -152,7 +154,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const [speedtestResult, setSpeedtestResult] = useState<SpeedtestResult | null>(null);
 
   // Global Activity Timeline State
+  const [httpsExpected, setHttpsExpected] = useState(false);
   const [activities, setActivities] = useState<ActivityRecord[]>([]);
+
+  useEffect(() => {
+    api
+      .get('/auth/status')
+      .then((res) => setHttpsExpected(Boolean(res.data?.httpsExpected)))
+      .catch(() => setHttpsExpected(false));
+  }, []);
   const [activityFilter, setActivityFilter] = useState<'all' | 'deploy' | 'domain' | 'database' | 'alert'>('all');
   const [loadingActivities, setLoadingActivities] = useState(false);
 
@@ -265,6 +275,32 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   return (
     <div className="space-y-6">
+      {currentUser?.role === 'admin' && !currentUser.totpEnabled && (
+        <button
+          type="button"
+          onClick={() => setActiveTab('settings')}
+          className="w-full text-left flex items-start gap-3 p-4 rounded-lg border border-warn/40 bg-warn/10"
+        >
+          <AlertTriangle className="w-5 h-5 text-warn shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-warn">Ative a autenticação em dois fatores</p>
+            <p className="text-xs text-on-surface-variant mt-0.5">
+              Contas admin sem 2FA não abrem o terminal do host. Configure em Configurações → Segurança.
+            </p>
+          </div>
+        </button>
+      )}
+      {httpsExpected && window.location.protocol === 'http:' && (
+        <div className="flex items-start gap-3 p-4 rounded-lg border border-crit/40 bg-crit/10">
+          <AlertTriangle className="w-5 h-5 text-crit shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-crit">O painel está respondendo em HTTP</p>
+            <p className="text-xs text-on-surface-variant mt-0.5">
+              Há um domínio configurado para HTTPS. Acesse pelo hostname do painel, não pela porta 3000.
+            </p>
+          </div>
+        </div>
+      )}
       {/* Header banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-surface-container p-5 rounded-lg border border-outline-variant">
         <div>

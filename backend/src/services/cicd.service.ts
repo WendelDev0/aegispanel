@@ -16,6 +16,7 @@ import { CONFIG } from '../config.js';
 import { assertSafeGitUrl, SafeGitTarget } from '../utils/url-security.js';
 import { injectPublicBuildArgs, publicBuildArgMap, publicBuildArgs } from '../utils/build-env.js';
 import { remoteWorkloadPlacement } from '../utils/app-upstream.js';
+import { redactSecrets as redactSecretText } from '../utils/redact.js';
 
 const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 const BUILD_TIMEOUT_MS = 30 * 60 * 1000;
@@ -144,10 +145,7 @@ export class CicdService {
 
   /** Removes embedded credentials from anything that may reach a log or the UI. */
   static redactSecrets(text: string): string {
-    return text
-      .replace(/https:\/\/[^@\s/]+@/g, 'https://***@')
-      .replace(/\b(gh[pousr]_[A-Za-z0-9]{16,})\b/g, '***')
-      .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, '***');
+    return redactSecretText(text);
   }
 
   private static redactAppSecrets(text: string, app: AppRecord): string {

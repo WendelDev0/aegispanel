@@ -51,61 +51,61 @@ Ordem de valor: **1 → 2 → 3 → 4 → 5**. As duas primeiras são o que um c
 
 ### 1.1 — 2FA TOTP
 
-- [ ] `users[].totpSecret` cifrado (`utils/crypto.ts`, prefixo `aegis.v1:`), nunca em `toPublic()`
-- [ ] Fluxo: `POST /api/auth/2fa/setup` (QR + segredo) → `POST /api/auth/2fa/confirm` (código válido) → ativo
-- [ ] Login em duas etapas: senha OK → token curto `pending2fa` (5 min, sem acesso a rotas) → `POST /api/auth/2fa/verify` → JWT completo
-- [ ] Códigos de recuperação (10, hash bcrypt, uso único)
-- [ ] **Obrigatório para `admin`** quando `AEGIS_REQUIRE_2FA_ADMIN=true` (default `true` em produção)
-- [ ] Desativar 2FA exige senha + código atual
-- [ ] Tela em Settings → Segurança; banner no dashboard enquanto admin estiver sem 2FA
+- [x] `users[].totpSecret` cifrado (`utils/crypto.ts`, prefixo `aegis.v1:`), nunca em `toPublic()`
+- [x] Fluxo: `POST /api/auth/2fa/setup` (QR + segredo) → `POST /api/auth/2fa/confirm` (código válido) → ativo
+- [x] Login em duas etapas: senha OK → token curto `pending2fa` (5 min, sem acesso a rotas) → `POST /api/auth/2fa/verify` → JWT completo
+- [x] Códigos de recuperação (10, hash bcrypt, uso único)
+- [x] **Obrigatório para `admin`** quando `AEGIS_REQUIRE_2FA_ADMIN=true` (default `true` em produção)
+- [x] Desativar 2FA exige senha + código atual
+- [x] Tela em Settings → Segurança; banner no dashboard enquanto admin estiver sem 2FA
 
 ### 1.2 — Sessões revogáveis por dispositivo
 
-- [ ] Coleção `sessions[]` em `DEFAULT_DATA` + `DatabaseSchema`: `id, userId, createdAt, lastSeenAt, ip, userAgent, revokedAt?`
-- [ ] JWT carrega `sid`; `authMiddleware` rejeita `sid` ausente/revogado (além do `tokenVersion` já existente)
-- [ ] `GET /api/auth/sessions` (próprias) · `DELETE /api/auth/sessions/:id` · admin pode listar/revogar de qualquer usuário
-- [ ] Expiração: JWT 24h + refresh silencioso pelo `sid` (substitui os 7 dias fixos)
-- [ ] Logout revoga o `sid`, não só limpa o `localStorage`
-- [ ] Socket.IO: handshake valida `sid`; sessão revogada derruba o socket em até 30s
-- [ ] Prune de sessões expiradas junto com `pruneDeployments()`
+- [x] Coleção `sessions[]` em `DEFAULT_DATA` + `DatabaseSchema`: `id, userId, createdAt, lastSeenAt, ip, userAgent, revokedAt?`
+- [x] JWT carrega `sid`; `authMiddleware` rejeita `sid` ausente/revogado (além do `tokenVersion` já existente)
+- [x] `GET /api/auth/sessions` (próprias) · `DELETE /api/auth/sessions/:id` · admin pode listar/revogar de qualquer usuário
+- [x] Expiração: JWT 24h + refresh silencioso pelo `sid` (substitui os 7 dias fixos)
+- [x] Logout revoga o `sid`, não só limpa o `localStorage`
+- [x] Socket.IO: handshake valida `sid`; sessão revogada derruba o socket em até 30s
+- [x] Prune de sessões expiradas junto com `pruneDeployments()`
 
 ### 1.3 — Audit log imutável
 
 Hoje `activities[]` é feed de UI (“deploy feito”), não auditoria: não tem ator, IP, nem garantia de não-edição.
 
-- [ ] `AuditStore` em `DATA_DIR/audit/YYYY-MM.jsonl` — append-only, uma linha por evento, fora do `panel_db.json`
-- [ ] Evento: `ts, actor{id,username,role}, sid, ip, action, target{type,id,name}, outcome, meta`
-- [ ] Middleware em toda rota `requireWrite`/`requireAdmin`: grava **sucesso e falha** (403 também é evento)
-- [ ] Eventos fora de HTTP: login OK/falha, 2FA falha, sessão revogada, terminal aberto, self-update, restore, import de estado, webhook aceito/rejeitado
-- [ ] `meta` passa por `redactSecrets()` — token, senha, env values nunca entram
-- [ ] `GET /api/system/audit?from&to&actor&action` (admin) + tela em Settings → Auditoria com filtro e export CSV
-- [ ] Retenção: 12 meses; arquivos antigos entram no backup do painel antes de serem removidos
-- [ ] Teste: rota mutante sem evento de auditoria **falha o teste** (varredura das rotas registradas)
+- [x] `AuditStore` em `DATA_DIR/audit/YYYY-MM.jsonl` — append-only, uma linha por evento, fora do `panel_db.json`
+- [x] Evento: `ts, actor{id,username,role}, sid, ip, action, target{type,id,name}, outcome, meta`
+- [x] Middleware em toda rota `requireWrite`/`requireAdmin`: grava **sucesso e falha** (403 também é evento)
+- [x] Eventos fora de HTTP: login OK/falha, 2FA falha, sessão revogada, terminal aberto, self-update, restore, import de estado, webhook aceito/rejeitado
+- [x] `meta` passa por `redactSecrets()` — token, senha, env values nunca entram
+- [x] `GET /api/system/audit?from&to&actor&action` (admin) + tela em Settings → Auditoria com filtro e export CSV
+- [x] Retenção: 12 meses; arquivos antigos entram no backup do painel antes de serem removidos
+- [x] Teste: rota mutante sem evento de auditoria **falha o teste** (varredura das rotas registradas)
 
 ### 1.4 — Painel só por HTTPS
 
 Hoje o acesso é `ssh -L 3000:127.0.0.1:3000`. Funciona, mas cliente quer URL.
 
-- [ ] `settings.panelDomain` opcional; `CaddyService` gera site `panelDomain → aegis-frontend:80` com TLS automático
-- [ ] Quando `panelDomain` está definido: `PANEL_BIND` continua `127.0.0.1` (Caddy fala pela rede interna), 3000 **nunca** vai para `0.0.0.0`
-- [ ] Headers no site do painel: HSTS, `X-Frame-Options: DENY`, CSP mínima, sem `Server`
-- [ ] `install.sh` pergunta o domínio do painel; sem domínio, mantém o túnel e avisa
-- [ ] `CORS_ORIGINS` passa a ser derivado de `panelDomain` quando vazio
-- [ ] Alerta no dashboard se o painel responder em HTTP puro fora de `LOCAL_MODE`
+- [x] `settings.panelDomain` opcional; `CaddyService` gera site `panelDomain → aegis-frontend:80` com TLS automático
+- [x] Quando `panelDomain` está definido: `PANEL_BIND` continua `127.0.0.1` (Caddy fala pela rede interna), 3000 **nunca** vai para `0.0.0.0`
+- [x] Headers no site do painel: HSTS, `X-Frame-Options: DENY`, CSP mínima, sem `Server`
+- [x] `install.sh` pergunta o domínio do painel; sem domínio, mantém o túnel e avisa
+- [x] `CORS_ORIGINS` passa a ser derivado de `panelDomain` quando vazio
+- [x] Alerta no dashboard se o painel responder em HTTP puro fora de `LOCAL_MODE`
 
 ### 1.5 — CI de volta ao verde
 
 - [ ] Desbloquear billing do GitHub Actions (ação humana — Settings → Billing)
 - [ ] Re-rodar workflow do `main`; `npm run check` verde no CI, não só local
 - [ ] Branch protection em `main`: PR obrigatório + CI verde + 1 review (mesmo que seja o próprio autor via conta secundária)
-- [ ] CI grep já falha com default literal de `JWT_SECRET`/`ENCRYPTION_KEY`; adicionar `TOTP_*` e chaves S3 à mesma verificação
+- [x] CI grep já falha com default literal de `JWT_SECRET`/`ENCRYPTION_KEY`; adicionar `TOTP_*` e chaves S3 à mesma verificação
 
 ### Critérios de aceite — Fase 1
 
-- [ ] Admin sem 2FA não consegue abrir o terminal do host (403 + evento de auditoria)
-- [ ] Revogar uma sessão no painel derruba a aba correspondente em ≤ 30s
-- [ ] Toda rota `requireWrite` tem evento no audit (teste automatizado)
-- [ ] Painel acessível em `https://painel.dominio` sem porta, `curl :3000` de fora → connection refused
+- [x] Admin sem 2FA não consegue abrir o terminal do host (403 + evento de auditoria)
+- [x] Revogar uma sessão no painel derruba a aba correspondente em ≤ 30s
+- [x] Toda rota `requireWrite` tem evento no audit (teste automatizado)
+- [x] Painel acessível em `https://painel.dominio` sem porta, `curl :3000` de fora → connection refused
 - [ ] CI verde no `main`
 
 ---
@@ -193,7 +193,7 @@ Backup que nunca foi restaurado é hipótese, não backup.
 `DATA_DIR/builds/<appId>` cresce a cada deploy (clone + `node_modules`). Logs já têm teto; builds não.
 
 - [ ] `settings.buildsDiskCapMb` (default 5 GB) — após cada deploy, remove `node_modules`/`.next`/`dist` de clones antigos até caber
-- [ ] `git clone --depth 1` por padrão (já usa `--depth`? verificar; se não, adotar)
+- [x] `git clone --depth 1 --single-branch` (já é o padrão em `cicd.service.ts`)
 - [ ] Imagens `aegis-app-*` órfãs (sem deployment apontando) → `prune` semanal, preserva as 3 últimas por app para rollback
 - [ ] `GET /api/system/storage-health` passa a reportar `builds`, `images`, `logs`, `backups` separados
 - [ ] Alerta quando disco do host < 10% livre (já existe monitor de `panel_db.json`; estender)
