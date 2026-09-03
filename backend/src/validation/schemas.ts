@@ -200,3 +200,12 @@ export const updateSettingsBodySchema = z.record(z.any());
  * dbStorage.validateState after parse — Zod only ensures we received an object.
  */
 export const importStateBodySchema = z.object({ users: z.array(z.any()).min(1) }).passthrough();
+
+/**
+ * Action routes (start/stop/restart/delete/run/toggle) must not accept a
+ * payload. Clients often omit the body entirely; treat undefined/null as {}.
+ */
+export const emptyBodySchema = z.preprocess(
+  (val) => (val === undefined || val === null ? {} : val),
+  z.object({}).strict()
+);

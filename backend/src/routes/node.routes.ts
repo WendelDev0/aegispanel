@@ -4,7 +4,7 @@ import { NodeService, LOCAL_NODE_ID } from '../services/node.service.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { authMiddleware, requireAdmin } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
-import { createNodeBodySchema, updateNodeBodySchema } from '../validation/schemas.js';
+import { createNodeBodySchema, updateNodeBodySchema, emptyBodySchema } from '../validation/schemas.js';
 
 export const nodeRouter = Router();
 
@@ -219,7 +219,7 @@ nodeRouter.put('/:id', requireAdmin, validateBody(updateNodeBodySchema), (req: R
 });
 
 /** Connects to the node and reports what actually happened. */
-nodeRouter.post('/:id/check', requireAdmin, async (req: Request, res: Response): Promise<void> => {
+nodeRouter.post('/:id/check', requireAdmin, validateBody(emptyBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     res.json(await NodeService.checkHealth(req.params.id));
   } catch (err: any) {
@@ -227,7 +227,7 @@ nodeRouter.post('/:id/check', requireAdmin, async (req: Request, res: Response):
   }
 });
 
-nodeRouter.post('/select/:id', requireAdmin, (req: Request, res: Response): void => {
+nodeRouter.post('/select/:id', requireAdmin, validateBody(emptyBodySchema), (req: Request, res: Response): void => {
   const nodes = dbStorage.getServerNodes();
   const target = nodes.find((n) => n.id === req.params.id);
   if (!target) {
@@ -243,7 +243,7 @@ nodeRouter.post('/select/:id', requireAdmin, (req: Request, res: Response): void
   res.json({ success: true, activeNode: NodeService.toPublic(target) });
 });
 
-nodeRouter.delete('/:id', requireAdmin, (req: Request, res: Response): void => {
+nodeRouter.delete('/:id', requireAdmin, validateBody(emptyBodySchema), (req: Request, res: Response): void => {
   const node = NodeService.getById(req.params.id);
   if (!node) {
     res.status(404).json({ error: 'Nó não encontrado' });

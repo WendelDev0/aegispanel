@@ -1,6 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { dockerService } from '../services/docker.service.js';
 import { authMiddleware, requireWrite, AuthRequest } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import { emptyBodySchema } from '../validation/schemas.js';
 
 export const dockerRouter = Router();
 
@@ -27,7 +29,7 @@ dockerRouter.get('/status', async (req: Request, res: Response) => {
   });
 });
 
-dockerRouter.post('/reconnect', requireWrite, async (req: Request, res: Response) => {
+dockerRouter.post('/reconnect', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response) => {
   const connected = await dockerService.detectAndConnect();
   res.json({
     success: connected,
@@ -56,7 +58,7 @@ dockerRouter.get('/containers/:id/stats', requireManagedWorkload, async (req: Re
   }
 });
 
-dockerRouter.post('/containers/:id/start', requireWrite, requireManagedWorkload, async (req: Request, res: Response) => {
+dockerRouter.post('/containers/:id/start', requireWrite, requireManagedWorkload, validateBody(emptyBodySchema), async (req: Request, res: Response) => {
   try {
     await dockerService.startContainer(req.params.id);
     res.json({ success: true });
@@ -65,7 +67,7 @@ dockerRouter.post('/containers/:id/start', requireWrite, requireManagedWorkload,
   }
 });
 
-dockerRouter.post('/containers/:id/stop', requireWrite, requireManagedWorkload, async (req: Request, res: Response) => {
+dockerRouter.post('/containers/:id/stop', requireWrite, requireManagedWorkload, validateBody(emptyBodySchema), async (req: Request, res: Response) => {
   try {
     await dockerService.stopContainer(req.params.id);
     res.json({ success: true });
@@ -74,7 +76,7 @@ dockerRouter.post('/containers/:id/stop', requireWrite, requireManagedWorkload, 
   }
 });
 
-dockerRouter.post('/containers/:id/restart', requireWrite, requireManagedWorkload, async (req: Request, res: Response) => {
+dockerRouter.post('/containers/:id/restart', requireWrite, requireManagedWorkload, validateBody(emptyBodySchema), async (req: Request, res: Response) => {
   try {
     await dockerService.restartContainer(req.params.id);
     res.json({ success: true });
@@ -83,7 +85,7 @@ dockerRouter.post('/containers/:id/restart', requireWrite, requireManagedWorkloa
   }
 });
 
-dockerRouter.delete('/containers/:id', requireWrite, requireManagedWorkload, async (req: Request, res: Response) => {
+dockerRouter.delete('/containers/:id', requireWrite, requireManagedWorkload, validateBody(emptyBodySchema), async (req: Request, res: Response) => {
   try {
     await dockerService.removeContainer(req.params.id, true);
     res.json({ success: true });

@@ -44,7 +44,7 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 - [x] Schemas nas mutações principais (auth setup/login/change-password, apps, databases, cron)
 - [x] `createIpLimiter` compartilhado (login / setup / change-password)
 - [x] Expandir Zod nas mutações body-heavy restantes (users, update app/env/domain, inspect-repo, files, nodes, domains, firewall, query, templates, settings, import-state, test-alert)
-- [ ] Rotas só-ação sem body (`start`/`stop`/`restart`/`delete`/`run`/`toggle`) — opcional; baixo risco
+- [x] Rotas só-ação sem body (`start`/`stop`/`restart`/`delete`/`run`/`toggle` + afins) com `emptyBodySchema`
 
 ---
 

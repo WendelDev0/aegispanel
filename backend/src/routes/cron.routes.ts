@@ -3,7 +3,7 @@ import { CronService } from '../services/cron.service.js';
 import { dbStorage } from '../db/storage.js';
 import { authMiddleware, requireAdmin, requireWrite, AuthRequest } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
-import { createCronBodySchema } from '../validation/schemas.js';
+import { createCronBodySchema, emptyBodySchema } from '../validation/schemas.js';
 
 export const cronRouter = Router();
 
@@ -56,7 +56,7 @@ cronRouter.post('/', requireWrite, validateBody(createCronBodySchema), (req: Aut
   }
 });
 
-cronRouter.post('/:id/run', requireWrite, async (req: AuthRequest, res: Response): Promise<void> => {
+cronRouter.post('/:id/run', requireWrite, validateBody(emptyBodySchema), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const job = dbStorage.getCronJobs().find((j) => j.id === req.params.id);
     if (!job) {
@@ -75,7 +75,7 @@ cronRouter.post('/:id/run', requireWrite, async (req: AuthRequest, res: Response
   }
 });
 
-cronRouter.post('/:id/toggle', requireAdmin, (req: AuthRequest, res: Response) => {
+cronRouter.post('/:id/toggle', requireAdmin, validateBody(emptyBodySchema), (req: AuthRequest, res: Response) => {
   try {
     res.json(CronService.toggle(req.params.id));
   } catch (err: any) {
@@ -83,6 +83,6 @@ cronRouter.post('/:id/toggle', requireAdmin, (req: AuthRequest, res: Response) =
   }
 });
 
-cronRouter.delete('/:id', requireAdmin, (req: AuthRequest, res: Response) => {
+cronRouter.delete('/:id', requireAdmin, validateBody(emptyBodySchema), (req: AuthRequest, res: Response) => {
   res.json({ success: CronService.delete(req.params.id) });
 });
