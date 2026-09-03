@@ -8,6 +8,7 @@ import { NodeService, LOCAL_NODE_ID } from './node.service.js';
 import { isRemoteTarget } from '../utils/app-upstream.js';
 import { containerNameForApp, normalizeDomain } from '../utils/naming.js';
 import { CONFIG } from '../config.js';
+import { AppLogStore } from '../utils/app-log.store.js';
 
 export { containerNameForApp, normalizeDomain };
 
@@ -27,6 +28,18 @@ export interface CreateAppDTO {
   deployBranch?: string;
   /** Target node for deploy. Absent = local panel machine. */
   nodeId?: string;
+}
+
+export interface AppMetricsSnapshot {
+  appId: string;
+  appName: string;
+  status: AppRecord['status'];
+  available: boolean;
+  cpuPercent: number;
+  memoryUsedBytes: number;
+  memoryLimitBytes: number;
+  memoryPercent: number;
+  retainedLogBytes: number;
 }
 
 export class AppService {
@@ -53,6 +66,55 @@ export class AppService {
 
   static getAll(): AppRecord[] {
     return dbStorage.getApps();
+  }
+
+  static async getMetrics(appId: string): Promise<AppMetricsSnapshot> {
+    const app = dbStorage.getAppById(appId);
+    if (!app) throw new Error('App não encontrado');
+    const retainedLogBytes = AppLogStore.size(appId);
+    const empty = {
+      appId: app.id,
+      appName: app.name,
+      status: app.status,
+      available: false,
+      cpuPercent: 0,
+      memoryUsedBytes: 0,
+      memoryLimitBytes: 0,
+      memoryPercent: 0,
+      retainedLogBytes,
+    };
+    if (!app.containerId) return empty;
+
+    const client = await this.dockerForApp(app);
+    const stats = await dockerService.getContainerStats(app.containerId, client);
+    return {
+      ...empty,
+      available: app.status === 'running',
+      ...stats,
+      retainedLogBytes,
+    };
+  }
+
+  static async listMetrics(): Promise<AppMetricsSnapshot[]> {
+    const snapshots: AppMetricsSnapshot[] = [];
+    for (const app of dbStorage.getApps()) {
+      try {
+        snapshots.push(await this.getMetrics(app.id));
+      } catch {
+        snapshots.push({
+          appId: app.id,
+          appName: app.name,
+          status: app.status,
+          available: false,
+          cpuPercent: 0,
+          memoryUsedBytes: 0,
+          memoryLimitBytes: 0,
+          memoryPercent: 0,
+          retainedLogBytes: AppLogStore.size(app.id),
+        });
+      }
+    }
+    return snapshots;
   }
 
   /**
@@ -120,7 +182,7 @@ export class AppService {
     const internalPort = dto.internalPort || 3000;
     const nodeId = dto.nodeId || undefined;
 
-    // Refuse remote git/dockerfile at create time (same gate as deploy).
+    // Refuse a missing / offline node at create time (same gate as deploy).
     if (nodeId && nodeId !== LOCAL_NODE_ID) {
       await NodeService.assertDeployTarget({
         name: dto.name,

@@ -142,16 +142,31 @@ export class AlertService {
     }
   }
 
-  static async broadcastNotification(title: string, message: string, type: 'deploy' | 'alert' | 'backup' = 'deploy', isError = false) {
+  static async broadcastNotification(
+    title: string,
+    message: string,
+    type: 'deploy' | 'alert' | 'backup' = 'deploy',
+    isError = false,
+    meta?: { appId?: string }
+  ) {
     const settings = dbStorage.getSettings();
     const config = settings.alertConfig;
-    if (!config || !config.enabled) return;
 
-    // Check notification rules
-    if (type === 'deploy' && isError && config.notifyOnDeployFail === false) return;
-    if (type === 'deploy' && !isError && config.notifyOnDeploySuccess === false) return;
-    if (type === 'backup' && config.notifyOnBackup === false) return;
-    if (type === 'alert' && config.notifyOnHighResource === false) return;
+    if (type === 'deploy' && isError && config?.notifyOnDeployFail === false) return;
+    if (type === 'deploy' && !isError && config?.notifyOnDeploySuccess === false) return;
+    if (type === 'backup' && config?.notifyOnBackup === false) return;
+    if (type === 'alert' && config?.notifyOnHighResource === false) return;
+
+    // History is the in-panel record; Discord/Telegram are optional fans-out.
+    dbStorage.addAlertHistory({
+      title,
+      message,
+      type,
+      isError,
+      appId: meta?.appId,
+    });
+
+    if (!config || !config.enabled) return;
 
     const formattedMessage = `*${title}*\n${message}`;
 

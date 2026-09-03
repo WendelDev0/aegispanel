@@ -14,7 +14,8 @@ import { containerNameForApp } from '../utils/naming.js';
 import { emit } from '../realtime.js';
 import { CONFIG } from '../config.js';
 import { assertSafeGitUrl, SafeGitTarget } from '../utils/url-security.js';
-import { injectPublicBuildArgs, publicBuildArgs } from '../utils/build-env.js';
+import { injectPublicBuildArgs, publicBuildArgMap, publicBuildArgs } from '../utils/build-env.js';
+import { remoteWorkloadPlacement } from '../utils/app-upstream.js';
 
 const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 const BUILD_TIMEOUT_MS = 30 * 60 * 1000;
@@ -301,6 +302,30 @@ export class CicdService {
     }
   }
 
+  /**
+   * Rows left `building` belong to a process that died (container recreate,
+   * crash). The in-memory lock does not survive that, so the next click is
+   * allowed — but the UI still showed a live pipeline. Mark them failed on boot.
+   */
+  static abandonInFlightDeploys(): number {
+    const now = new Date().toISOString();
+    let abandoned = 0;
+    for (const dep of dbStorage.getDeployments()) {
+      if (dep.status !== 'building' && dep.status !== 'queued') continue;
+      const previous = dbStorage.getDeploymentLogs(dep.appId, dep.id);
+      dbStorage.saveDeployment({
+        ...dep,
+        status: 'failed',
+        finishedAt: now,
+        buildLogs:
+          `${previous}` +
+          `[${now}] ❌ Deploy interrompido: o painel reiniciou antes de concluir.\n`,
+      });
+      abandoned++;
+    }
+    return abandoned;
+  }
+
   private static async executeDeployUnlocked(
     app: AppRecord,
     options: {
@@ -321,8 +346,8 @@ export class CicdService {
     const dockerClient = await NodeService.getClient(target.nodeId);
     const isRemote = target.isRemote;
     const portOpts = isRemote
-      ? { client: dockerClient, nodeId: target.nodeId }
-      : { nodeId: target.nodeId };
+      ? { client: dockerClient, nodeId: target.nodeId, excludeAppId: app.id }
+      : { nodeId: target.nodeId, excludeAppId: app.id };
 
     const requestedCommitHash = safeCommitHash(options.commitHash);
     let commitHash = requestedCommitHash || 'unknown';
@@ -394,11 +419,14 @@ export class CicdService {
         });
         throw new Error(`Docker Engine offline no nó remoto: ${err.message}`);
       }
-      log(`[${new Date().toISOString()}] 🖥️ Deploy no nó remoto "${target.nodeId}" (imagem)...\n`, {
-        step: 1,
-        stepName: 'Nó remoto',
-        percentage: 12,
-      });
+      log(
+        `[${new Date().toISOString()}] 🖥️ Deploy no nó remoto "${target.nodeId}" (build e start no Docker do nó)...\n`,
+        {
+          step: 1,
+          stepName: 'Nó remoto',
+          percentage: 12,
+        }
+      );
     } else if (!(await dockerService.testConnection())) {
       logs += `[${new Date().toISOString()}] ❌ Erro: Docker Engine não está disponível no servidor.\n`;
       deployment.status = 'failed';
@@ -419,34 +447,38 @@ export class CicdService {
     const versionedTag = `${containerName}:${deploymentId}`;
     const envList = Object.entries(app.env || {}).map(([k, v]) => `${k}=${v}`);
 
-    // Resolve the host port before building anything.
-    //
-    // An automatically assigned port that has since been taken by another
-    // container is moved to a free one, so a deploy never fails over
-    // bookkeeping the panel can redo itself. A port the user chose explicitly
-    // is left alone: silently moving it would break whatever they pointed at
-    // it, so that case fails with the name of the container holding it.
-    if (!(await PortService.isAvailable(app.port, app.containerId, portOpts))) {
-      if (app.autoPort !== false) {
-        const previousPort = app.port;
-        app.port = await PortService.allocate(undefined, app.containerId, portOpts);
-        dbStorage.saveApp(app);
-        log(
-          `[${new Date().toISOString()}] 🔀 Porta :${previousPort} ocupada; a aplicação foi realocada automaticamente para :${app.port}.
-`,
-          { step: 1, stepName: 'Porta realocada', percentage: 15 }
-        );
-      } else {
-        const conflict = await PortService.describeConflict(app.port, app.containerId, portOpts);
-        throw new Error(
-          `${conflict || `A porta :${app.port} está em uso.`} Escolha outra porta nas configurações da aplicação, ou deixe o campo vazio para atribuição automática.`
-        );
-      }
-    }
-
-    const ports: { [intPort: string]: number } = { [`${app.internalPort || 3000}/tcp`]: app.port };
-
     try {
+      // Resolve the host port before building anything.
+      //
+      // An automatically assigned port that has since been taken by another
+      // container is moved to a free one, so a deploy never fails over
+      // bookkeeping the panel can redo itself. A port the user chose explicitly
+      // is left alone: silently moving it would break whatever they pointed at
+      // it, so that case fails with the name of the container holding it.
+      //
+      // This check lives inside the try so a conflict emits `deploy:stream` as
+      // failed. Sitting outside left the row `building` forever and the UI on
+      // "Inicializando Pipeline".
+      if (!(await PortService.isAvailable(app.port, app.containerId, portOpts))) {
+        if (app.autoPort !== false) {
+          const previousPort = app.port;
+          app.port = await PortService.allocate(undefined, app.containerId, portOpts);
+          dbStorage.saveApp(app);
+          log(
+            `[${new Date().toISOString()}] 🔀 Porta :${previousPort} ocupada; a aplicação foi realocada automaticamente para :${app.port}.
+`,
+            { step: 1, stepName: 'Porta realocada', percentage: 15 }
+          );
+        } else {
+          const conflict = await PortService.describeConflict(app.port, app.containerId, portOpts);
+          throw new Error(
+            `${conflict || `A porta :${app.port} está em uso.`} Escolha outra porta nas configurações da aplicação, ou deixe o campo vazio para atribuição automática.`
+          );
+        }
+      }
+
+      const ports: { [intPort: string]: number } = { [`${app.internalPort || 3000}/tcp`]: app.port };
+
       if (app.sourceType === 'git' && app.gitUrl) {
         const buildsDir = path.join(CONFIG.DATA_DIR, 'builds', app.id);
         fs.mkdirSync(buildsDir, { recursive: true });
@@ -610,18 +642,31 @@ export class CicdService {
         // Only intentionally public variables may enter the image build. All
         // other application variables are injected into the runtime container
         // below and never become Docker build arguments or build-context files.
-        const buildArgs = publicBuildArgs(app.env || {});
-
-        const build = await run('docker', ['build', ...buildArgs, '-t', buildImageTag, '-t', versionedTag, '.'], {
-          cwd: buildsDir,
-          timeoutMs: BUILD_TIMEOUT_MS,
-          onOutput: (chunk) => log(this.redactSecrets(chunk)),
-        });
-
-        if (build.exitCode !== 0) {
-          throw new Error(
-            `Erro ao compilar imagem Docker (código ${build.exitCode}). Verifique os logs de build acima.`
+        if (isRemote) {
+          log(
+            `[${new Date().toISOString()}] 📤 Contexto enviado ao Docker do nó (o socket do painel não recebe o build nem o start).\n`
           );
+          await dockerService.buildImage({
+            contextDir: buildsDir,
+            tags: [buildImageTag, versionedTag],
+            buildArgs: publicBuildArgMap(app.env || {}),
+            client: dockerClient,
+            timeoutMs: BUILD_TIMEOUT_MS,
+            onOutput: (chunk) => log(this.redactSecrets(chunk)),
+          });
+        } else {
+          const buildArgs = publicBuildArgs(app.env || {});
+          const build = await run('docker', ['build', ...buildArgs, '-t', buildImageTag, '-t', versionedTag, '.'], {
+            cwd: buildsDir,
+            timeoutMs: BUILD_TIMEOUT_MS,
+            onOutput: (chunk) => log(this.redactSecrets(chunk)),
+          });
+
+          if (build.exitCode !== 0) {
+            throw new Error(
+              `Erro ao compilar imagem Docker (código ${build.exitCode}). Verifique os logs de build acima.`
+            );
+          }
         }
 
         // Step 5: start the container
@@ -631,12 +676,68 @@ export class CicdService {
           percentage: 85,
         });
 
+        const placement = remoteWorkloadPlacement(isRemote);
         app.containerId = await dockerService.createAndStartContainer({
           name: containerName,
           image: buildImageTag,
           env: envList,
           ports,
-          bindIp: CONFIG.APP_BIND_IP,
+          bindIp: placement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
+          client: placement.useRemoteDocker ? dockerClient : undefined,
+          joinPanelNetwork: placement.joinPanelNetwork,
+          labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
+        });
+        logs += `[${new Date().toISOString()}] 🚀 Container online com ID: ${app.containerId.substring(0, 12)}\n`;
+      } else if (app.sourceType === 'dockerfile') {
+        const buildsDir = path.join(CONFIG.DATA_DIR, 'builds', app.id);
+        const dockerfilePath = path.join(buildsDir, 'Dockerfile');
+        if (!fs.existsSync(dockerfilePath)) {
+          throw new Error(
+            'Não há Dockerfile no contexto desta aplicação. Envie os arquivos ou use uma origem Git.'
+          );
+        }
+        this.ensureBuildContextIgnore(buildsDir);
+        log(
+          `[${new Date().toISOString()}] 🐳 [Step 4/5] Compilando Dockerfile nativo em ${buildsDir}...\n`,
+          { step: 4, stepName: 'Dockerfile nativo', percentage: 65 }
+        );
+        if (isRemote) {
+          await dockerService.buildImage({
+            contextDir: buildsDir,
+            tags: [buildImageTag, versionedTag],
+            buildArgs: publicBuildArgMap(app.env || {}),
+            client: dockerClient,
+            timeoutMs: BUILD_TIMEOUT_MS,
+            onOutput: (chunk) => log(this.redactSecrets(chunk)),
+          });
+        } else {
+          const buildArgs = publicBuildArgs(app.env || {});
+          const build = await run('docker', ['build', ...buildArgs, '-t', buildImageTag, '-t', versionedTag, '.'], {
+            cwd: buildsDir,
+            timeoutMs: BUILD_TIMEOUT_MS,
+            onOutput: (chunk) => log(this.redactSecrets(chunk)),
+          });
+          if (build.exitCode !== 0) {
+            throw new Error(
+              `Erro ao compilar imagem Docker (código ${build.exitCode}). Verifique os logs de build acima.`
+            );
+          }
+        }
+        log(`[${new Date().toISOString()}] 🚀 [Step 5/5] Iniciando contêiner na porta host :${app.port}...\n`, {
+          step: 5,
+          stepName: 'Iniciando Contêiner',
+          percentage: 85,
+        });
+        const dockerfilePlacement = remoteWorkloadPlacement(isRemote);
+        app.containerId = await dockerService.createAndStartContainer({
+          name: containerName,
+          image: buildImageTag,
+          env: envList,
+          ports,
+          bindIp: dockerfilePlacement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
+          client: dockerfilePlacement.useRemoteDocker ? dockerClient : undefined,
+          joinPanelNetwork: dockerfilePlacement.joinPanelNetwork,
+          labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
         });
         logs += `[${new Date().toISOString()}] 🚀 Container online com ID: ${app.containerId.substring(0, 12)}\n`;
       } else {
@@ -649,14 +750,16 @@ export class CicdService {
 
         // Remote image deploys publish on 0.0.0.0 so panel Caddy can reach the
         // node's host port; local apps stay on APP_BIND_IP (usually loopback).
+        const placement = remoteWorkloadPlacement(isRemote);
         app.containerId = await dockerService.createAndStartContainer({
           name: containerName,
           image,
           env: envList,
           ports,
-          bindIp: isRemote ? '0.0.0.0' : CONFIG.APP_BIND_IP,
-          client: isRemote ? dockerClient : undefined,
-          joinPanelNetwork: !isRemote,
+          bindIp: placement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
+          client: placement.useRemoteDocker ? dockerClient : undefined,
+          joinPanelNetwork: placement.joinPanelNetwork,
+          labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
         });
         logs += `[${new Date().toISOString()}] 🚀 Container criado com ID: ${app.containerId.substring(0, 12)}\n`;
       }
@@ -701,7 +804,8 @@ export class CicdService {
         `✅ Deploy Concluído: ${app.name}`,
         `🚀 *Aplicação:* ${app.name}\n🌿 *Branch:* ${branch}\n🏷️ *Commit:* #${commitHash} - "${commitMsg}"\n👤 *Autor:* ${author}\n🌐 *Porta:* :${app.port}${app.domain ? `\n🔒 *Domínio:* https://${app.domain}` : ''}\n⏱️ *Tempo de Build:* ${duration}s`,
         'deploy',
-        false
+        false,
+        { appId: app.id }
       );
 
       this.emitProgress(app.id, {
@@ -738,7 +842,8 @@ export class CicdService {
         `❌ Falha no Deploy: ${app.name}`,
         `🚨 *Erro no Deploy da Aplicação:* ${app.name}\n🌿 *Branch:* ${branch}\n⚠️ *Detalhe:* ${safeMessage}`,
         'deploy',
-        true
+        true,
+        { appId: app.id }
       );
 
       this.emitProgress(app.id, {
@@ -794,14 +899,16 @@ export class CicdService {
       };
     }
 
+    const rollbackPlacement = remoteWorkloadPlacement(isRemote);
     app.containerId = await dockerService.createAndStartContainer({
       name: containerName,
       image: versionedTag,
       env: envList,
       ports,
-      bindIp: isRemote ? '0.0.0.0' : CONFIG.APP_BIND_IP,
-      client: isRemote ? dockerClient : undefined,
-      joinPanelNetwork: !isRemote,
+      bindIp: rollbackPlacement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
+      client: rollbackPlacement.useRemoteDocker ? dockerClient : undefined,
+      joinPanelNetwork: rollbackPlacement.joinPanelNetwork,
+      labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
     });
 
     app.status = 'running';
@@ -823,7 +930,8 @@ export class CicdService {
       `⏪ Rollback Executado: ${app.name}`,
       `A aplicação *${app.name}* foi revertida para o commit *#${targetDeployment.commitHash}*.`,
       'deploy',
-      false
+      false,
+      { appId: app.id }
     );
 
     return { success: true, message: `Aplicação revertida para a versão #${targetDeployment.commitHash}.` };

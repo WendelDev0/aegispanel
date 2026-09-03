@@ -217,8 +217,8 @@ export const CreateAppModal: React.FC<CreateAppModalProps> = ({ onCreated, onCan
               )}
             </select>
             {showRemoteOriginWarning && (
-              <p className="text-[11px] text-warn mt-1.5">
-                Deploy remoto ainda só aceita origem imagem Docker.
+              <p className="text-[11px] text-on-surface-variant mt-1.5">
+                Clone no painel; o docker build e o start rodam no Docker do nó. O Caddy continua apontando para o IP do nó.
               </p>
             )}
           </div>

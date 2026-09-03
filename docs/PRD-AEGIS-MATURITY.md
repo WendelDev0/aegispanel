@@ -142,8 +142,8 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 
 ### Alta
 
-- [ ] Cluster multi-servidor completo (deploy remoto de verdade)
-- [ ] Observabilidade por app (métricas, retenção de logs, histórico de alertas)
+- [x] Cluster multi-servidor: git/dockerfile no Docker do nó remoto (#5) — clone no painel, build/start no nó, Caddy em `hostIp:port`
+- [x] Observabilidade por app (#6): métricas CPU/memória, retenção de logs em disco, histórico de alertas
 
 
 

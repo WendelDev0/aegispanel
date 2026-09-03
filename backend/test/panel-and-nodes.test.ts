@@ -73,9 +73,7 @@ test('assertDeployTarget refuses missing remote node', async () => {
   );
 });
 
-test('assertDeployTarget refuses git source on remote node that exists as local id only via fake', async () => {
-  // Use local node id with a pretend remote by checking the git refusal path
-  // through a node that is registered — create via storage if needed.
+test('assertDeployTarget git on a registered node is not blocked by source type', async () => {
   const { dbStorage } = await import('../src/db/storage.js');
   const node = {
     id: 'node-remote-test',
@@ -89,16 +87,15 @@ test('assertDeployTarget refuses git source on remote node that exists as local 
     sshPrivateKey: 'aegis.v1:deadbeef',
     sshHostFingerprint: 'SHA256:test',
   };
-  // Don't encrypt — assertDeployTarget for git fails before health/key use.
   dbStorage.saveServerNode(node as any);
 
-  await assert.rejects(
-    () =>
-      NodeService.assertDeployTarget({
-        name: 'demo',
-        sourceType: 'git',
-        nodeId: 'node-remote-test',
-      }),
-    /ainda não suport/
-  );
+  try {
+    await NodeService.assertDeployTarget({
+      name: 'demo',
+      sourceType: 'git',
+      nodeId: 'node-remote-test',
+    });
+  } catch (err: any) {
+    assert.equal(/ainda não suport/i.test(String(err.message)), false);
+  }
 });

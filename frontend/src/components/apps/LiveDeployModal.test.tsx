@@ -37,4 +37,24 @@ describe('LiveDeployModal', () => {
     expect(screen.getByText('RUNNING')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Minimizar' })).toBeTruthy();
   });
+
+  it('shows the failure so the overlay is not stuck on initializing', () => {
+    render(
+      <LiveDeployModal
+        state={{
+          app,
+          step: 5,
+          stepName: 'Erro no Deploy',
+          logs: 'A porta 4104 já está atribuída à aplicação "bomdebolao".\n',
+          percentage: 100,
+          status: 'failed',
+        }}
+        onClose={() => {}}
+      />
+    );
+
+    expect(screen.getByText('FAILED')).toBeTruthy();
+    expect(screen.getByText(/O processo de build foi interrompido com erro/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Fechar' })).toBeTruthy();
+  });
 });

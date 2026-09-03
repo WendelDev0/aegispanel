@@ -3,6 +3,7 @@ import path from 'path';
 import { CONFIG } from '../config.js';
 import type { UserRole } from '../middleware/auth.js';
 import { DeployLogStore } from '../utils/deploy-log.store.js';
+import { AppLogStore } from '../utils/app-log.store.js';
 
 export interface User {
   id: string;
@@ -131,6 +132,16 @@ export interface FirewallRule {
   createdAt: string;
 }
 
+export interface AlertHistoryRecord {
+  id: string;
+  title: string;
+  message: string;
+  type: 'deploy' | 'alert' | 'backup';
+  isError: boolean;
+  appId?: string;
+  createdAt: string;
+}
+
 export interface ActivityRecord {
   id: string;
   type: 'deploy' | 'domain' | 'database' | 'backup' | 'alert' | 'system' | 'rollback';
@@ -224,6 +235,7 @@ export interface DatabaseSchema {
   firewallRules: FirewallRule[];
   serverNodes: ServerNode[];
   activities: ActivityRecord[];
+  alertHistory: AlertHistoryRecord[];
   settings: PanelSettings;
 }
 
@@ -233,6 +245,7 @@ const DEFAULT_DATA: DatabaseSchema = {
   apps: [],
   deployments: [],
   activities: [],
+  alertHistory: [],
   cronJobs: [
     {
       id: 'cron-daily-backup',
@@ -559,6 +572,8 @@ class JsonStorage {
       for (const d of deps) DeployLogStore.remove(d.appId, d.id);
       this.data.deployments = (this.data.deployments || []).filter((d) => d.appId !== id);
       DeployLogStore.removeApp(id);
+      AppLogStore.removeApp(id);
+      this.data.alertHistory = (this.data.alertHistory || []).filter((a) => a.appId !== id);
       this.save();
       return true;
     }
@@ -791,6 +806,29 @@ class JsonStorage {
     return newRecord;
   }
 
+  getAlertHistory(appId?: string, limit = 50): AlertHistoryRecord[] {
+    if (!this.data.alertHistory) this.data.alertHistory = [];
+    const list = appId
+      ? this.data.alertHistory.filter((a) => a.appId === appId)
+      : this.data.alertHistory;
+    return [...list].reverse().slice(0, limit);
+  }
+
+  addAlertHistory(entry: Omit<AlertHistoryRecord, 'id' | 'createdAt'>): AlertHistoryRecord {
+    if (!this.data.alertHistory) this.data.alertHistory = [];
+    const record: AlertHistoryRecord = {
+      ...entry,
+      id: `alrt-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString(),
+    };
+    this.data.alertHistory.push(record);
+    if (this.data.alertHistory.length > 200) {
+      this.data.alertHistory = this.data.alertHistory.slice(-200);
+    }
+    this.save();
+    return record;
+  }
+
   // Storage health
   /**
    * Returns the on-disk size of the panel database and record counts.
@@ -822,6 +860,7 @@ class JsonStorage {
         firewallRules: this.data.firewallRules?.length ?? 0,
         serverNodes: this.data.serverNodes?.length ?? 0,
         activities: this.data.activities?.length ?? 0,
+        alertHistory: this.data.alertHistory?.length ?? 0,
       },
     };
   }

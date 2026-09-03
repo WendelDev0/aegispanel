@@ -29,6 +29,15 @@ export function publicBuildArgs(env: Record<string, string>): string[] {
   return args;
 }
 
+/** dockerode `buildargs` map — same public-only filter as the CLI flags. */
+export function publicBuildArgMap(env: Record<string, string>): Record<string, string> {
+  const args: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (isPublicBuildVariable(key)) args[key] = value;
+  }
+  return args;
+}
+
 /** Adds public ARG/ENV declarations to a generated Dockerfile builder stage. */
 export function injectPublicBuildArgs(dockerfile: string, env: Record<string, string>): string {
   const keys = Object.keys(env).filter(isPublicBuildVariable);

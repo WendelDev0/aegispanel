@@ -7,6 +7,7 @@ import { CicdService } from '../services/cicd.service.js';
 import { CaddyService } from '../services/caddy.service.js';
 import { dbStorage } from '../db/storage.js';
 import { CONFIG } from '../config.js';
+import { AppLogStore } from '../utils/app-log.store.js';
 import { resolveSafePath } from '../utils/safe-path.js';
 import { PortService } from '../services/port.service.js';
 import { EncryptionService } from '../utils/crypto.js';
@@ -64,6 +65,14 @@ appRouter.get('/suggest-port', requireWrite, async (req: Request, res: Response)
 
 appRouter.get('/', (req: Request, res: Response) => {
   res.json(AppService.getAll().map(AppService.toPublic));
+});
+
+appRouter.get('/metrics', requireWrite, async (_req: Request, res: Response): Promise<void> => {
+  try {
+    res.json(await AppService.listMetrics());
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Pre-Deploy Repo Inspector (Vercel Style Auto-Discovery)
@@ -155,12 +164,14 @@ appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (re
     // pins it, and the pin is remembered so a later deploy never moves it.
     if (port === '' || port === null) {
       app.autoPort = true;
-      app.port = await PortService.allocate(undefined, app.containerId);
+      app.port = await PortService.allocate(undefined, app.containerId, { excludeAppId: app.id });
     } else if (port) {
       const requested = parsePort(port, 'A porta do host');
       if (requested === undefined) throw new Error('Porta inválida.');
       if (requested !== app.port) {
-        const conflict = await PortService.describeConflict(requested, app.containerId);
+        const conflict = await PortService.describeConflict(requested, app.containerId, {
+          excludeAppId: app.id,
+        });
         if (conflict) {
           res.status(400).json({ error: conflict });
           return;
@@ -335,6 +346,24 @@ appRouter.get('/:id/deployments/:depId/logs', requireWrite, (req: Request, res: 
     status: dep.status,
     buildLogs: CicdService.redactSecrets(logs),
   });
+});
+
+appRouter.get('/:id/metrics', requireWrite, async (req: Request, res: Response): Promise<void> => {
+  try {
+    res.json(await AppService.getMetrics(req.params.id));
+  } catch (err: any) {
+    const status = err.message === 'App não encontrado' ? 404 : 500;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+appRouter.get('/:id/alerts', requireWrite, (req: Request, res: Response): void => {
+  const app = dbStorage.getAppById(req.params.id);
+  if (!app) {
+    res.status(404).json({ error: 'App não encontrado' });
+    return;
+  }
+  res.json(dbStorage.getAlertHistory(app.id, 50));
 });
 
 // Manual deploy
@@ -567,14 +596,29 @@ appRouter.get('/:id/logs', requireWrite, async (req: Request, res: Response) => 
         const remote =
           isRemoteTarget(app.nodeId, app.nodeId ? NodeService.getById(app.nodeId) : null);
         const client = remote && app.nodeId ? await NodeService.getClient(app.nodeId) : undefined;
-        const logs = await dockerService.getLogs(app.containerId, 100, client);
+        const logs = await dockerService.getLogs(app.containerId, 200, client);
         if (logs && !logs.startsWith('Logs unavailable')) {
-          res.json({ logs });
+          AppLogStore.append(app.id, logs);
+          res.json({
+            logs: CicdService.redactSecrets(logs),
+            retainedBytes: AppLogStore.size(app.id),
+            source: 'live',
+          });
           return;
         }
       } catch {
-        // fall through to build logs
+        // fall through to retained / build logs
       }
+    }
+
+    const retained = AppLogStore.read(app.id);
+    if (retained) {
+      res.json({
+        logs: CicdService.redactSecrets(retained),
+        retainedBytes: AppLogStore.size(app.id),
+        source: 'retained',
+      });
+      return;
     }
 
     const deployments = dbStorage.getDeployments(app.id);
