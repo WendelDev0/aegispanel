@@ -639,6 +639,7 @@ class DockerManager {
     name: string;
     image: string;
     env?: string[];
+    cmd?: string[];
     ports?: { [internalPort: string]: number };
     volumes?: { [hostPath: string]: string };
     restartPolicy?: string;

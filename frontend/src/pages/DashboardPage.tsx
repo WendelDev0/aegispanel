@@ -301,6 +301,36 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
         </div>
       )}
+      {overview?.restoreDrill && (() => {
+        const drill = overview.restoreDrill;
+        const ageDays = Math.max(0, Math.floor((Date.now() - new Date(drill.at).getTime()) / 86_400_000));
+        const bad = !drill.ok || drill.stale;
+        return (
+          <button
+            type="button"
+            onClick={() => setActiveTab('backups')}
+            className={`w-full text-left flex items-start gap-3 p-4 rounded-lg border ${
+              bad ? 'border-crit/40 bg-crit/10' : 'border-ok/30 bg-ok/10'
+            }`}
+          >
+            {bad ? (
+              <AlertTriangle className="w-5 h-5 text-crit shrink-0 mt-0.5" />
+            ) : (
+              <CheckCircle2 className="w-5 h-5 text-ok shrink-0 mt-0.5" />
+            )}
+            <div>
+              <p className={`text-sm font-semibold ${bad ? 'text-crit' : 'text-ok'}`}>
+                Último ensaio de restore: há {ageDays} {ageDays === 1 ? 'dia' : 'dias'} · {drill.ok ? 'OK' : 'Falhou'}
+              </p>
+              <p className="text-xs text-on-surface-variant mt-0.5">
+                {drill.stale
+                  ? 'Passou de 45 dias — rode o ensaio em Backups ou ative o cron mensal.'
+                  : drill.error || 'O dump mais recente foi validado sem sobrescrever o estado atual.'}
+              </p>
+            </div>
+          </button>
+        );
+      })()}
       {/* Header banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-surface-container p-5 rounded-lg border border-outline-variant">
         <div>

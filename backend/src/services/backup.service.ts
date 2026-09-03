@@ -5,6 +5,9 @@ import { dbStorage, BackupRecord, DatabaseRecord } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { AuditStore } from '../utils/audit.store.js';
+import { OffsiteService } from './offsite.service.js';
+import { DatabaseService } from './database.service.js';
+import { AlertService } from './alert.service.js';
 
 const DUMP_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_RESTORE_BYTES = 512 * 1024 * 1024;
@@ -20,6 +23,82 @@ export class BackupService {
 
   static getAll(): BackupRecord[] {
     return dbStorage.getBackups();
+  }
+
+  private static isRestorable(status: BackupRecord['status']): boolean {
+    return status === 'completed' || status === 'completed_local_only';
+  }
+
+  /**
+   * Resolves a backup file on disk, downloading from the bucket when the
+   * local copy was deleted. The dump is still validated after this returns.
+   */
+  static async materializeBackupFile(backup: BackupRecord): Promise<string> {
+    this.ensureDir();
+    const filePath = path.join(this.backupDir, path.basename(backup.filename));
+    if (fs.existsSync(filePath)) return filePath;
+    if (!backup.offsiteKey) {
+      throw new Error('Arquivo de backup não encontrado no disco e sem cópia offsite.');
+    }
+    await OffsiteService.downloadTo(backup.offsiteKey, filePath);
+    return filePath;
+  }
+
+  private static notifyOffsiteFailure(targetName: string, error: string): void {
+    // Local copies of production state would page the team on every failed
+    // laptop backup. History and Discord stay off here; production still alerts.
+    if (CONFIG.LOCAL_MODE) return;
+    AlertService.broadcastNotification(
+      'Upload offsite falhou',
+      `${targetName}: o dump ficou só neste disco (${error}).`,
+      'backup',
+      true
+    );
+  }
+
+  /**
+   * Encrypts and uploads after a local dump. Without a configured target the
+   * backup is `completed` locally. A configured target that cannot be reached
+   * becomes `completed_local_only` so restore still works from this disk.
+   */
+  private static async finalizeOffsite(record: BackupRecord, localPath: string): Promise<BackupRecord> {
+    const raw = OffsiteService.rawTarget();
+    if (!raw?.bucket) {
+      return dbStorage.saveBackup({ ...record, status: 'completed' });
+    }
+    if (!OffsiteService.resolvedTarget() || !OffsiteService.offsiteAllowed()) {
+      const reason = OffsiteService.offsiteAllowed()
+        ? 'destino offsite incompleto ou chave ilegível'
+        : 'upload bloqueado no modo local';
+      OffsiteService.markUpload(false, reason);
+      return dbStorage.saveBackup({ ...record, status: 'completed_local_only' });
+    }
+    const kind = record.targetType === 'full' ? 'panel' : 'db';
+    const key = OffsiteService.objectKey(
+      kind,
+      record.filename,
+      record.targetType === 'database' ? record.targetId : undefined
+    );
+    try {
+      const { sha256 } = await OffsiteService.uploadFile(localPath, key);
+      OffsiteService.markUpload(true);
+      try {
+        await OffsiteService.applyRetention();
+      } catch (err: any) {
+        console.warn('Retenção offsite falhou:', err.message);
+      }
+      return dbStorage.saveBackup({
+        ...record,
+        status: 'completed',
+        sha256,
+        offsiteKey: key,
+        offsiteUploadedAt: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      OffsiteService.markUpload(false, err.message);
+      this.notifyOffsiteFailure(record.targetName, err.message);
+      return dbStorage.saveBackup({ ...record, status: 'completed_local_only' });
+    }
   }
 
   /**
@@ -117,7 +196,7 @@ export class BackupService {
         metadata: { backupId, databaseId: db.id },
       });
 
-      return dbStorage.saveBackup(record);
+      return this.finalizeOffsite(record, targetPath);
     } catch (err: any) {
       writeStream.destroy();
       try {
@@ -214,28 +293,14 @@ export class BackupService {
     }
   }
 
-  static async restoreBackup(backupId: string): Promise<boolean> {
-    const backup = dbStorage.getBackups().find((b) => b.id === backupId);
-    if (!backup) throw new Error('Registro de backup não encontrado');
-    if (backup.status !== 'completed') {
-      throw new Error('Este backup não foi concluído com sucesso e não pode ser restaurado.');
-    }
-
-    const filePath = path.join(this.backupDir, path.basename(backup.filename));
-    if (!fs.existsSync(filePath)) throw new Error('Arquivo de backup não encontrado no disco');
-    const backupStats = fs.statSync(filePath);
-    if (backupStats.size > MAX_RESTORE_BYTES) {
-      throw new Error(`O backup excede o limite de restauração de ${MAX_RESTORE_BYTES / 1024 / 1024} MB.`);
-    }
-
-    const db = dbStorage.getDatabaseById(backup.targetId);
-    if (!db || !db.containerId) throw new Error('Banco de dados ou contêiner não está ativo para restauração');
-    if (db.status !== 'running') throw new Error(`O contêiner do banco está ${db.status}.`);
-
-    // Validate the dump file before touching the live database.
-    this.validateDumpIntegrity(filePath, db.type, backupStats.size);
-
-    const rawPassword = EncryptionService.decrypt(db.dbPassword);
+  /**
+   * Pipes a dump into a running engine. Shared by live restore, remote restore
+   * and the monthly drill so the restore command cannot drift between them.
+   */
+  static async restoreDumpInto(db: DatabaseRecord, filePath: string, containerId: string): Promise<void> {
+    const rawPassword = EncryptionService.isEncrypted(db.dbPassword)
+      ? EncryptionService.decrypt(db.dbPassword)
+      : db.dbPassword;
     const dump = fs.readFileSync(filePath);
 
     let cmd: string[];
@@ -266,21 +331,46 @@ export class BackupService {
         throw new Error(`Restauração não suportada para bancos do tipo ${db.type}.`);
     }
 
-    const result = await dockerService.execInContainer(db.containerId, cmd, {
+    const result = await dockerService.execInContainer(containerId, cmd, {
       env,
       stdin: dump,
       timeoutMs: DUMP_TIMEOUT_MS,
     });
 
     if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || `Restauração falhou com código ${result.exitCode}`);
+    }
+  }
+
+  static async restoreBackup(backupId: string): Promise<boolean> {
+    const backup = dbStorage.getBackups().find((b) => b.id === backupId);
+    if (!backup) throw new Error('Registro de backup não encontrado');
+    if (!this.isRestorable(backup.status)) {
+      throw new Error('Este backup não foi concluído com sucesso e não pode ser restaurado.');
+    }
+
+    const filePath = await this.materializeBackupFile(backup);
+    const backupStats = fs.statSync(filePath);
+    if (backupStats.size > MAX_RESTORE_BYTES) {
+      throw new Error(`O backup excede o limite de restauração de ${MAX_RESTORE_BYTES / 1024 / 1024} MB.`);
+    }
+
+    const db = dbStorage.getDatabaseById(backup.targetId);
+    if (!db || !db.containerId) throw new Error('Banco de dados ou contêiner não está ativo para restauração');
+    if (db.status !== 'running') throw new Error(`O contêiner do banco está ${db.status}.`);
+
+    this.validateDumpIntegrity(filePath, db.type, backupStats.size);
+    try {
+      await this.restoreDumpInto(db, filePath, db.containerId);
+    } catch (err: any) {
       dbStorage.addActivity({
         type: 'backup',
         title: `Restauração falhou: ${db.name}`,
-        description: result.stderr.trim() || `Código de saída ${result.exitCode}`,
+        description: err.message,
         status: 'error',
         metadata: { backupId, databaseId: db.id },
       });
-      throw new Error(result.stderr.trim() || `Restauração falhou com código ${result.exitCode}`);
+      throw err;
     }
 
     // Post-restore sanity check: verify the database is still reachable.
@@ -312,9 +402,14 @@ export class BackupService {
    * Lightweight connectivity check after a restore. Runs the cheapest possible
    * query to confirm the database engine accepted the data and is responsive.
    */
-  private static async verifyDatabaseConnectivity(db: DatabaseRecord): Promise<void> {
-    if (!db.containerId) return;
-    const rawPassword = EncryptionService.decrypt(db.dbPassword);
+  private static async verifyDatabaseConnectivity(
+    db: DatabaseRecord,
+    containerId = db.containerId
+  ): Promise<void> {
+    if (!containerId) return;
+    const rawPassword = EncryptionService.isEncrypted(db.dbPassword)
+      ? EncryptionService.decrypt(db.dbPassword)
+      : db.dbPassword;
 
     let cmd: string[];
     let env: string[];
@@ -338,7 +433,7 @@ export class BackupService {
         return; // No check for unsupported types.
     }
 
-    const result = await dockerService.execInContainer(db.containerId, cmd, {
+    const result = await dockerService.execInContainer(containerId, cmd, {
       env,
       timeoutMs: 15_000,
     });
@@ -411,7 +506,7 @@ export class BackupService {
         metadata: { backupId },
       });
 
-      return dbStorage.saveBackup(record);
+      return this.finalizeOffsite(record, targetPath);
     } catch (err: any) {
       try {
         if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
@@ -445,12 +540,11 @@ export class BackupService {
     if (backup.targetType !== 'full' || backup.targetId !== 'panel') {
       throw new Error('Este backup não é um snapshot do estado do painel.');
     }
-    if (backup.status !== 'completed') {
+    if (!this.isRestorable(backup.status)) {
       throw new Error('Só é possível restaurar backups concluídos com sucesso.');
     }
 
-    const filePath = this.getBackupFilePath(backup.filename);
-    if (!filePath) throw new Error('Arquivo de backup não encontrado no disco.');
+    const filePath = await this.materializeBackupFile(backup);
 
     let parsed: unknown;
     try {
@@ -473,5 +567,164 @@ export class BackupService {
       metadata: { backupId },
     });
     return true;
+  }
+
+  static latestDrillStatus(): {
+    at: string;
+    ok: boolean;
+    durationMs: number;
+    error?: string;
+    stale: boolean;
+  } | null {
+    const drills = dbStorage
+      .getBackups()
+      .map((b) => b.drill)
+      .filter((d): d is NonNullable<BackupRecord['drill']> => Boolean(d))
+      .sort((a, b) => b.at.localeCompare(a.at));
+    const latest = drills[0];
+    if (!latest) return null;
+    const ageMs = Date.now() - new Date(latest.at).getTime();
+    return { ...latest, stale: ageMs > 45 * 24 * 60 * 60 * 1000 };
+  }
+
+  static async restoreFromRemoteKey(key: string): Promise<{ kind: 'panel' | 'db'; filename: string }> {
+    const parsed = OffsiteService.parseRemoteKey(key);
+    this.ensureDir();
+    const dest = path.join(this.backupDir, path.basename(parsed.filename));
+    await OffsiteService.downloadTo(key, dest);
+
+    if (parsed.kind === 'panel') {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(fs.readFileSync(dest, 'utf-8'));
+      } catch (err: any) {
+        throw new Error(`Snapshot do painel corrompido: ${err.message}`);
+      }
+      const problems = dbStorage.validateState(payload);
+      if (problems.length) throw new Error(`Backup inválido: ${problems.join(' ')}`);
+      dbStorage.importState(payload as Parameters<typeof dbStorage.importState>[0]);
+      return parsed;
+    }
+
+    const db = parsed.dbId ? dbStorage.getDatabaseById(parsed.dbId) : undefined;
+    if (!db || !db.containerId) {
+      throw new Error('Banco de dados da chave remota não existe ou não está em execução neste painel.');
+    }
+    const stats = fs.statSync(dest);
+    this.validateDumpIntegrity(dest, db.type, stats.size);
+    await this.restoreDumpInto(db, dest, db.containerId);
+    await this.verifyDatabaseConnectivity(db);
+    return parsed;
+  }
+
+  private static recordDrill(backup: BackupRecord, result: BackupRecord['drill']): void {
+    backup.drill = result;
+    dbStorage.saveBackup(backup);
+  }
+
+  private static latestRestorable(
+    targetType: BackupRecord['targetType'],
+    targetId: string
+  ): BackupRecord | undefined {
+    return dbStorage
+      .getBackups()
+      .filter((b) => b.targetType === targetType && b.targetId === targetId && this.isRestorable(b.status))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  }
+
+  /**
+   * Monthly "dark" restore: validate panel schema without importing, then
+   * restore the latest dump of each database into an ephemeral container.
+   */
+  static async runRestoreDrill(): Promise<{ ok: boolean; summary: string }> {
+    const started = Date.now();
+    const lines: string[] = [];
+    let ok = true;
+
+    const panelBackup = this.latestRestorable('full', 'panel');
+    if (panelBackup) {
+      try {
+        const file = await this.materializeBackupFile(panelBackup);
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
+        } catch (err: any) {
+          throw new Error(`JSON inválido: ${err.message}`);
+        }
+        const problems = dbStorage.validateState(parsed);
+        if (problems.length) throw new Error(problems.join(' '));
+        this.recordDrill(panelBackup, { at: new Date().toISOString(), ok: true, durationMs: Date.now() - started });
+        lines.push('Estado do painel: schema válido (não importado).');
+      } catch (err: any) {
+        ok = false;
+        this.recordDrill(panelBackup, {
+          at: new Date().toISOString(),
+          ok: false,
+          durationMs: Date.now() - started,
+          error: err.message,
+        });
+        lines.push(`Estado do painel: falhou (${err.message}).`);
+      }
+    } else {
+      lines.push('Nenhum snapshot do painel para ensaiar.');
+    }
+
+    if (CONFIG.LOCAL_MODE) {
+      lines.push('Modo local: ensaio Docker dos dumps pulado.');
+    } else {
+      for (const db of dbStorage.getDatabases()) {
+        if (db.type === 'redis') continue;
+        const dump = this.latestRestorable('database', db.id);
+        if (!dump) {
+          lines.push(`${db.name}: sem dump restorable.`);
+          continue;
+        }
+        const drillStarted = Date.now();
+        const ephemeralName = `aegis-drill-${db.id}-${Date.now().toString(36)}`.slice(0, 63);
+        let containerId: string | undefined;
+        try {
+          const file = await this.materializeBackupFile(dump);
+          this.validateDumpIntegrity(file, db.type, fs.statSync(file).size);
+          containerId = await DatabaseService.startEphemeral(db, ephemeralName);
+          await DatabaseService.waitUntilReady(containerId, db);
+          await this.restoreDumpInto(db, file, containerId);
+          await this.verifyDatabaseConnectivity(db, containerId);
+          this.recordDrill(dump, {
+            at: new Date().toISOString(),
+            ok: true,
+            durationMs: Date.now() - drillStarted,
+          });
+          lines.push(`${db.name}: restore no container efêmero OK.`);
+        } catch (err: any) {
+          ok = false;
+          this.recordDrill(dump, {
+            at: new Date().toISOString(),
+            ok: false,
+            durationMs: Date.now() - drillStarted,
+            error: err.message,
+          });
+          lines.push(`${db.name}: falhou (${err.message}).`);
+        } finally {
+          if (containerId) {
+            try {
+              await dockerService.removeContainer(containerId, true, true);
+            } catch {
+              await dockerService.removeContainerByName(ephemeralName, true).catch(() => undefined);
+            }
+          }
+        }
+      }
+    }
+
+    const summary = lines.join('\n');
+    AuditStore.append({
+      action: 'backup.drill',
+      outcome: ok ? 'success' : 'failure',
+      meta: { summary },
+    });
+    if (!ok && !CONFIG.LOCAL_MODE) {
+      AlertService.broadcastNotification('Ensaio de restore falhou', summary, 'backup', true);
+    }
+    return { ok, summary };
   }
 }

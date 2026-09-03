@@ -96,6 +96,14 @@ export const CONFIG = {
   ALLOW_OUTBOUND_ALERTS: process.env.AEGIS_ALLOW_OUTBOUND_ALERTS === 'true',
 
   /**
+   * Offsite backup uploads are blocked in local mode for the same reason as
+   * alerts: a copied production database would push dumps to the real bucket.
+   */
+  get ALLOW_OFFSITE_BACKUP() {
+    return process.env.AEGIS_ALLOW_OFFSITE_BACKUP === 'true';
+  },
+
+  /**
    * Interface database containers publish their port on.
    *
    * Loopback by default: Docker's iptables rules run before ufw, so a database

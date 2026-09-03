@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { SystemService } from '../services/system.service.js';
 import { CaddyService } from '../services/caddy.service.js';
 import { AlertService } from '../services/alert.service.js';
+import { BackupService } from '../services/backup.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { dbStorage, PanelSettings, AlertConfig } from '../db/storage.js';
 import { authMiddleware, requireAdmin, AuthRequest, clientIp } from '../middleware/auth.js';
@@ -32,8 +33,15 @@ const MASK = '••••••••';
  */
 function redactSettings(settings: PanelSettings): PanelSettings {
   const alert = settings.alertConfig || ({} as AlertConfig);
+  const target = settings.backupTarget;
   return {
     ...settings,
+    backupTarget: target
+      ? {
+          ...target,
+          secretAccessKey: target.secretAccessKey ? MASK : undefined,
+        }
+      : undefined,
     alertConfig: {
       ...alert,
       discordWebhookUrl: alert.discordWebhookUrl ? MASK : undefined,
@@ -49,14 +57,36 @@ function redactSettings(settings: PanelSettings): PanelSettings {
  * every token the user cannot see.
  */
 function mergeSettings(current: PanelSettings, patch: Partial<PanelSettings>): Partial<PanelSettings> {
-  if (!patch.alertConfig) return patch;
+  let next: Partial<PanelSettings> = { ...patch };
+  if (patch.backupTarget) {
+    const incoming = patch.backupTarget;
+    const stored = current.backupTarget;
+    next = {
+      ...next,
+      backupTarget: {
+        provider: 's3',
+        endpoint: incoming.endpoint ?? stored?.endpoint,
+        region: incoming.region || stored?.region || '',
+        bucket: incoming.bucket || stored?.bucket || '',
+        prefix: incoming.prefix ?? stored?.prefix,
+        accessKeyId: incoming.accessKeyId || stored?.accessKeyId || '',
+        secretAccessKey:
+          incoming.secretAccessKey === MASK || incoming.secretAccessKey === undefined
+            ? stored?.secretAccessKey
+            : incoming.secretAccessKey,
+        lastUploadAt: stored?.lastUploadAt,
+        lastError: stored?.lastError,
+      },
+    };
+  }
+  if (!patch.alertConfig) return next;
 
   const incoming = patch.alertConfig as Partial<AlertConfig>;
   const keepIfMasked = <K extends keyof AlertConfig>(key: K): AlertConfig[K] =>
     incoming[key] === MASK || incoming[key] === undefined ? current.alertConfig?.[key] : (incoming[key] as AlertConfig[K]);
 
   return {
-    ...patch,
+    ...next,
     alertConfig: {
       ...current.alertConfig,
       ...incoming,
@@ -68,15 +98,29 @@ function mergeSettings(current: PanelSettings, patch: Partial<PanelSettings>): P
 }
 
 function encryptAlertSecrets(patch: Partial<PanelSettings>): Partial<PanelSettings> {
-  if (!patch.alertConfig) return patch;
-  const alert = { ...patch.alertConfig } as AlertConfig;
+  let next = patch;
+  if (
+    next.backupTarget?.secretAccessKey &&
+    next.backupTarget.secretAccessKey !== MASK &&
+    !EncryptionService.isEncrypted(next.backupTarget.secretAccessKey)
+  ) {
+    next = {
+      ...next,
+      backupTarget: {
+        ...next.backupTarget,
+        secretAccessKey: EncryptionService.encrypt(next.backupTarget.secretAccessKey),
+      },
+    };
+  }
+  if (!next.alertConfig) return next;
+  const alert = { ...next.alertConfig } as AlertConfig;
   for (const key of ['discordWebhookUrl', 'telegramBotToken', 'whatsappApiKey'] as const) {
     const value = alert[key];
     if (value && value !== MASK && !EncryptionService.isEncrypted(value)) {
       alert[key] = EncryptionService.encrypt(value) as never;
     }
   }
-  return { ...patch, alertConfig: alert };
+  return { ...next, alertConfig: alert };
 }
 
 systemRouter.get('/stats', async (req: Request, res: Response) => {
@@ -137,6 +181,7 @@ systemRouter.get('/overview', async (req: Request, res: Response) => {
         runningDatabases: databases.filter((d) => d.status === 'running').length,
       },
       settings: redactSettings(dbStorage.getSettings()),
+      restoreDrill: BackupService.latestDrillStatus(),
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

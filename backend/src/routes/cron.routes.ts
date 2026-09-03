@@ -28,7 +28,7 @@ cronRouter.post('/', requireWrite, validateBody(createCronBodySchema), (req: Aut
 
     if (type !== 'backup' && !canHandleShell(req)) {
       res.status(403).json({
-        error: 'Somente administradores podem criar tarefas shell ou webhook, pois elas executam ações privilegiadas no servidor.',
+        error: 'Somente administradores podem criar tarefas shell, webhook ou ensaio de restore.',
       });
       return;
     }
@@ -65,7 +65,7 @@ cronRouter.post('/:id/run', requireWrite, validateBody(emptyBodySchema), async (
     }
 
     if (job.type !== 'backup' && !canHandleShell(req)) {
-      res.status(403).json({ error: 'Somente administradores podem executar tarefas shell ou webhook.' });
+      res.status(403).json({ error: 'Somente administradores podem executar esta tarefa.' });
       return;
     }
 

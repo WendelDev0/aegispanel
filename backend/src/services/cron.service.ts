@@ -211,6 +211,10 @@ export class CronService {
         if (failures > 0) {
           throw new Error(`${failures} de ${totalSteps} backup(s) falharam.\n${output}`);
         }
+      } else if (job.type === 'restore-drill') {
+        const result = await BackupService.runRestoreDrill();
+        output = result.summary;
+        if (!result.ok) throw new Error(output);
       } else if (job.type === 'shell' && job.command) {
         // Shell jobs are admin-gated at the route; a shell is intentional here.
         const { stdout, stderr } = await execPromise(job.command, {

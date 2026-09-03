@@ -9,6 +9,26 @@ set -euo pipefail
 
 INSTALL_DIR="${AEGIS_INSTALL_DIR:-/opt/aegispanel}"
 REPO_URL="https://github.com/WendelDev0/aegispanel.git"
+RESTORE_FROM=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --restore-from)
+            RESTORE_FROM="${2:-}"
+            shift 2
+            ;;
+        --restore-from=*)
+            RESTORE_FROM="${1#*=}"
+            shift
+            ;;
+        *)
+            echo "Uso: install.sh [--restore-from s3://bucket/prefix]"
+            echo "     Com --restore-from, exporte ENCRYPTION_KEY da instalação antiga"
+            echo "     e AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (e AWS_REGION / AWS_ENDPOINT_URL se preciso)."
+            exit 1
+            ;;
+    esac
+done
 
 echo "======================================================================"
 echo "🛡️  Instalando AegisPanel - Cloud & Server Management Platform"
@@ -122,6 +142,43 @@ ensure_secret() {
 ensure_secret JWT_SECRET
 ensure_secret ENCRYPTION_KEY
 
+if [ -n "$RESTORE_FROM" ]; then
+    if [ -z "${ENCRYPTION_KEY:-}" ]; then
+        echo "❌ --restore-from exige ENCRYPTION_KEY da instalação antiga no ambiente."
+        echo "   O bucket só abre com a mesma chave que cifrou os dumps. Não use a chave recém-gerada."
+        exit 1
+    fi
+    upsert_env() {
+        local key="$1"
+        local value="$2"
+        local tmp
+        tmp=$(mktemp)
+        grep -vE "^${key}=" "$ENV_FILE" > "$tmp" || true
+        printf '%s=%s\n' "$key" "$value" >> "$tmp"
+        mv "$tmp" "$ENV_FILE"
+        chmod 600 "$ENV_FILE"
+    }
+
+    upsert_env ENCRYPTION_KEY "$ENCRYPTION_KEY"
+    echo "   ✅ ENCRYPTION_KEY da instalação antiga gravada (obrigatória para descriptografar o bucket)."
+
+    copy_env_if_set() {
+        local key="$1"
+        local value="${!key:-}"
+        [ -z "$value" ] && return 0
+        upsert_env "$key" "$value"
+        echo "   ✅ ${key} copiada para o .env do painel."
+    }
+    copy_env_if_set AWS_ACCESS_KEY_ID
+    copy_env_if_set AWS_SECRET_ACCESS_KEY
+    copy_env_if_set AWS_REGION
+    copy_env_if_set AWS_ENDPOINT_URL
+    if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+        echo "❌ --restore-from exige AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY no ambiente."
+        exit 1
+    fi
+fi
+
 # Optional panel hostname. The installer never binds :3000 on 0.0.0.0;
 # HTTPS is published by Caddy after the operator sets panelDomain in Settings.
 PANEL_DOMAIN_HINT=""
@@ -151,6 +208,25 @@ chmod 600 "$ENV_FILE"
 cd "$INSTALL_DIR"
 echo "🚀 [6/6] Compilando e iniciando os contêineres..."
 docker compose up -d --build
+
+if [ -n "$RESTORE_FROM" ]; then
+    echo "🛟 Restaurando estado a partir de ${RESTORE_FROM}..."
+    echo "   Aguardando o backend ficar saudável..."
+    ready=0
+    for _ in $(seq 1 90); do
+        if docker compose exec -T backend curl -sf http://127.0.0.1:4000/api/health >/dev/null 2>&1; then
+            ready=1
+            break
+        fi
+        sleep 2
+    done
+    if [ "$ready" -ne 1 ]; then
+        echo "❌ Backend não ficou pronto a tempo. Veja: docker compose logs backend"
+        exit 1
+    fi
+    docker compose exec -T backend node dist/scripts/dr-restore.js --from "$RESTORE_FROM"
+    echo "   ✅ Restore remoto concluído."
+fi
 
 SERVER_IP=$(curl -s --max-time 5 ifconfig.me || curl -s --max-time 5 icanhazip.com || echo "IP_DO_SERVIDOR")
 

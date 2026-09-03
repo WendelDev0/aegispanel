@@ -117,7 +117,7 @@ export interface CronJobRecord {
   id: string;
   name: string;
   schedule: string;
-  type: 'shell' | 'backup' | 'webhook';
+  type: 'shell' | 'backup' | 'webhook' | 'restore-drill';
   command?: string;
   webhookUrl?: string;
   enabled: boolean;
@@ -144,8 +144,32 @@ export interface BackupRecord {
   targetName: string;
   filename: string;
   sizeBytes: number;
-  status: 'completed' | 'in_progress' | 'failed';
+  status: 'completed' | 'in_progress' | 'failed' | 'completed_local_only';
   createdAt: string;
+  sha256?: string;
+  offsiteKey?: string;
+  offsiteUploadedAt?: string;
+  drill?: { at: string; ok: boolean; durationMs: number; error?: string };
+}
+
+export interface BackupTargetPublic {
+  provider: 's3';
+  endpoint: string;
+  region: string;
+  bucket: string;
+  prefix: string;
+  accessKeyId: string;
+  hasSecret?: boolean;
+  secretAccessKey?: string;
+  lastUploadAt?: string;
+  lastError?: string;
+}
+
+export interface RemoteBackupObject {
+  key: string;
+  sizeBytes: number;
+  lastModified: string;
+  sha256?: string;
 }
 
 export interface FirewallRule {
@@ -229,6 +253,7 @@ export interface PanelSettings {
   notificationEmail?: string;
   autoBackup: boolean;
   backupIntervalHours: number;
+  backupTarget?: BackupTargetPublic;
   alertConfig: AlertConfig;
 }
 
@@ -273,4 +298,11 @@ export interface OverviewData {
     runningDatabases: number;
   };
   settings: PanelSettings;
+  restoreDrill?: {
+    at: string;
+    ok: boolean;
+    durationMs: number;
+    error?: string;
+    stale: boolean;
+  } | null;
 }

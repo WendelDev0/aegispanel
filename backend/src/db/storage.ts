@@ -108,7 +108,7 @@ export interface CronJobRecord {
   id: string;
   name: string;
   schedule: string; // e.g. "0 3 * * *"
-  type: 'shell' | 'backup' | 'webhook';
+  type: 'shell' | 'backup' | 'webhook' | 'restore-drill';
   command?: string;
   webhookUrl?: string;
   enabled: boolean;
@@ -135,8 +135,25 @@ export interface BackupRecord {
   targetName: string;
   filename: string;
   sizeBytes: number;
-  status: 'completed' | 'in_progress' | 'failed';
+  status: 'completed' | 'in_progress' | 'failed' | 'completed_local_only';
   createdAt: string;
+  sha256?: string;
+  offsiteKey?: string;
+  offsiteUploadedAt?: string;
+  drill?: { at: string; ok: boolean; durationMs: number; error?: string };
+}
+
+export interface BackupTarget {
+  provider: 's3';
+  endpoint?: string;
+  region: string;
+  bucket: string;
+  prefix?: string;
+  accessKeyId: string;
+  /** Encrypted at rest. Never returned by the API. */
+  secretAccessKey?: string;
+  lastUploadAt?: string;
+  lastError?: string;
 }
 
 export interface FirewallRule {
@@ -237,6 +254,7 @@ export interface PanelSettings {
   notificationEmail?: string;
   autoBackup: boolean;
   backupIntervalHours: number;
+  backupTarget?: BackupTarget;
   alertConfig: AlertConfig;
 }
 
@@ -274,6 +292,14 @@ const DEFAULT_DATA: DatabaseSchema = {
       createdAt: new Date().toISOString(),
       lastStatus: 'success',
       lastOutput: 'Rotina de backup automático agendada para as 03:00'
+    },
+    {
+      id: 'cron-restore-drill',
+      name: 'Ensaio mensal de restore',
+      schedule: '0 4 1 * *',
+      type: 'restore-drill',
+      enabled: false,
+      createdAt: new Date().toISOString(),
     },
     {
       id: 'cron-docker-prune',
@@ -367,6 +393,7 @@ class JsonStorage {
     return {
       ...DEFAULT_DATA,
       ...parsed,
+      cronJobs: this.withDefaultCronJobs(parsed.cronJobs),
       settings: {
         ...DEFAULT_DATA.settings,
         ...(parsed.settings || {}),
@@ -376,6 +403,14 @@ class JsonStorage {
         },
       },
     };
+  }
+
+  private withDefaultCronJobs(stored: CronJobRecord[] | undefined): CronJobRecord[] {
+    const list = stored ? [...stored] : [...DEFAULT_DATA.cronJobs];
+    for (const job of DEFAULT_DATA.cronJobs) {
+      if (!list.some((j) => j.id === job.id)) list.push({ ...job });
+    }
+    return list;
   }
 
   /**

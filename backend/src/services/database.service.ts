@@ -136,6 +136,205 @@ export class DatabaseService {
     };
   }
 
+  /**
+   * Image, env and volume path for one engine. Shared by create, disaster
+   * recovery recreate, and restore drills so a DR restore cannot start a
+   * different image than the panel originally used.
+   *
+   * `dbPassword` must already be plaintext.
+   */
+  static engineLaunch(db: Pick<DatabaseRecord, 'type' | 'dbUser' | 'dbPassword' | 'dbName'>): {
+    image: string;
+    env: string[];
+    cmd?: string[];
+    internalPort: number;
+    volumeTarget: string;
+  } {
+    const mysqlUser = db.dbUser !== 'root' ? db.dbUser : 'app_user';
+    switch (db.type) {
+      case 'postgres':
+        return {
+          image: 'postgres:16-alpine',
+          env: [
+            `POSTGRES_USER=${db.dbUser}`,
+            `POSTGRES_PASSWORD=${db.dbPassword}`,
+            `POSTGRES_DB=${db.dbName}`,
+          ],
+          internalPort: 5432,
+          volumeTarget: '/var/lib/postgresql/data',
+        };
+      case 'mysql':
+        return {
+          image: 'mysql:8.4',
+          env: [
+            `MYSQL_ROOT_PASSWORD=${db.dbPassword}`,
+            `MYSQL_DATABASE=${db.dbName}`,
+            `MYSQL_USER=${mysqlUser}`,
+            `MYSQL_PASSWORD=${db.dbPassword}`,
+          ],
+          internalPort: 3306,
+          volumeTarget: '/var/lib/mysql',
+        };
+      case 'mariadb':
+        return {
+          image: 'mariadb:11',
+          env: [
+            `MARIADB_ROOT_PASSWORD=${db.dbPassword}`,
+            `MARIADB_DATABASE=${db.dbName}`,
+            `MARIADB_USER=${mysqlUser}`,
+            `MARIADB_PASSWORD=${db.dbPassword}`,
+          ],
+          internalPort: 3306,
+          volumeTarget: '/var/lib/mysql',
+        };
+      case 'redis':
+        return {
+          image: 'redis:7-alpine',
+          env: [],
+          cmd: ['redis-server', '--requirepass', db.dbPassword],
+          internalPort: 6379,
+          volumeTarget: '/data',
+        };
+      case 'mongodb':
+        return {
+          image: 'mongo:7.0',
+          env: [
+            `MONGO_INITDB_ROOT_USERNAME=${db.dbUser}`,
+            `MONGO_INITDB_ROOT_PASSWORD=${db.dbPassword}`,
+            `MONGO_INITDB_DATABASE=${db.dbName}`,
+          ],
+          internalPort: 27017,
+          volumeTarget: '/data/db',
+        };
+      default:
+        throw new Error(`Tipo de banco não suportado: ${db.type}`);
+    }
+  }
+
+  static hostConnectionString(
+    db: Pick<DatabaseRecord, 'type' | 'dbUser' | 'dbName'>,
+    password: string,
+    hostPort: number
+  ): string {
+    switch (db.type) {
+      case 'postgres':
+        return `postgresql://${db.dbUser}:${password}@HOST_IP:${hostPort}/${db.dbName}`;
+      case 'mysql':
+      case 'mariadb':
+        return `mysql://${db.dbUser}:${password}@HOST_IP:${hostPort}/${db.dbName}`;
+      case 'redis':
+        return `redis://:${password}@HOST_IP:${hostPort}`;
+      case 'mongodb':
+        return `mongodb://${db.dbUser}:${password}@HOST_IP:${hostPort}/${db.dbName}?authSource=admin`;
+      default:
+        throw new Error(`Tipo de banco não suportado: ${db.type}`);
+    }
+  }
+
+  /**
+   * Recreates an existing panel database container from its record (same
+   * image/env as create). Used by disaster recovery after importState.
+   */
+  static async recreateContainer(db: DatabaseRecord): Promise<string> {
+    const password = EncryptionService.decrypt(db.dbPassword);
+    const launch = this.engineLaunch({ ...db, dbPassword: password });
+    const containerName = containerNameForDatabase(db.name);
+    const containerId = await dockerService.createAndStartContainer({
+      name: containerName,
+      image: launch.image,
+      env: launch.env,
+      ...(launch.cmd ? { cmd: launch.cmd } : {}),
+      ports: { [`${launch.internalPort}/tcp`]: db.port },
+      bindIp: CONFIG.DB_BIND_IP,
+      volumes: { [`aegis-db-${db.id}`]: launch.volumeTarget },
+      labels: {
+        'aegis.type': 'database',
+        'aegis.db.type': db.type,
+        'aegis.db.name': db.name,
+      },
+    });
+    db.containerId = containerId;
+    db.status = 'running';
+    db.internalPort = launch.internalPort;
+    dbStorage.saveDatabase(db);
+    return containerId;
+  }
+
+  /**
+   * Starts a throwaway engine with no published ports. Restore drills must
+   * never bind the live database's host port.
+   */
+  static async startEphemeral(
+    db: Pick<DatabaseRecord, 'type' | 'dbUser' | 'dbPassword' | 'dbName'>,
+    name: string
+  ): Promise<string> {
+    const password = EncryptionService.isEncrypted(db.dbPassword)
+      ? EncryptionService.decrypt(db.dbPassword)
+      : db.dbPassword;
+    const launch = this.engineLaunch({ ...db, dbPassword: password });
+    return dockerService.createAndStartContainer({
+      name,
+      image: launch.image,
+      env: launch.env,
+      ...(launch.cmd ? { cmd: launch.cmd } : {}),
+      restartPolicy: 'no',
+      joinPanelNetwork: false,
+      labels: { 'aegis.type': 'restore-drill' },
+    });
+  }
+
+  static async pingInContainer(
+    containerId: string,
+    db: Pick<DatabaseRecord, 'type' | 'dbUser' | 'dbPassword'>
+  ): Promise<void> {
+    const password = EncryptionService.isEncrypted(db.dbPassword)
+      ? EncryptionService.decrypt(db.dbPassword)
+      : db.dbPassword;
+    let cmd: string[];
+    switch (db.type) {
+      case 'postgres':
+        cmd = ['pg_isready', '-U', db.dbUser];
+        break;
+      case 'mysql':
+        cmd = ['mysqladmin', 'ping', '-h', '127.0.0.1'];
+        break;
+      case 'mariadb':
+        cmd = ['healthcheck.sh', '--connect'];
+        break;
+      case 'mongodb':
+        cmd = ['mongosh', '--quiet', '--eval', 'db.adminCommand("ping")'];
+        break;
+      case 'redis':
+        cmd = ['redis-cli', '-a', password, 'ping'];
+        break;
+      default:
+        throw new Error(`Ping não suportado para ${db.type}`);
+    }
+    const result = await dockerService.execInContainer(containerId, cmd, { timeoutMs: 10_000 });
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || `Ping falhou com código ${result.exitCode}`);
+    }
+  }
+
+  static async waitUntilReady(
+    containerId: string,
+    db: Pick<DatabaseRecord, 'type' | 'dbUser' | 'dbPassword'>,
+    timeoutMs = 90_000
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    let last = 'ainda não respondeu';
+    while (Date.now() < deadline) {
+      try {
+        await this.pingInContainer(containerId, db);
+        return;
+      } catch (err: any) {
+        last = err.message || String(err);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+    }
+    throw new Error(`O engine não ficou pronto a tempo: ${last}`);
+  }
+
   static async createDatabase(dto: CreateDbDTO): Promise<DatabaseRecord> {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/.test(dto.name)) {
       throw new Error('Nome do banco inválido. Use apenas letras, números, ponto, hífen ou sublinhado.');
@@ -151,78 +350,25 @@ export class DatabaseService {
     // /app/data/... on the wrong filesystem and keeps persistence portable.
     const dataVolume = `aegis-db-${id}`;
 
-    let image = '';
-    let internalPort = 5432;
-    let env: string[] = [];
-    let cmd: string[] | undefined;
-    let connString = '';
-    let volumeTarget = '';
-
-    // Generate strong credentials if empty
     const dbUser = dto.dbUser || EncryptionService.generateSecureUsername('usr_db');
     const rawPassword = dto.dbPassword || EncryptionService.generateStrongPassword(24, true);
     const dbName = dto.dbName || dto.name.toLowerCase().replace(/[^a-z0-9_]/g, '');
-
-    switch (dto.type) {
-      case 'postgres':
-        image = 'postgres:16-alpine';
-        internalPort = 5432;
-        volumeTarget = '/var/lib/postgresql/data';
-        env = [
-          `POSTGRES_USER=${dbUser}`,
-          `POSTGRES_PASSWORD=${rawPassword}`,
-          `POSTGRES_DB=${dbName}`,
-        ];
-        connString = `postgresql://${dbUser}:${rawPassword}@HOST_IP:${hostPort}/${dbName}`;
-        break;
-
-      case 'mysql':
-        image = 'mysql:8.4';
-        internalPort = 3306;
-        volumeTarget = '/var/lib/mysql';
-        env = [
-          `MYSQL_ROOT_PASSWORD=${rawPassword}`,
-          `MYSQL_DATABASE=${dbName}`,
-          `MYSQL_USER=${dbUser !== 'root' ? dbUser : 'app_user'}`,
-          `MYSQL_PASSWORD=${rawPassword}`,
-        ];
-        connString = `mysql://${dbUser}:${rawPassword}@HOST_IP:${hostPort}/${dbName}`;
-        break;
-
-      case 'mariadb':
-        image = 'mariadb:11';
-        internalPort = 3306;
-        volumeTarget = '/var/lib/mysql';
-        env = [
-          `MARIADB_ROOT_PASSWORD=${rawPassword}`,
-          `MARIADB_DATABASE=${dbName}`,
-          `MARIADB_USER=${dbUser !== 'root' ? dbUser : 'app_user'}`,
-          `MARIADB_PASSWORD=${rawPassword}`,
-        ];
-        connString = `mysql://${dbUser}:${rawPassword}@HOST_IP:${hostPort}/${dbName}`;
-        break;
-
-      case 'redis':
-        image = 'redis:7-alpine';
-        internalPort = 6379;
-        volumeTarget = '/data';
-        env = [];
-        cmd = ['redis-server', '--requirepass', rawPassword];
-        connString = `redis://:${rawPassword}@HOST_IP:${hostPort}`;
-        break;
-
-      case 'mongodb':
-        image = 'mongo:7.0';
-        internalPort = 27017;
-        volumeTarget = '/data/db';
-        env = [
-          `MONGO_INITDB_ROOT_USERNAME=${dbUser}`,
-          `MONGO_INITDB_ROOT_PASSWORD=${rawPassword}`,
-          `MONGO_INITDB_DATABASE=${dbName}`,
-        ];
-        connString = `mongodb://${dbUser}:${rawPassword}@HOST_IP:${hostPort}/${dbName}?authSource=admin`;
-        break;
-    }
+    const launch = this.engineLaunch({
+      type: dto.type,
+      dbUser,
+      dbPassword: rawPassword,
+      dbName,
+    });
+    const image = launch.image;
+    const internalPort = launch.internalPort;
+    const env = launch.env;
+    const cmd = launch.cmd;
+    const volumeTarget = launch.volumeTarget;
+    const connString = this.hostConnectionString(
+      { type: dto.type, dbUser, dbName },
+      rawPassword,
+      hostPort
+    );
 
     const volumes: { [hostPath: string]: string } = {};
     volumes[dataVolume] = volumeTarget;

@@ -115,7 +115,7 @@ export const createDatabaseBodySchema = z.object({
 export const createCronBodySchema = z.object({
   name: z.string().min(1).max(120),
   schedule: z.string().min(1).max(120),
-  type: z.enum(['shell', 'backup', 'webhook']),
+  type: z.enum(['shell', 'backup', 'webhook', 'restore-drill']),
   command: z.string().optional(),
   webhookUrl: z.string().optional(),
 });
@@ -222,3 +222,17 @@ export const emptyBodySchema = z.preprocess(
   (val) => (val === undefined || val === null ? {} : val),
   z.object({}).strict()
 );
+
+export const backupTargetBodySchema = z.object({
+  provider: z.literal('s3').optional(),
+  endpoint: z.string().max(500).optional(),
+  region: z.string().min(1).max(80),
+  bucket: z.string().min(1).max(255),
+  prefix: z.string().max(200).optional(),
+  accessKeyId: z.string().min(1).max(200),
+  secretAccessKey: z.string().max(500).optional(),
+});
+
+export const remoteRestoreBodySchema = z.object({
+  key: z.string().min(1).max(1024).refine((k) => !k.includes('..'), 'Chave inválida'),
+});

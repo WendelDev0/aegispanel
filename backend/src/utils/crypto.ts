@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import fs from 'fs';
 import { CONFIG } from '../config.js';
 
 // Derived from a key dedicated to data-at-rest, never from the session signing key.
@@ -169,5 +170,110 @@ export class EncryptionService {
   /** URL-safe high-entropy token, used for webhook secrets. */
   static generateToken(bytes: number = 32): string {
     return crypto.randomBytes(bytes).toString('base64url');
+  }
+
+  static async sha256File(filePath: string): Promise<string> {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    for await (const chunk of stream) {
+      hash.update(chunk as Buffer);
+    }
+    return hash.digest('hex');
+  }
+
+  /**
+   * Encrypts a file with the same AES-256-GCM key as string secrets.
+   *
+   * Layout: magic(8) + iv(12) + ciphertext + authTag(16). The bucket therefore
+   * never stores a dump in the clear, and a truncated object fails the tag
+   * check instead of restoring garbage.
+   */
+  static async encryptFile(src: string, dest: string): Promise<void> {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv(ALGORITHM, MASTER_KEY, iv);
+    const out = fs.createWriteStream(dest, { mode: 0o600 });
+    const header = Buffer.concat([Buffer.from('AEGISF01'), iv]);
+
+    await new Promise<void>((resolve, reject) => {
+      out.write(header, (err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        const input = fs.createReadStream(src);
+        input.on('error', reject);
+        cipher.on('error', reject);
+        out.on('error', reject);
+        input.on('data', (chunk) => {
+          const encrypted = cipher.update(chunk as Buffer);
+          if (encrypted.length && !out.write(encrypted)) input.pause();
+        });
+        out.on('drain', () => input.resume());
+        input.on('end', () => {
+          try {
+            const tail = Buffer.concat([cipher.final(), cipher.getAuthTag()]);
+            out.end(tail, () => resolve());
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+    });
+  }
+
+  static async decryptFile(src: string, dest: string): Promise<void> {
+    const stat = fs.statSync(src);
+    if (stat.size < 8 + 12 + 16) {
+      throw new DecryptionError('Arquivo cifrado curto demais.');
+    }
+    const fd = fs.openSync(src, 'r');
+    try {
+      const header = Buffer.alloc(20);
+      fs.readSync(fd, header, 0, 20, 0);
+      if (header.subarray(0, 8).toString('utf8') !== 'AEGISF01') {
+        throw new DecryptionError('Arquivo não é um dump cifrado pelo AegisPanel.');
+      }
+      const iv = header.subarray(8, 20);
+      const tag = Buffer.alloc(16);
+      fs.readSync(fd, tag, 0, 16, stat.size - 16);
+      const decipher = crypto.createDecipheriv(ALGORITHM, MASTER_KEY, iv);
+      decipher.setAuthTag(tag);
+      const out = fs.createWriteStream(dest, { mode: 0o600 });
+      const cipherBytes = stat.size - 20 - 16;
+      const buf = Buffer.alloc(64 * 1024);
+      let offset = 20;
+      let remaining = cipherBytes;
+      await new Promise<void>((resolve, reject) => {
+        out.on('error', reject);
+        try {
+          while (remaining > 0) {
+            const n = fs.readSync(fd, buf, 0, Math.min(buf.length, remaining), offset);
+            if (n <= 0) break;
+            offset += n;
+            remaining -= n;
+            const plain = decipher.update(buf.subarray(0, n));
+            if (plain.length) out.write(plain);
+          }
+          const last = decipher.final();
+          out.end(last, () => resolve());
+        } catch (e) {
+          reject(e);
+        }
+      });
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
+  static isEncryptedFile(filePath: string): boolean {
+    try {
+      const fd = fs.openSync(filePath, 'r');
+      const magic = Buffer.alloc(8);
+      fs.readSync(fd, magic, 0, 8, 0);
+      fs.closeSync(fd);
+      return magic.toString('utf8') === 'AEGISF01';
+    } catch {
+      return false;
+    }
   }
 }

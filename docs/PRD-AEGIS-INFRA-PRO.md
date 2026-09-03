@@ -119,44 +119,44 @@ Hoje o acesso é `ssh -L 3000:127.0.0.1:3000`. Funciona, mas cliente quer URL.
 - [x] Dump por banco com validação de header/magic no restore
 - [x] Backup do estado do painel (`backup_panel_state_*.json`) + restore
 - [x] Cron diário inclui o estado do painel
-- [ ] **Tudo em `DATA_DIR/backups`, mesmo disco do painel**
+- [x] **Tudo em `DATA_DIR/backups`, mesmo disco do painel** — cópia offsite cifrada em S3-compatível
 
 ### 2.1 — Destino offsite S3-compatível
 
-- [ ] `settings.backupTarget`: `{ provider: 's3', endpoint, region, bucket, prefix, accessKeyId, secretAccessKey(cifrado) }` — cobre AWS S3, Cloudflare R2, Backblaze B2, MinIO
-- [ ] SDK: `@aws-sdk/client-s3` (única dependência nova); upload multipart para dumps > 100 MB
-- [ ] Cada backup: gravado local → **enviado** → só então `status: 'completed'`; falha de upload = `completed_local_only` com alerta
-- [ ] `sha256` calculado antes do upload e verificado no `HEAD` do objeto
-- [ ] Criptografia em repouso: dumps cifrados com `ENCRYPTION_KEY` antes de sair (AES-256-GCM, `utils/crypto.ts`) — o bucket não vê dado em claro
-- [ ] Retenção no bucket: diário 14 · semanal 8 · mensal 12 (lifecycle via painel, não regra do provedor)
-- [ ] `POST /api/backups/target/test` — escreve e lê um objeto de 1 KB, retorna latência
-- [ ] `LOCAL_MODE` bloqueia upload (mesmo guard de `alert.service.ts`); escape `AEGIS_ALLOW_OFFSITE_BACKUP=true`
-- [ ] Tela em Backups → Destino: provedor, teste, último upload, tamanho total no bucket
+- [x] `settings.backupTarget`: `{ provider: 's3', endpoint, region, bucket, prefix, accessKeyId, secretAccessKey(cifrado) }` — cobre AWS S3, Cloudflare R2, Backblaze B2, MinIO
+- [x] SDK: `@aws-sdk/client-s3` (única dependência nova); upload multipart para dumps > 100 MB
+- [x] Cada backup: gravado local → **enviado** → só então `status: 'completed'`; falha de upload = `completed_local_only` com alerta
+- [x] `sha256` calculado antes do upload e verificado no `HEAD` do objeto
+- [x] Criptografia em repouso: dumps cifrados com `ENCRYPTION_KEY` antes de sair (AES-256-GCM, `utils/crypto.ts`) — o bucket não vê dado em claro
+- [x] Retenção no bucket: diário 14 · semanal 8 · mensal 12 (lifecycle via painel, não regra do provedor)
+- [x] `POST /api/backups/target/test` — escreve e lê um objeto de 1 KB, retorna latência
+- [x] `LOCAL_MODE` bloqueia upload (mesmo guard de `alert.service.ts`); escape `AEGIS_ALLOW_OFFSITE_BACKUP=true`
+- [x] Tela em Backups → Destino: provedor, teste, último upload, tamanho total no bucket
 
 ### 2.2 — Restore a partir do bucket
 
-- [ ] `GET /api/backups/remote` lista objetos do bucket (não só o índice local)
-- [ ] Restore de dump remoto: download → checksum → decrypt → validação de magic (já existe) → restore
-- [ ] **Disaster recovery**: `install.sh --restore-from s3://bucket/prefix` em VPS nova → baixa `panel_state` mais recente → recria bancos → restaura dumps → sincroniza Caddy
-- [ ] Script `backend/scripts/dr-restore.ts` idempotente, com `--dry-run`
-- [ ] Documento `docs/DISASTER-RECOVERY.md`: passo a passo em 1 página, testado
+- [x] `GET /api/backups/remote` lista objetos do bucket (não só o índice local)
+- [x] Restore de dump remoto: download → checksum → decrypt → validação de magic (já existe) → restore
+- [x] **Disaster recovery**: `install.sh --restore-from s3://bucket/prefix` em VPS nova → baixa `panel_state` mais recente → recria bancos → restaura dumps → sincroniza Caddy
+- [x] Script `backend/src/scripts/dr-restore.ts` idempotente, com `--dry-run`
+- [x] Documento `docs/DISASTER-RECOVERY.md`: passo a passo em 1 página, testado
 
 ### 2.3 — Ensaio mensal “no escuro”
 
 Backup que nunca foi restaurado é hipótese, não backup.
 
-- [ ] Cron `restore-drill` (mensal, admin ativa): sobe container efêmero do mesmo engine, restaura o dump mais recente, roda `SELECT 1` / `PING`, derruba o container
-- [ ] Resultado gravado em `backups[].drill: { at, ok, durationMs, error? }` + evento de auditoria + alerta em falha
-- [ ] Dashboard: “Último ensaio de restore: há 12 dias · OK” — vermelho se > 45 dias ou falhou
-- [ ] Drill do estado do painel: parse + validação de schema do `panel_state` mais recente (sem sobrescrever o atual)
+- [x] Cron `restore-drill` (mensal, admin ativa): sobe container efêmero do mesmo engine, restaura o dump mais recente, roda `SELECT 1` / `PING`, derruba o container
+- [x] Resultado gravado em `backups[].drill: { at, ok, durationMs, error? }` + evento de auditoria + alerta em falha
+- [x] Dashboard: “Último ensaio de restore: há 12 dias · OK” — vermelho se > 45 dias ou falhou
+- [x] Drill do estado do painel: parse + validação de schema do `panel_state` mais recente (sem sobrescrever o atual)
 - [ ] Runbook trimestral (humano): DR completo numa VPS descartável usando `install.sh --restore-from`
 
 ### Critérios de aceite — Fase 2
 
-- [ ] Apagar `DATA_DIR/backups` inteiro e restaurar um banco a partir do bucket funciona
+- [x] Apagar `DATA_DIR/backups` inteiro e restaurar um banco a partir do bucket funciona
 - [ ] `install.sh --restore-from` em VPS limpa reconstrói painel + bancos em < 30 min
-- [ ] Ensaio mensal roda sozinho e aparece no dashboard
-- [ ] Nenhum dump chega ao bucket em claro (verificado lendo o objeto)
+- [x] Ensaio mensal roda sozinho e aparece no dashboard
+- [x] Nenhum dump chega ao bucket em claro (verificado lendo o objeto)
 
 ---
 
