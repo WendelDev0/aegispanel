@@ -162,6 +162,7 @@ export interface ServerNode {
   name: string;
   type: 'vps' | 'local' | 'cloud';
   hostIp: string;
+  isLocal?: boolean;
   isCurrent: boolean;
   status: 'online' | 'offline' | 'unknown' | 'error';
   location?: string;
