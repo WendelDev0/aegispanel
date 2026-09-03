@@ -12,6 +12,7 @@ import {
   updateSettingsBodySchema,
   importStateBodySchema,
   testAlertBodySchema,
+  emptyBodySchema,
 } from '../validation/schemas.js';
 
 export const systemRouter = Router();
@@ -96,7 +97,7 @@ systemRouter.get('/history', (req: Request, res: Response) => {
   );
 });
 
-systemRouter.post('/speedtest', requireAdmin, async (req: Request, res: Response): Promise<void> => {
+systemRouter.post('/speedtest', requireAdmin, validateBody(emptyBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     res.json(await SystemService.runSpeedtest());
   } catch (err: any) {
@@ -218,7 +219,7 @@ systemRouter.post('/import-state', requireAdmin, validateBody(importStateBodySch
 });
 
 // Force Caddy SSL/proxy reset (clears ACME cache and regenerates the Caddyfile)
-systemRouter.post('/caddy-reset', requireAdmin, async (req: Request, res: Response): Promise<void> => {
+systemRouter.post('/caddy-reset', requireAdmin, validateBody(emptyBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const caddyContent = await CaddyService.syncCaddyfile();
 
@@ -298,7 +299,7 @@ systemRouter.get('/panel/logs/:target', requireAdmin, async (req: Request, res: 
   }
 });
 
-systemRouter.post('/panel/self-update', requireAdmin, async (_req: Request, res: Response): Promise<void> => {
+systemRouter.post('/panel/self-update', requireAdmin, validateBody(emptyBodySchema), async (_req: Request, res: Response): Promise<void> => {
   try {
     const result = await PanelService.selfUpdate();
     res.json({

@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { FirewallService } from '../services/firewall.service.js';
 import { authMiddleware, requireAdmin } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
-import { createFirewallBodySchema } from '../validation/schemas.js';
+import { createFirewallBodySchema, emptyBodySchema } from '../validation/schemas.js';
 
 export const firewallRouter = Router();
 
@@ -37,7 +37,7 @@ firewallRouter.post('/rules', requireAdmin, validateBody(createFirewallBodySchem
   }
 });
 
-firewallRouter.delete('/rules/:id', requireAdmin, async (req: Request, res: Response): Promise<void> => {
+firewallRouter.delete('/rules/:id', requireAdmin, validateBody(emptyBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await FirewallService.deleteRule(req.params.id);
     if (!result) {

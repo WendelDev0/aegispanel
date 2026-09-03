@@ -23,6 +23,7 @@ import {
   updateDomainBodySchema,
   deployAppBodySchema,
   fileContentBodySchema,
+  emptyBodySchema,
 } from '../validation/schemas.js';
 
 export const appRouter = Router();
@@ -358,7 +359,7 @@ appRouter.post('/:id/deploy', requireWrite, validateBody(deployAppBodySchema), a
 });
 
 // 1-click rollback
-appRouter.post('/:id/rollback/:deploymentId', requireWrite, async (req: Request, res: Response): Promise<void> => {
+appRouter.post('/:id/rollback/:deploymentId', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     res.json(await CicdService.rollback(req.params.id, req.params.deploymentId));
   } catch (err: any) {
@@ -367,7 +368,7 @@ appRouter.post('/:id/rollback/:deploymentId', requireWrite, async (req: Request,
 });
 
 // Rotate the webhook secret
-appRouter.post('/:id/webhook-secret', requireAdmin, (req: Request, res: Response): void => {
+appRouter.post('/:id/webhook-secret', requireAdmin, validateBody(emptyBodySchema), (req: Request, res: Response): void => {
   try {
     res.json({ webhookSecret: AppService.rotateWebhookSecret(req.params.id) });
   } catch (err: any) {
@@ -411,7 +412,7 @@ appRouter.get('/:id/workflow', requireWrite, (req: Request, res: Response): void
   res.json({ yaml: CicdService.generateGitHubWorkflow(app, hostUrl) });
 });
 
-appRouter.post('/:id/start', requireWrite, async (req: Request, res: Response) => {
+appRouter.post('/:id/start', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response) => {
   try {
     res.json(AppService.toPublic(await AppService.startApp(req.params.id)));
   } catch (err: any) {
@@ -419,7 +420,7 @@ appRouter.post('/:id/start', requireWrite, async (req: Request, res: Response) =
   }
 });
 
-appRouter.post('/:id/stop', requireWrite, async (req: Request, res: Response) => {
+appRouter.post('/:id/stop', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response) => {
   try {
     res.json(AppService.toPublic(await AppService.stopApp(req.params.id)));
   } catch (err: any) {
@@ -427,7 +428,7 @@ appRouter.post('/:id/stop', requireWrite, async (req: Request, res: Response) =>
   }
 });
 
-appRouter.post('/:id/restart', requireWrite, async (req: Request, res: Response) => {
+appRouter.post('/:id/restart', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response) => {
   try {
     res.json(AppService.toPublic(await AppService.restartApp(req.params.id)));
   } catch (err: any) {
@@ -587,7 +588,7 @@ appRouter.get('/:id/logs', requireWrite, async (req: Request, res: Response) => 
   }
 });
 
-appRouter.delete('/:id', requireWrite, async (req: Request, res: Response) => {
+appRouter.delete('/:id', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response) => {
   try {
     res.json({ success: await AppService.deleteApp(req.params.id) });
   } catch (err: any) {

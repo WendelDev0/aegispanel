@@ -15,6 +15,7 @@ import {
   loginBodySchema,
   setupBodySchema,
   createUserBodySchema,
+  emptyBodySchema,
 } from '../validation/schemas.js';
 
 export const authRouter = Router();
@@ -214,7 +215,7 @@ authRouter.post('/users', authMiddleware, requireAdmin, validateBody(createUserB
 });
 
 // Remove team user
-authRouter.delete('/users/:id', authMiddleware, requireAdmin, (req: AuthRequest, res: Response): void => {
+authRouter.delete('/users/:id', authMiddleware, requireAdmin, validateBody(emptyBodySchema), (req: AuthRequest, res: Response): void => {
   try {
     const users = dbStorage.getUsers();
     const target = users.find((u) => u.id === req.params.id);

@@ -5,7 +5,7 @@ import { DomainService } from '../services/domain.service.js';
 import { isValidDomain } from '../utils/naming.js';
 import { authMiddleware, requireWrite, AuthRequest } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
-import { createDomainBodySchema, checkDnsBodySchema } from '../validation/schemas.js';
+import { createDomainBodySchema, checkDnsBodySchema, emptyBodySchema } from '../validation/schemas.js';
 
 export const domainRouter = Router();
 
@@ -81,7 +81,7 @@ domainRouter.get('/:id/ssl-status', async (req: Request, res: Response): Promise
 });
 
 // Force Renew SSL
-domainRouter.post('/:id/renew-ssl', requireWrite, async (req: Request, res: Response): Promise<void> => {
+domainRouter.post('/:id/renew-ssl', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     await DomainService.renewSsl(req.params.id);
     res.json({ success: true, message: 'Certificado SSL renovado com sucesso via Caddy Proxy.' });
@@ -135,7 +135,7 @@ domainRouter.post('/', requireWrite, validateBody(createDomainBodySchema), async
   }
 });
 
-domainRouter.delete('/:id', requireWrite, async (req: Request, res: Response) => {
+domainRouter.delete('/:id', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response) => {
   try {
     const domainToRemove = dbStorage.getDomains().find(d => d.id === req.params.id);
     const success = dbStorage.removeDomain(req.params.id);

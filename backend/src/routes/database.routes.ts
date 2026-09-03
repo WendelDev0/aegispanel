@@ -3,7 +3,7 @@ import { DatabaseService } from '../services/database.service.js';
 import { CONFIG } from '../config.js';
 import { authMiddleware, requireAdmin, requireWrite } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
-import { createDatabaseBodySchema } from '../validation/schemas.js';
+import { createDatabaseBodySchema, emptyBodySchema } from '../validation/schemas.js';
 
 export const databaseRouter = Router();
 
@@ -61,7 +61,7 @@ databaseRouter.post('/', requireWrite, validateBody(createDatabaseBodySchema), a
   }
 });
 
-databaseRouter.post('/:id/start', requireWrite, async (req: Request, res: Response) => {
+databaseRouter.post('/:id/start', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response) => {
   try {
     const updated = await DatabaseService.startDatabase(req.params.id);
     res.json(updated);
@@ -70,7 +70,7 @@ databaseRouter.post('/:id/start', requireWrite, async (req: Request, res: Respon
   }
 });
 
-databaseRouter.post('/:id/stop', requireWrite, async (req: Request, res: Response) => {
+databaseRouter.post('/:id/stop', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response) => {
   try {
     const updated = await DatabaseService.stopDatabase(req.params.id);
     res.json(updated);
@@ -79,7 +79,7 @@ databaseRouter.post('/:id/stop', requireWrite, async (req: Request, res: Respons
   }
 });
 
-databaseRouter.post('/:id/restart', requireWrite, async (req: Request, res: Response) => {
+databaseRouter.post('/:id/restart', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response) => {
   try {
     const updated = await DatabaseService.restartDatabase(req.params.id);
     res.json(updated);
@@ -88,7 +88,7 @@ databaseRouter.post('/:id/restart', requireWrite, async (req: Request, res: Resp
   }
 });
 
-databaseRouter.delete('/:id', requireWrite, async (req: Request, res: Response) => {
+databaseRouter.delete('/:id', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response) => {
   try {
     const success = await DatabaseService.deleteDatabase(req.params.id);
     res.json({ success });

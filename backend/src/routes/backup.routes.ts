@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { BackupService } from '../services/backup.service.js';
 import { authMiddleware, requireWrite, requireAdmin } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import { emptyBodySchema } from '../validation/schemas.js';
 
 export const backupRouter = Router();
 
@@ -10,7 +12,7 @@ backupRouter.get('/', (req: Request, res: Response) => {
   res.json(BackupService.getAll());
 });
 
-backupRouter.post('/database/:id', requireWrite, async (req: Request, res: Response): Promise<void> => {
+backupRouter.post('/database/:id', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const backup = await BackupService.createDatabaseBackup(req.params.id);
     res.status(201).json(backup);
@@ -19,7 +21,7 @@ backupRouter.post('/database/:id', requireWrite, async (req: Request, res: Respo
   }
 });
 
-backupRouter.post('/panel', requireAdmin, async (req: Request, res: Response): Promise<void> => {
+backupRouter.post('/panel', requireAdmin, validateBody(emptyBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const backup = await BackupService.createPanelStateBackup();
     res.status(201).json(backup);
@@ -28,7 +30,7 @@ backupRouter.post('/panel', requireAdmin, async (req: Request, res: Response): P
   }
 });
 
-backupRouter.post('/:id/restore', requireAdmin, async (req: Request, res: Response): Promise<void> => {
+backupRouter.post('/:id/restore', requireAdmin, validateBody(emptyBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     const backup = BackupService.getAll().find((b) => b.id === req.params.id);
     if (backup && backup.targetType === 'full' && backup.targetId === 'panel') {
@@ -54,7 +56,7 @@ backupRouter.get('/download/:filename', requireAdmin, (req: Request, res: Respon
   res.download(filePath);
 });
 
-backupRouter.delete('/:id', requireWrite, async (req: Request, res: Response) => {
+backupRouter.delete('/:id', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response) => {
   const success = await BackupService.deleteBackup(req.params.id);
   res.json({ success });
 });
