@@ -22,6 +22,8 @@ export interface CreateAppDTO {
   githubToken?: string;
   autoDeploy?: boolean;
   deployBranch?: string;
+  /** Target node for deploy. Absent = local panel machine. */
+  nodeId?: string;
 }
 
 export class AppService {
@@ -160,6 +162,7 @@ export class AppService {
       githubToken: dto.githubToken ? EncryptionService.encrypt(dto.githubToken) : undefined,
       autoDeploy: dto.autoDeploy ?? true,
       deployBranch: dto.deployBranch || dto.branch || 'main',
+      nodeId: dto.nodeId || undefined,
       status,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

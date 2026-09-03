@@ -14,6 +14,8 @@ import { assertSafeGitUrl } from '../utils/url-security.js';
 import { isValidDomain } from '../utils/naming.js';
 import { getPublicBaseUrl } from '../utils/public-url.js';
 import { authMiddleware, requireWrite, requireAdmin, AuthRequest } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import { createAppBodySchema } from '../validation/schemas.js';
 
 export const appRouter = Router();
 
@@ -69,9 +71,9 @@ appRouter.post('/inspect-repo', requireWrite, async (req: Request, res: Response
   }
 });
 
-appRouter.post('/', requireWrite, async (req: Request, res: Response): Promise<void> => {
+appRouter.post('/', requireWrite, validateBody(createAppBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
-    const { name, sourceType, gitUrl, branch, imageName, port, internalPort, env, domain, githubToken, autoDeploy, deployBranch } = req.body;
+    const { name, sourceType, gitUrl, branch, imageName, port, internalPort, env, domain, githubToken, autoDeploy, deployBranch, nodeId } = req.body;
     if (!name) {
       res.status(400).json({ error: 'Nome é obrigatório' });
       return;
@@ -98,6 +100,7 @@ appRouter.post('/', requireWrite, async (req: Request, res: Response): Promise<v
       githubToken,
       autoDeploy,
       deployBranch,
+      nodeId,
     });
 
     // Returned immediately so the client can open the live deploy stream; the
@@ -304,6 +307,21 @@ appRouter.put('/:id/domain', requireWrite, async (req: Request, res: Response): 
 // Deployment history
 appRouter.get('/:id/deployments', requireWrite, (req: Request, res: Response): void => {
   res.json(dbStorage.getDeployments(req.params.id));
+});
+
+appRouter.get('/:id/deployments/:depId/logs', requireWrite, (req: Request, res: Response): void => {
+  const dep = dbStorage.getDeploymentById(req.params.id, req.params.depId);
+  if (!dep) {
+    res.status(404).json({ error: 'Deploy não encontrado' });
+    return;
+  }
+  const logs = dbStorage.getDeploymentLogs(req.params.id, req.params.depId);
+  res.json({
+    deploymentId: dep.id,
+    appId: dep.appId,
+    status: dep.status,
+    buildLogs: CicdService.redactSecrets(logs),
+  });
 });
 
 // Manual deploy
@@ -544,14 +562,17 @@ appRouter.get('/:id/logs', requireWrite, async (req: Request, res: Response) => 
     }
 
     const deployments = dbStorage.getDeployments(app.id);
-    if (deployments.length > 0 && deployments[0].buildLogs) {
-      let logMsg = `📋 [Logs de Build do CI/CD - Status: ${deployments[0].status.toUpperCase()}]:\n\n`;
-      logMsg += CicdService.redactSecrets(deployments[0].buildLogs);
-      if (!app.containerId) {
-        logMsg += '\n💡 Dica: verifique se o Docker Engine está ativo para que o contêiner suba.';
+    if (deployments.length > 0) {
+      const buildLogs = dbStorage.getDeploymentLogs(app.id, deployments[0].id);
+      if (buildLogs) {
+        let logMsg = `📋 [Logs de Build do CI/CD - Status: ${deployments[0].status.toUpperCase()}]:\n\n`;
+        logMsg += CicdService.redactSecrets(buildLogs);
+        if (!app.containerId) {
+          logMsg += '\n💡 Dica: verifique se o Docker Engine está ativo para que o contêiner suba.';
+        }
+        res.json({ logs: logMsg });
+        return;
       }
-      res.json({ logs: logMsg });
-      return;
     }
 
     res.json({ logs: 'Aguardando inicialização do container ou primeiro disparo de deploy...' });

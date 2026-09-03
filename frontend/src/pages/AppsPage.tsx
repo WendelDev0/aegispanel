@@ -49,6 +49,8 @@ import { api } from '../services/api.js';
 import { socket } from '../services/socket.js';
 import { AppRecord, DeploymentRecord } from '../types/index.js';
 import { EnvEditor } from '../components/EnvEditor.js';
+import { DeployHistoryModal } from '../components/apps/DeployHistoryModal.js';
+import { BuildLogsModal } from '../components/apps/BuildLogsModal.js';
 
 interface AppsPageProps {
   /** Opens the analytics view already focused on this application. */
@@ -430,6 +432,20 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       setDeploymentsList(res.data);
     } catch (err: any) {
       alert('Erro ao carregar histórico: ' + err.message);
+    }
+  };
+
+  const openBuildLogs = async (dep: DeploymentRecord) => {
+    if (!selectedDeploymentsApp) return;
+    try {
+      setSelectedBuildLogs({ ...dep, buildLogs: 'Carregando logs…' });
+      const res = await api.get(`/apps/${selectedDeploymentsApp.id}/deployments/${dep.id}/logs`);
+      setSelectedBuildLogs({ ...dep, buildLogs: res.data.buildLogs || '' });
+    } catch (err: any) {
+      setSelectedBuildLogs({
+        ...dep,
+        buildLogs: `Erro ao carregar logs: ${err.response?.data?.error || err.message}`,
+      });
     }
   };
 
@@ -1269,75 +1285,14 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
       {/* Modal: Histórico de Deploys */}
       {selectedDeploymentsApp && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
-            <div className="p-5 bg-surface-container-low/90 border-b border-outline-variant flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Clock className="w-5 h-5 text-ok" />
-                <span className="font-bold text-white text-sm">Histórico de Deploys: {selectedDeploymentsApp.name}</span>
-              </div>
-              <button onClick={() => setSelectedDeploymentsApp(null)} className="text-on-surface-variant hover:text-white">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-4 flex-1 overflow-y-auto space-y-3 custom-scrollbar">
-              {deploymentsList.length === 0 ? (
-                <div className="text-center py-8 text-on-surface-variant/70 text-xs">
-                  Nenhum registro de build anterior encontrado.
-                </div>
-              ) : (
-                deploymentsList.map((dep) => (
-                  <div
-                    key={dep.id}
-                    className="p-4 rounded-lg bg-surface-container-low border border-outline-variant flex items-center justify-between hover:border-outline-variant transition-colors"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        {dep.status === 'success' ? (
-                          <CheckCircle2 className="w-4 h-4 text-ok" />
-                        ) : dep.status === 'building' ? (
-                          <RefreshCw className="w-4 h-4 text-warn animate-spin" />
-                        ) : (
-                          <AlertCircle className="w-4 h-4 text-crit" />
-                        )}
-                        <span className="font-bold text-on-surface text-xs">{dep.commitMessage || 'Deploy'}</span>
-                        <span className="text-[10px] font-mono text-primary bg-primary/20 px-2 py-0.5 rounded">
-                          {dep.branch}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-on-surface-variant font-mono">
-                        Por {dep.authorName} • {new Date(dep.createdAt).toLocaleString('pt-BR')} • {dep.durationSeconds}s
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setSelectedBuildLogs(dep)}
-                        title="Ver saída de logs deste build"
-                        className="px-3 py-1.5 rounded bg-surface-container-high hover:bg-surface-container-highest text-primary text-xs font-semibold transition-colors"
-                      >
-                        Ver Logs
-                      </button>
-
-                      {dep.status === 'success' && (
-                        <button
-                          onClick={() => handleRollback(selectedDeploymentsApp.id, dep.id)}
-                          disabled={rollingBackId === dep.id}
-                          title="Reverter a aplicação para este commit/versão instantaneamente em 2 segundos"
-                          className="px-3 py-1.5 rounded bg-warn/10 hover:bg-warn/15 text-warn border border-warn/30 text-xs font-semibold transition-colors flex items-center gap-1 active:scale-95 disabled:opacity-50"
-                        >
-                          <Clock className={`w-3.5 h-3.5 ${rollingBackId === dep.id ? 'animate-spin' : ''}`} />
-                          <span>{rollingBackId === dep.id ? 'Revertendo...' : '⏪ Rollback'}</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
+        <DeployHistoryModal
+          app={selectedDeploymentsApp}
+          deployments={deploymentsList}
+          rollingBackId={rollingBackId}
+          onClose={() => setSelectedDeploymentsApp(null)}
+          onOpenLogs={openBuildLogs}
+          onRollback={handleRollback}
+        />
       )}
 
       {/* Modal: GitHub Actions Workflow YAML */}
@@ -1379,23 +1334,10 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
       {/* Modal: Build Logs Output */}
       {selectedBuildLogs && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0a0f1c] rounded-lg border border-outline-variant w-full max-w-3xl overflow-hidden flex flex-col max-h-[85vh]">
-            <div className="p-4 bg-surface-container-low/90 border-b border-outline-variant flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Terminal className="w-5 h-5 text-ok" />
-                <span className="font-bold text-white text-sm">Build Output: {selectedBuildLogs.appName}</span>
-              </div>
-              <button onClick={() => setSelectedBuildLogs(null)} className="text-on-surface-variant hover:text-white">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-5 flex-1 overflow-auto font-mono text-xs text-ok bg-black/90 whitespace-pre-wrap leading-relaxed">
-              {selectedBuildLogs.buildLogs || 'Nenhum log gravado para este build.'}
-            </div>
-          </div>
-        </div>
+        <BuildLogsModal
+          deployment={selectedBuildLogs}
+          onClose={() => setSelectedBuildLogs(null)}
+        />
       )}
 
       {/* Modal: AI Prompt Generator (Vercel to AegisPanel) */}

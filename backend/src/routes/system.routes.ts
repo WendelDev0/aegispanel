@@ -6,6 +6,7 @@ import { dockerService } from '../services/docker.service.js';
 import { dbStorage, PanelSettings, AlertConfig } from '../db/storage.js';
 import { authMiddleware, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { EncryptionService } from '../utils/crypto.js';
+import { PanelService } from '../services/panel.service.js';
 
 export const systemRouter = Router();
 
@@ -274,5 +275,32 @@ systemRouter.post('/test-alert', requireAdmin, async (req: Request, res: Respons
     res.json({ success: true, message: `Mensagem de teste enviada via ${channel}!` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+systemRouter.get('/panel/log-targets', requireAdmin, (_req: Request, res: Response) => {
+  res.json({ targets: PanelService.listLogTargets() });
+});
+
+systemRouter.get('/panel/logs/:target', requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const tail = req.query.tail ? Number(req.query.tail) : 200;
+    const logs = await PanelService.getStackLogs(req.params.target, tail);
+    res.json({ target: req.params.target, logs });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+systemRouter.post('/panel/self-update', requireAdmin, async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await PanelService.selfUpdate();
+    res.json({
+      success: true,
+      message: 'Self-update da stack iniciado/concluído.',
+      output: result.output,
+    });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
   }
 });

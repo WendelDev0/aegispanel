@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { CONFIG } from '../config.js';
 import type { UserRole } from '../middleware/auth.js';
+import { DeployLogStore } from '../utils/deploy-log.store.js';
 
 export interface User {
   id: string;
@@ -41,6 +42,10 @@ export interface DeploymentRecord {
   authorName?: string;
   branch: string;
   status: 'queued' | 'building' | 'success' | 'failed';
+  /**
+   * In-memory / streaming only. Persisted under DATA_DIR/deploy-logs so
+   * panel_db.json stays small. List endpoints return an empty string.
+   */
   buildLogs: string;
   durationSeconds: number;
   triggeredBy: 'webhook' | 'manual' | 'github_action';
@@ -70,6 +75,8 @@ export interface AppRecord {
   githubToken?: string;
   autoDeploy?: boolean;
   deployBranch?: string;
+  /** Optional remote node target. Absent / local node = this machine. */
+  nodeId?: string;
   status: 'running' | 'stopped' | 'building' | 'error';
   lastDeployAt?: string;
   lastCommitHash?: string;
@@ -547,6 +554,11 @@ class JsonStorage {
     const initialLen = this.data.apps.length;
     this.data.apps = this.data.apps.filter(a => a.id !== id);
     if (this.data.apps.length !== initialLen) {
+      // Drop deployment metadata and file-backed logs for this app together.
+      const deps = (this.data.deployments || []).filter((d) => d.appId === id);
+      for (const d of deps) DeployLogStore.remove(d.appId, d.id);
+      this.data.deployments = (this.data.deployments || []).filter((d) => d.appId !== id);
+      DeployLogStore.removeApp(id);
       this.save();
       return true;
     }
@@ -556,22 +568,56 @@ class JsonStorage {
   // Deployments
   getDeployments(appId?: string): DeploymentRecord[] {
     if (!this.data.deployments) this.data.deployments = [];
-    if (appId) {
-      return this.data.deployments.filter(d => d.appId === appId);
+    const list = appId
+      ? this.data.deployments.filter(d => d.appId === appId)
+      : this.data.deployments;
+    // Never ship full build logs in list payloads — they live on disk now.
+    return list.map((d) => ({ ...d, buildLogs: '' }));
+  }
+
+  getDeploymentById(appId: string, deploymentId: string): DeploymentRecord | undefined {
+    if (!this.data.deployments) this.data.deployments = [];
+    return this.data.deployments.find((d) => d.id === deploymentId && d.appId === appId);
+  }
+
+  /**
+   * Returns the build log for one deployment.
+   *
+   * Prefers the file store; falls back to any legacy inline buildLogs left in
+   * panel_db.json from before the migration, then migrates that content out.
+   */
+  getDeploymentLogs(appId: string, deploymentId: string): string {
+    const fromFile = DeployLogStore.read(appId, deploymentId);
+    if (fromFile !== null) return fromFile;
+
+    const dep = this.getDeploymentById(appId, deploymentId);
+    if (dep?.buildLogs) {
+      DeployLogStore.write(appId, deploymentId, dep.buildLogs);
+      dep.buildLogs = '';
+      this.save();
+      return DeployLogStore.read(appId, deploymentId) || '';
     }
-    return this.data.deployments;
+    return '';
   }
 
   saveDeployment(dep: DeploymentRecord): DeploymentRecord {
     if (!this.data.deployments) this.data.deployments = [];
+
+    // Persist logs to disk first so a crash between write and JSON save still
+    // leaves the log recoverable; the JSON copy stays empty on purpose.
+    if (dep.buildLogs) {
+      DeployLogStore.write(dep.appId, dep.id, dep.buildLogs);
+    }
+
+    const stored: DeploymentRecord = { ...dep, buildLogs: '' };
     const idx = this.data.deployments.findIndex(d => d.id === dep.id);
     if (idx >= 0) {
-      this.data.deployments[idx] = dep;
+      this.data.deployments[idx] = stored;
     } else {
-      this.data.deployments.unshift(dep);
+      this.data.deployments.unshift(stored);
     }
     this.save();
-    return dep;
+    return { ...stored, buildLogs: dep.buildLogs };
   }
 
   // Cron Jobs
@@ -787,7 +833,7 @@ class JsonStorage {
    * balloons. This keeps the most recent N per app and truncates logs on
    * older entries to a short summary.
    */
-  pruneDeployments(maxPerApp: number = 30, logTruncateLength: number = 500): number {
+  pruneDeployments(maxPerApp: number = 30, _logTruncateLength: number = 500): number {
     if (!this.data.deployments?.length) return 0;
 
     const byApp = new Map<string, DeploymentRecord[]>();
@@ -803,14 +849,13 @@ class JsonStorage {
       deploys.sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
       for (let i = 0; i < deploys.length; i++) {
         if (i >= maxPerApp) {
-          // Remove entirely.
+          DeployLogStore.remove(deploys[i].appId, deploys[i].id);
           this.data.deployments = this.data.deployments.filter(d => d.id !== deploys[i].id);
           pruned++;
-        } else if (i >= 10 && deploys[i].buildLogs.length > logTruncateLength) {
-          // Keep the record but truncate the log.
-          deploys[i].buildLogs =
-            deploys[i].buildLogs.slice(0, logTruncateLength) +
-            `\n\n[… log truncado — deploy antigo]`;
+        } else if (deploys[i].buildLogs) {
+          // Migrate any leftover inline logs out of the JSON document.
+          DeployLogStore.write(deploys[i].appId, deploys[i].id, deploys[i].buildLogs);
+          deploys[i].buildLogs = '';
           pruned++;
         }
       }

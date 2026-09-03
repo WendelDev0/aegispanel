@@ -8,6 +8,13 @@ import {
   requireAdmin,
   signToken,
 } from '../middleware/auth.js';
+import { createIpLimiter } from '../middleware/rate-limit.js';
+import { validateBody } from '../middleware/validate.js';
+import {
+  changePasswordBodySchema,
+  loginBodySchema,
+  setupBodySchema,
+} from '../validation/schemas.js';
 
 export const authRouter = Router();
 
@@ -15,45 +22,19 @@ export const authRouter = Router();
 export { authMiddleware, requireAdmin, requireWrite } from '../middleware/auth.js';
 export type { AuthRequest } from '../middleware/auth.js';
 
-const MAX_ATTEMPTS = 5;
-const LOCK_TIME_MS = 15 * 60 * 1000;
-const ATTEMPT_TTL_MS = 60 * 60 * 1000;
-const MAX_TRACKED_IPS = 10_000;
 const USERNAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$/;
 const MAX_PASSWORD_LENGTH = 512;
 
-interface AttemptRecord {
-  attempts: number;
-  lockUntil?: number;
-  updatedAt: number;
-}
-
 /**
- * Brute-force limiter keyed by the connection address.
- *
- * req.ip is used rather than the X-Forwarded-For header directly: with
- * `trust proxy` set, Express derives it from the proxy chain, whereas reading
- * the raw header lets a client mint a fresh identity per request and bypass
- * the lockout entirely.
+ * Shared IP lockout for login, first-run setup and password changes.
+ * req.ip (with trust proxy) is the identity — never the raw X-Forwarded-For.
  */
-const loginAttempts = new Map<string, AttemptRecord>();
-let setupInProgress = false;
+const authLimiter = createIpLimiter({
+  maxAttempts: 5,
+  lockTimeMs: 15 * 60 * 1000,
+});
 
-function pruneAttempts(now: number): void {
-  if (loginAttempts.size < MAX_TRACKED_IPS) {
-    for (const [ip, rec] of loginAttempts) {
-      if (now - rec.updatedAt > ATTEMPT_TTL_MS && (!rec.lockUntil || rec.lockUntil < now)) {
-        loginAttempts.delete(ip);
-      }
-    }
-    return;
-  }
-  // Hard cap reached: drop the oldest half so the map cannot grow without bound.
-  const sorted = [...loginAttempts.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt);
-  for (let i = 0; i < sorted.length / 2; i++) {
-    loginAttempts.delete(sorted[i][0]);
-  }
-}
+let setupInProgress = false;
 
 function normalizeRole(role: unknown): UserRole {
   return role === 'admin' || role === 'developer' || role === 'viewer' ? role : 'viewer';
@@ -83,112 +64,93 @@ authRouter.get('/status', (req: Request, res: Response) => {
 });
 
 // Setup initial admin account (only works once)
-authRouter.post('/setup', async (req: Request, res: Response): Promise<void> => {
-  const users = dbStorage.getUsers();
-  if (users.length > 0) {
-    res.status(403).json({ error: 'Acesso bloqueado: O painel já possui um administrador cadastrado.' });
-    return;
-  }
-
-  const { username, password, email, serverName } = req.body || {};
-  const credentialError = validateCredentials(username, password);
-  if (credentialError) {
-    res.status(400).json({ error: credentialError });
-    return;
-  }
-
-  if (setupInProgress) {
-    res.status(409).json({ error: 'A configuração inicial já está em andamento.' });
-    return;
-  }
-
-  setupInProgress = true;
-  try {
-    // Re-check after validation and before the asynchronous hash. This closes
-    // the race where two first-run requests both observed an empty database.
-    if (dbStorage.getUsers().length > 0) {
+authRouter.post(
+  '/setup',
+  authLimiter.guard,
+  validateBody(setupBodySchema),
+  async (req: Request, res: Response): Promise<void> => {
+    const users = dbStorage.getUsers();
+    if (users.length > 0) {
       res.status(403).json({ error: 'Acesso bloqueado: O painel já possui um administrador cadastrado.' });
       return;
     }
 
-    const passwordHash = await bcrypt.hash(password, 12);
-    const newUser: User = {
-      id: `usr_${Date.now().toString(36)}`,
-      username,
-      passwordHash,
-      email,
-      role: 'admin',
-      tokenVersion: 0,
-      createdAt: new Date().toISOString(),
-    };
+    const { username, password, email, serverName } = req.body;
 
-    dbStorage.addUser(newUser);
-
-    if (serverName) {
-      dbStorage.updateSettings({ serverName });
+    if (setupInProgress) {
+      res.status(409).json({ error: 'A configuração inicial já está em andamento.' });
+      return;
     }
 
-    res.json({ token: signToken(newUser), user: publicUser(newUser) });
-  } finally {
-    setupInProgress = false;
+    setupInProgress = true;
+    try {
+      // Re-check after validation and before the asynchronous hash. This closes
+      // the race where two first-run requests both observed an empty database.
+      if (dbStorage.getUsers().length > 0) {
+        res.status(403).json({ error: 'Acesso bloqueado: O painel já possui um administrador cadastrado.' });
+        return;
+      }
+
+      const passwordHash = await bcrypt.hash(password, 12);
+      const newUser: User = {
+        id: `usr_${Date.now().toString(36)}`,
+        username,
+        passwordHash,
+        email: email || undefined,
+        role: 'admin',
+        tokenVersion: 0,
+        createdAt: new Date().toISOString(),
+      };
+
+      dbStorage.addUser(newUser);
+
+      if (serverName) {
+        dbStorage.updateSettings({ serverName });
+      }
+
+      authLimiter.clear(req);
+      res.json({ token: signToken(newUser), user: publicUser(newUser) });
+    } finally {
+      setupInProgress = false;
+    }
   }
-});
+);
 
 // Login with brute-force rate limiting
-authRouter.post('/login', async (req: Request, res: Response): Promise<void> => {
-  const clientIp = req.ip || req.socket.remoteAddress || 'unknown-ip';
-  const now = Date.now();
-  pruneAttempts(now);
+authRouter.post(
+  '/login',
+  authLimiter.guard,
+  validateBody(loginBodySchema),
+  async (req: Request, res: Response): Promise<void> => {
+    const { username, password } = req.body;
 
-  const attemptData = loginAttempts.get(clientIp) || { attempts: 0, updatedAt: now };
+    const user = dbStorage.getUserByUsername(username);
 
-  if (attemptData.lockUntil && now < attemptData.lockUntil) {
-    const minutesLeft = Math.ceil((attemptData.lockUntil - now) / 60000);
-    res.status(429).json({
-      error: `🛡️ Bloqueio de Segurança: Muitas tentativas incorretas. Seu IP está temporariamente bloqueado por mais ${minutesLeft} minuto(s).`,
-    });
-    return;
-  }
+    // Always run a hash comparison so a missing user and a wrong password take
+    // comparable time and cannot be told apart by response latency.
+    const storedHash = user?.passwordHash || '$2a$12$0000000000000000000000000000000000000000000000000000u';
+    const match = await bcrypt.compare(password, storedHash);
 
-  const { username, password } = req.body || {};
-  if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
-    res.status(400).json({ error: 'Usuário e senha são obrigatórios' });
-    return;
-  }
-  if (password.length > MAX_PASSWORD_LENGTH) {
-    res.status(400).json({ error: `A senha não pode exceder ${MAX_PASSWORD_LENGTH} caracteres.` });
-    return;
-  }
-
-  const user = dbStorage.getUserByUsername(username);
-
-  // Always run a hash comparison so a missing user and a wrong password take
-  // comparable time and cannot be told apart by response latency.
-  const storedHash = user?.passwordHash || '$2a$12$0000000000000000000000000000000000000000000000000000u';
-  const match = await bcrypt.compare(password, storedHash);
-
-  if (!user || !match) {
-    attemptData.attempts += 1;
-    attemptData.updatedAt = now;
-    if (attemptData.attempts >= MAX_ATTEMPTS) {
-      attemptData.lockUntil = now + LOCK_TIME_MS;
-      loginAttempts.set(clientIp, attemptData);
-      res.status(429).json({
-        error: '🛡️ Bloqueio de Segurança: Limite de 5 tentativas excedido. IP bloqueado temporariamente por 15 minutos.',
+    if (!user || !match) {
+      authLimiter.recordFailure(req);
+      const locked = authLimiter.isLocked(req);
+      if (locked.locked) {
+        res.status(429).json({
+          error:
+            '🛡️ Bloqueio de Segurança: Limite de 5 tentativas excedido. IP bloqueado temporariamente por 15 minutos.',
+        });
+        return;
+      }
+      res.status(401).json({
+        error: 'Usuário ou senha incorretos.',
       });
       return;
     }
-    loginAttempts.set(clientIp, attemptData);
-    const remaining = MAX_ATTEMPTS - attemptData.attempts;
-    res.status(401).json({
-      error: `Usuário ou senha incorretos. (${remaining} tentativa(s) restante(s) antes do bloqueio)`,
-    });
-    return;
-  }
 
-  loginAttempts.delete(clientIp);
-  res.json({ token: signToken(user), user: publicUser(user) });
-});
+    authLimiter.clear(req);
+    res.json({ token: signToken(user), user: publicUser(user) });
+  }
+);
 
 // Current user
 authRouter.get('/me', authMiddleware, (req: AuthRequest, res: Response) => {
@@ -196,28 +158,28 @@ authRouter.get('/me', authMiddleware, (req: AuthRequest, res: Response) => {
 });
 
 // Change own password
-authRouter.post('/change-password', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  const { currentPassword, newPassword } = req.body || {};
-  if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || !currentPassword || !newPassword) {
-    res.status(400).json({ error: 'Senha atual e nova senha são obrigatórias' });
-    return;
-  }
-  if (newPassword.length < 12 || newPassword.length > MAX_PASSWORD_LENGTH) {
-    res.status(400).json({ error: `A nova senha deve ter entre 12 e ${MAX_PASSWORD_LENGTH} caracteres.` });
-    return;
-  }
+authRouter.post(
+  '/change-password',
+  authMiddleware,
+  authLimiter.guard,
+  validateBody(changePasswordBodySchema),
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    const { currentPassword, newPassword } = req.body;
 
-  const user = dbStorage.getUsers().find((u) => u.id === req.user!.id);
-  if (!user || !(await bcrypt.compare(currentPassword, user.passwordHash))) {
-    res.status(401).json({ error: 'Senha atual incorreta' });
-    return;
-  }
+    const user = dbStorage.getUsers().find((u) => u.id === req.user!.id);
+    if (!user || !(await bcrypt.compare(currentPassword, user.passwordHash))) {
+      authLimiter.recordFailure(req);
+      res.status(401).json({ error: 'Senha atual incorreta' });
+      return;
+    }
 
-  user.passwordHash = await bcrypt.hash(newPassword, 12);
-  user.tokenVersion = (user.tokenVersion ?? 0) + 1;
-  dbStorage.saveUser(user);
-  res.json({ success: true });
-});
+    user.passwordHash = await bcrypt.hash(newPassword, 12);
+    user.tokenVersion = (user.tokenVersion ?? 0) + 1;
+    dbStorage.saveUser(user);
+    authLimiter.clear(req);
+    res.json({ success: true });
+  }
+);
 
 // List team users
 authRouter.get('/users', authMiddleware, requireAdmin, (req: AuthRequest, res: Response): void => {

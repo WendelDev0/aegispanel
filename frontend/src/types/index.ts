@@ -101,6 +101,8 @@ export interface AppRecord {
   hasGithubToken?: boolean;
   autoDeploy?: boolean;
   deployBranch?: string;
+  /** Target node id. Absent = local panel machine. */
+  nodeId?: string;
   status: 'running' | 'stopped' | 'building' | 'error';
   lastDeployAt?: string;
   lastCommitHash?: string;
@@ -161,7 +163,7 @@ export interface ServerNode {
   type: 'vps' | 'local' | 'cloud';
   hostIp: string;
   isCurrent: boolean;
-  status: 'online' | 'offline';
+  status: 'online' | 'offline' | 'unknown' | 'error';
   location?: string;
 }
 

@@ -132,6 +132,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
   // Import file ref
   const importFileRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
+  const [panelLogTarget, setPanelLogTarget] = useState('aegis-backend');
+  const [panelLogs, setPanelLogs] = useState('');
+  const [loadingPanelLogs, setLoadingPanelLogs] = useState(false);
+  const [selfUpdating, setSelfUpdating] = useState(false);
+  const [selfUpdateOutput, setSelfUpdateOutput] = useState('');
+
 
   const fetchSettingsAndNodes = async () => {
     // Settled individually: listing the team requires the admin role, and a
@@ -344,6 +350,34 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
       link.remove();
     } catch (err: any) {
       alert('Erro ao exportar dados: ' + err.message);
+    }
+  };
+
+  const handleLoadPanelLogs = async () => {
+    try {
+      setLoadingPanelLogs(true);
+      const res = await api.get(`/system/panel/logs/${panelLogTarget}`, { params: { tail: 200 } });
+      setPanelLogs(res.data.logs || '');
+    } catch (err: any) {
+      setPanelLogs(err.response?.data?.error || err.message);
+    } finally {
+      setLoadingPanelLogs(false);
+    }
+  };
+
+  const handleSelfUpdate = async () => {
+    if (!confirm('Atualizar a stack do painel agora? Isso reconstrói os contêineres aegis-*.')) return;
+    try {
+      setSelfUpdating(true);
+      setSelfUpdateOutput('');
+      const res = await api.post('/system/panel/self-update');
+      setSelfUpdateOutput(res.data.output || res.data.message || 'OK');
+      alert(res.data.message || 'Self-update concluído.');
+    } catch (err: any) {
+      setSelfUpdateOutput(err.response?.data?.error || err.message);
+      alert('Self-update falhou: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setSelfUpdating(false);
     }
   };
 
@@ -956,6 +990,51 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
             <span>{importing ? 'Importando...' : 'Restaurar / Importar Backup'}</span>
           </button>
         </div>
+      </div>
+      )}
+
+      {isAdmin && (
+      <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
+        <div className="flex items-center gap-2">
+          <Activity className="w-5 h-5 text-ok" />
+          <h3 className="font-bold text-white text-base">Autogestão do Painel</h3>
+        </div>
+        <p className="text-xs text-on-surface-variant">
+          Logs allowlisted da stack (backend, frontend, caddy, nginx) e self-update via Docker Compose. Bloqueado em LOCAL_MODE.
+        </p>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            value={panelLogTarget}
+            onChange={(e) => setPanelLogTarget(e.target.value)}
+            className="bg-surface-container-low border border-outline-variant rounded px-3 py-2 text-xs text-white"
+          >
+            <option value="aegis-backend">aegis-backend</option>
+            <option value="aegis-frontend">aegis-frontend</option>
+            <option value="aegis-caddy">aegis-caddy</option>
+            <option value="aegis-nginx">aegis-nginx</option>
+          </select>
+          <button
+            onClick={handleLoadPanelLogs}
+            disabled={loadingPanelLogs}
+            className="px-4 py-2 rounded bg-surface-container-high text-xs font-semibold text-on-surface border border-outline-variant disabled:opacity-50"
+          >
+            {loadingPanelLogs ? 'Carregando…' : 'Ver logs'}
+          </button>
+          <button
+            onClick={handleSelfUpdate}
+            disabled={selfUpdating}
+            className="px-4 py-2 rounded bg-primary-container hover:bg-primary text-white text-xs font-semibold disabled:opacity-50"
+          >
+            {selfUpdating ? 'Atualizando…' : 'Self-update da stack'}
+          </button>
+        </div>
+
+        {(panelLogs || selfUpdateOutput) && (
+          <pre className="max-h-64 overflow-auto bg-surface-container-lowest border border-outline-variant rounded p-3 text-[11px] font-mono text-ok whitespace-pre-wrap">
+            {selfUpdateOutput || panelLogs}
+          </pre>
+        )}
       </div>
       )}
 
