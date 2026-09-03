@@ -77,6 +77,14 @@ $SUDO mkdir -p "$INSTALL_DIR/caddy" "$INSTALL_DIR/data"
 $SUDO chown -R "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$INSTALL_DIR"
 $SUDO chmod 700 "$INSTALL_DIR/data"
 
+if [ ! -f "$INSTALL_DIR/docker-compose.yml" ] && [ ! -f "$INSTALL_DIR/compose.yml" ]; then
+    echo "❌ docker-compose.yml não encontrado em $INSTALL_DIR"
+    echo "   O self-update do painel precisa desse arquivo."
+    echo "   Defina AEGIS_INSTALL_DIR para o clone correto, ou copie o compose para cá."
+    echo "   Depois grave no .env: AEGIS_COMPOSE_DIR=$INSTALL_DIR"
+    exit 1
+fi
+
 if [ ! -f "$INSTALL_DIR/caddy/Caddyfile" ]; then
     printf '# AegisPanel Default Caddyfile\n' > "$INSTALL_DIR/caddy/Caddyfile"
 fi
@@ -113,6 +121,16 @@ ensure_secret() {
 
 ensure_secret JWT_SECRET
 ensure_secret ENCRYPTION_KEY
+
+# Same path on the host and inside the backend container. Without this,
+# `docker compose` from the panel cannot find the project (cwd is /app).
+if grep -qE "^AEGIS_COMPOSE_DIR=" "$ENV_FILE"; then
+    sed -i "s|^AEGIS_COMPOSE_DIR=.*|AEGIS_COMPOSE_DIR=${INSTALL_DIR}|" "$ENV_FILE"
+else
+    printf 'AEGIS_COMPOSE_DIR=%s\n' "$INSTALL_DIR" >> "$ENV_FILE"
+fi
+echo "   ✅ AEGIS_COMPOSE_DIR=${INSTALL_DIR}"
+
 chmod 600 "$ENV_FILE"
 
 # 6. Subir a stack

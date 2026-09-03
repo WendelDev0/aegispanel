@@ -210,11 +210,14 @@ class DockerManager {
     };
   }
 
-  async listImages(): Promise<any[]> {
+  async listImages(client?: Docker): Promise<any[]> {
     try {
-      const connected = await this.testConnection();
-      if (!connected) return [];
-      const images = await this.docker.listImages();
+      const docker = client || this.docker;
+      if (!client) {
+        const connected = await this.testConnection();
+        if (!connected) return [];
+      }
+      const images = await docker.listImages();
       return images.map(img => ({
         id: img.Id,
         repoTags: img.RepoTags || [],
@@ -312,12 +315,13 @@ class DockerManager {
     }
   }
 
-  async startContainer(containerId: string): Promise<boolean> {
+  async startContainer(containerId: string, client?: Docker): Promise<boolean> {
     try {
-      if (!(await this.isManagedWorkload(containerId))) {
+      const docker = client || this.docker;
+      if (!client && !(await this.isManagedWorkload(containerId))) {
         throw new Error('Contêiner não gerenciado pelo AegisPanel.');
       }
-      const container = this.docker.getContainer(containerId);
+      const container = docker.getContainer(containerId);
       await container.start();
       return true;
     } catch (err) {
@@ -326,12 +330,13 @@ class DockerManager {
     }
   }
 
-  async stopContainer(containerId: string): Promise<boolean> {
+  async stopContainer(containerId: string, client?: Docker): Promise<boolean> {
     try {
-      if (!(await this.isManagedWorkload(containerId))) {
+      const docker = client || this.docker;
+      if (!client && !(await this.isManagedWorkload(containerId))) {
         throw new Error('Contêiner não gerenciado pelo AegisPanel.');
       }
-      const container = this.docker.getContainer(containerId);
+      const container = docker.getContainer(containerId);
       await container.stop();
       return true;
     } catch (err) {
@@ -340,12 +345,13 @@ class DockerManager {
     }
   }
 
-  async restartContainer(containerId: string): Promise<boolean> {
+  async restartContainer(containerId: string, client?: Docker): Promise<boolean> {
     try {
-      if (!(await this.isManagedWorkload(containerId))) {
+      const docker = client || this.docker;
+      if (!client && !(await this.isManagedWorkload(containerId))) {
         throw new Error('Contêiner não gerenciado pelo AegisPanel.');
       }
-      const container = this.docker.getContainer(containerId);
+      const container = docker.getContainer(containerId);
       await container.restart();
       return true;
     } catch (err) {
@@ -354,12 +360,13 @@ class DockerManager {
     }
   }
 
-  async removeContainer(containerId: string, force: boolean = true, removeVolumes = false): Promise<boolean> {
+  async removeContainer(containerId: string, force: boolean = true, removeVolumes = false, client?: Docker): Promise<boolean> {
     try {
-      if (!(await this.isManagedWorkload(containerId))) {
+      const docker = client || this.docker;
+      if (!client && !(await this.isManagedWorkload(containerId))) {
         throw new Error('Contêiner não gerenciado pelo AegisPanel.');
       }
-      const container = this.docker.getContainer(containerId);
+      const container = docker.getContainer(containerId);
       await container.remove({ force, ...(removeVolumes ? { v: true } : {}) });
       return true;
     } catch (err) {
@@ -368,12 +375,13 @@ class DockerManager {
     }
   }
 
-  async getLogs(containerId: string, tail: number = 100): Promise<string> {
+  async getLogs(containerId: string, tail: number = 100, client?: Docker): Promise<string> {
     try {
-      if (!(await this.isManagedWorkload(containerId))) {
+      const docker = client || this.docker;
+      if (!client && !(await this.isManagedWorkload(containerId))) {
         throw new Error('Contêiner não gerenciado pelo AegisPanel.');
       }
-      const container = this.docker.getContainer(containerId);
+      const container = docker.getContainer(containerId);
       const logBuffer = await container.logs({
         stdout: true,
         stderr: true,
@@ -387,11 +395,12 @@ class DockerManager {
     }
   }
 
-  async pullImage(imageName: string): Promise<void> {
+  async pullImage(imageName: string, client?: Docker): Promise<void> {
+    const docker = client || this.docker;
     return new Promise((resolve, reject) => {
-      this.docker.pull(imageName, (err: any, stream: any) => {
+      docker.pull(imageName, (err: any, stream: any) => {
         if (err) return reject(err);
-        this.docker.modem.followProgress(stream, (err: any) => {
+        docker.modem.followProgress(stream, (err: any) => {
           if (err) return reject(err);
           resolve();
         });
@@ -399,9 +408,10 @@ class DockerManager {
     });
   }
 
-  async removeContainerByName(name: string, force: boolean = true): Promise<boolean> {
+  async removeContainerByName(name: string, force: boolean = true, client?: Docker): Promise<boolean> {
     try {
-      const container = this.docker.getContainer(name);
+      const docker = client || this.docker;
+      const container = docker.getContainer(name);
       const info = await container.inspect();
       if (info.Config?.Labels?.['aegis.managed'] !== 'true') return false;
       await container.remove({ force });
@@ -497,14 +507,15 @@ class DockerManager {
    * Removes containers named "<name>-prev-*", left over from a swap that was
    * interrupted before its cleanup ran.
    */
-  private async removeStaleBackups(name: string): Promise<void> {
+  private async removeStaleBackups(name: string, client?: Docker): Promise<void> {
+    const docker = client || this.docker;
     try {
-      const containers = await this.docker.listContainers({ all: true });
+      const containers = await docker.listContainers({ all: true });
       for (const info of containers) {
         const containerName = (info.Names[0] || '').replace(/^\//, '');
         if (containerName.startsWith(`${name}-prev-`) && info.Labels?.['aegis.managed'] === 'true') {
           try {
-            await this.docker.getContainer(info.Id).remove({ force: true });
+            await docker.getContainer(info.Id).remove({ force: true });
             console.warn(`Contêiner órfão removido: ${containerName}`);
           } catch (err: any) {
             console.warn(`Não foi possível remover o órfão ${containerName}:`, err.message);
@@ -517,9 +528,13 @@ class DockerManager {
   }
 
   /** Finds which container is publishing one of the given host ports. */
-  private async findPortHolder(hostPorts: number[]): Promise<{ port: number; container: string } | null> {
+  private async findPortHolder(
+    hostPorts: number[],
+    client?: Docker
+  ): Promise<{ port: number; container: string } | null> {
+    const docker = client || this.docker;
     try {
-      const containers = await this.docker.listContainers({ all: false });
+      const containers = await docker.listContainers({ all: false });
       for (const info of containers) {
         for (const p of info.Ports || []) {
           if (p.PublicPort && hostPorts.includes(p.PublicPort)) {
@@ -552,36 +567,51 @@ class DockerManager {
     labels?: { [key: string]: string };
     /** '127.0.0.1' keeps the published port off the internet. See buildCreateOptions. */
     bindIp?: string;
+    /** Remote Docker daemon (SSH). Defaults to the local panel daemon. */
+    client?: Docker;
+    /**
+     * Join the panel's aegis-net so Caddy can reach the container by name.
+     * Must stay false on remote nodes — that network does not exist there.
+     */
+    joinPanelNetwork?: boolean;
   }): Promise<string> {
-    await this.testConnection();
-    if (!this.isAvailable) {
-      throw new Error(
-        'Docker Engine não está ativo. No Windows, inicie o Docker Desktop. Na VPS Ubuntu, o Docker inicia automaticamente.'
-      );
+    const docker = options.client || this.docker;
+    // Remote daemons have no panel aegis-net; attaching would fail the create.
+    const joinNetwork = options.joinPanelNetwork !== false && !options.client;
+
+    if (!options.client) {
+      await this.testConnection();
+      if (!this.isAvailable) {
+        throw new Error(
+          'Docker Engine não está ativo. No Windows, inicie o Docker Desktop. Na VPS Ubuntu, o Docker inicia automaticamente.'
+        );
+      }
+    } else {
+      await docker.ping();
     }
 
-    // Ensure the image exists locally before touching the running container.
+    // Ensure the image exists on the target daemon before touching the running container.
     try {
-      await this.docker.getImage(options.image).inspect();
+      await docker.getImage(options.image).inspect();
     } catch {
       console.log(`Pulling image ${options.image}...`);
-      await this.pullImage(options.image);
+      await this.pullImage(options.image, docker);
     }
 
-    const networkName = await this.findAegisNetworkName();
+    const networkName = joinNetwork ? await this.findAegisNetworkName() : undefined;
     const createOptions = this.buildCreateOptions({ ...options, networkName });
 
     // Sweep containers left behind by an earlier interrupted swap. Each one
     // still holds the host port binding, so without this a single failed
     // deploy makes the port permanently unavailable.
-    await this.removeStaleBackups(options.name);
+    await this.removeStaleBackups(options.name, docker);
 
     const backupName = `${options.name}-prev-${Date.now().toString(36)}`;
     let renamedOld = false;
     let created: Docker.Container | null = null;
 
     try {
-      const existing = this.docker.getContainer(options.name);
+      const existing = docker.getContainer(options.name);
       const existingInfo = await existing.inspect();
       if (existingInfo.Config?.Labels?.['aegis.managed'] !== 'true') {
         throw new Error(`Já existe um contêiner não gerenciado com o nome "${options.name}".`);
@@ -599,12 +629,12 @@ class DockerManager {
     }
 
     try {
-      created = await this.docker.createContainer(createOptions);
+      created = await docker.createContainer(createOptions);
       await created.start();
 
       if (renamedOld) {
         try {
-          await this.docker.getContainer(backupName).remove({ force: true });
+          await docker.getContainer(backupName).remove({ force: true });
         } catch (err: any) {
           console.warn('Não foi possível remover o contêiner anterior:', err.message);
         }
@@ -626,7 +656,7 @@ class DockerManager {
 
       if (renamedOld) {
         try {
-          const old = this.docker.getContainer(backupName);
+          const old = docker.getContainer(backupName);
           await old.rename({ name: options.name });
           await old.start().catch(() => {});
           console.warn(`Deploy falhou; contêiner anterior "${options.name}" foi restaurado.`);
@@ -642,7 +672,7 @@ class DockerManager {
           err.message.includes('Ports are not available'))
       ) {
         const hostPorts = Object.values(options.ports || {});
-        const holder = await this.findPortHolder(hostPorts);
+        const holder = await this.findPortHolder(hostPorts, docker);
         throw new Error(
           holder
             ? `A porta do host :${holder.port} já está em uso pelo contêiner "${holder.container}". ` +

@@ -23,6 +23,7 @@ import {
   Database,
 } from 'lucide-react';
 import { api } from '../services/api.js';
+import { socket } from '../services/socket.js';
 import { User } from '../types/index.js';
 
 /** Placeholder the API sends in place of a stored secret. */
@@ -137,6 +138,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
   const [loadingPanelLogs, setLoadingPanelLogs] = useState(false);
   const [selfUpdating, setSelfUpdating] = useState(false);
   const [selfUpdateOutput, setSelfUpdateOutput] = useState('');
+  const selfUpdatingRef = useRef(false);
 
 
   const fetchSettingsAndNodes = async () => {
@@ -200,6 +202,29 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
 
   useEffect(() => {
     fetchSettingsAndNodes();
+  }, []);
+
+  useEffect(() => {
+    const onChunk = (data: { line?: string; status?: string; done?: boolean }) => {
+      if (data.line) {
+        setSelfUpdateOutput((prev) => (prev + data.line).slice(-256 * 1024));
+      }
+      if (data.done) setSelfUpdating(false);
+    };
+    const onDisconnect = () => {
+      if (!selfUpdatingRef.current) return;
+      setSelfUpdateOutput(
+        (prev) =>
+          prev +
+          '\n[aegis] Conexão perdida — o backend provavelmente está reiniciando. Recarregue o painel em alguns segundos.\n'
+      );
+    };
+    socket.on('panel:self-update', onChunk);
+    socket.on('disconnect', onDisconnect);
+    return () => {
+      socket.off('panel:self-update', onChunk);
+      socket.off('disconnect', onDisconnect);
+    };
   }, []);
 
   /**
@@ -368,15 +393,23 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
   const handleSelfUpdate = async () => {
     if (!confirm('Atualizar a stack do painel agora? Isso reconstrói os contêineres aegis-*.')) return;
     try {
+      selfUpdatingRef.current = true;
       setSelfUpdating(true);
-      setSelfUpdateOutput('');
-      const res = await api.post('/system/panel/self-update');
-      setSelfUpdateOutput(res.data.output || res.data.message || 'OK');
-      alert(res.data.message || 'Self-update concluído.');
+      setSelfUpdateOutput('[aegis] Iniciando self-update…\n');
+      const res = await api.post('/system/panel/self-update', {}, { timeout: 11 * 60 * 1000 });
+      if (res.data.output) {
+        setSelfUpdateOutput((prev) =>
+          prev.includes(res.data.output) ? prev : `${prev}\n${res.data.output}`
+        );
+      }
     } catch (err: any) {
-      setSelfUpdateOutput(err.response?.data?.error || err.message);
-      alert('Self-update falhou: ' + (err.response?.data?.error || err.message));
+      const msg = err.response?.data?.error || err.message;
+      setSelfUpdateOutput((prev) => `${prev}\n[aegis] ${msg}\n`);
+      if (err.response) {
+        alert('Self-update falhou: ' + msg);
+      }
     } finally {
+      selfUpdatingRef.current = false;
       setSelfUpdating(false);
     }
   };
@@ -1000,7 +1033,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
           <h3 className="font-bold text-white text-base">Autogestão do Painel</h3>
         </div>
         <p className="text-xs text-on-surface-variant">
-          Logs allowlisted da stack (backend, frontend, caddy, nginx) e self-update via Docker Compose. Bloqueado em LOCAL_MODE.
+          Logs allowlisted da stack (backend, frontend, caddy, nginx) e self-update via Docker Compose.
+          O progresso do self-update chega em tempo real. Bloqueado em LOCAL_MODE.
         </p>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -1030,9 +1064,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser }) => {
           </button>
         </div>
 
-        {(panelLogs || selfUpdateOutput) && (
+        {selfUpdateOutput && (
           <pre className="max-h-64 overflow-auto bg-surface-container-lowest border border-outline-variant rounded p-3 text-[11px] font-mono text-ok whitespace-pre-wrap">
-            {selfUpdateOutput || panelLogs}
+            {selfUpdateOutput}
+          </pre>
+        )}
+        {panelLogs && (
+          <pre className="max-h-64 overflow-auto bg-surface-container-lowest border border-outline-variant rounded p-3 text-[11px] font-mono text-ok whitespace-pre-wrap">
+            {panelLogs}
           </pre>
         )}
       </div>

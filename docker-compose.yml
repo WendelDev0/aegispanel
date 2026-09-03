@@ -52,6 +52,9 @@ services:
       - AEGIS_TRUSTED_PROXIES=${AEGIS_TRUSTED_PROXIES:-}
       - AEGIS_PUBLIC_BASE_URL=${AEGIS_PUBLIC_BASE_URL:-}
       - AEGIS_SUPABASE_PUBLIC_HOST=${AEGIS_SUPABASE_PUBLIC_HOST:-}
+      # Host path of the clone, also mounted below at the same path so
+      # `docker compose` bind mounts resolve on the daemon (host-absolute).
+      - AEGIS_COMPOSE_DIR=${AEGIS_COMPOSE_DIR:-/opt/aegispanel}
       - DOCKER_SOCKET=/var/run/docker.sock
       - TZ=${TZ:-America/Sao_Paulo}
       # Required. The container refuses to start if these are unset; generate
@@ -62,6 +65,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data:/app/data
       - ./caddy:/app/caddy
+      # Identity mount: compose running inside this container must see the
+      # same absolute project path the daemon uses for ./data and build contexts.
+      - ${AEGIS_COMPOSE_DIR:-/opt/aegispanel}:${AEGIS_COMPOSE_DIR:-/opt/aegispanel}
       # Read-only: the backend consumes Caddy's access log and must never be
       # able to alter or truncate it.
       - caddy_logs:/var/log/caddy:ro

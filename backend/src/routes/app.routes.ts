@@ -13,6 +13,8 @@ import { EncryptionService } from '../utils/crypto.js';
 import { assertSafeGitUrl } from '../utils/url-security.js';
 import { isValidDomain } from '../utils/naming.js';
 import { getPublicBaseUrl } from '../utils/public-url.js';
+import { NodeService } from '../services/node.service.js';
+import { isRemoteTarget } from '../utils/app-upstream.js';
 import { authMiddleware, requireWrite, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import {
@@ -194,7 +196,11 @@ appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (re
     // one it keeps running forever, holding the host port and shadowing the
     // new deploy.
     if (name && name !== previousName) {
-      await AppService.removeContainerByAppName(previousName);
+      const remoteClient =
+        isRemoteTarget(app.nodeId, app.nodeId ? NodeService.getById(app.nodeId) : null) && app.nodeId
+          ? await NodeService.getClient(app.nodeId).catch(() => undefined)
+          : undefined;
+      await AppService.removeContainerByAppName(previousName, remoteClient);
     }
 
     if (app.domain) {
@@ -558,7 +564,10 @@ appRouter.get('/:id/logs', requireWrite, async (req: Request, res: Response) => 
 
     if (app.containerId) {
       try {
-        const logs = await dockerService.getLogs(app.containerId, 100);
+        const remote =
+          isRemoteTarget(app.nodeId, app.nodeId ? NodeService.getById(app.nodeId) : null);
+        const client = remote && app.nodeId ? await NodeService.getClient(app.nodeId) : undefined;
+        const logs = await dockerService.getLogs(app.containerId, 100, client);
         if (logs && !logs.startsWith('Logs unavailable')) {
           res.json({ logs });
           return;
