@@ -2,12 +2,12 @@ import { Router, Response } from 'express';
 import { CronService } from '../services/cron.service.js';
 import { dbStorage } from '../db/storage.js';
 import { authMiddleware, requireAdmin, requireWrite, AuthRequest } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import { createCronBodySchema } from '../validation/schemas.js';
 
 export const cronRouter = Router();
 
 cronRouter.use(authMiddleware);
-
-const VALID_TYPES = ['shell', 'backup', 'webhook'] as const;
 
 /**
  * A `shell` job runs an arbitrary command on the host, which is equivalent to
@@ -22,18 +22,9 @@ cronRouter.get('/', (req: AuthRequest, res: Response) => {
   res.json(CronService.getAll());
 });
 
-cronRouter.post('/', requireWrite, (req: AuthRequest, res: Response): void => {
+cronRouter.post('/', requireWrite, validateBody(createCronBodySchema), (req: AuthRequest, res: Response): void => {
   try {
     const { name, schedule, type, command, webhookUrl } = req.body;
-    if (!name || !schedule || !type) {
-      res.status(400).json({ error: 'Nome, expressão cron e tipo são obrigatórios' });
-      return;
-    }
-
-    if (!VALID_TYPES.includes(type)) {
-      res.status(400).json({ error: `Tipo inválido. Use um de: ${VALID_TYPES.join(', ')}` });
-      return;
-    }
 
     if (type !== 'backup' && !canHandleShell(req)) {
       res.status(403).json({
