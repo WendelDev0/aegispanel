@@ -138,6 +138,8 @@ Documento de produto para elevar o painel de “funciona na VPS” para maturida
 
 ## Próxima evolução (fora deste PRD)
 
+> Continuação em [PRD-AEGIS-INFRA-PRO.md](./PRD-AEGIS-INFRA-PRO.md): acesso (2FA, sessões, audit), backup offsite, limites por app, snapshots do estado, fila/health de nós.
+
 
 
 ### Alta
