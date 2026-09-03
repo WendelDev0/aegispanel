@@ -9,6 +9,7 @@ import { ProjectDetector, ProjectInspectionResult } from './project-detector.ser
 import { AlertService } from './alert.service.js';
 import { AppService } from './app.service.js';
 import { PortService } from './port.service.js';
+import { NodeService } from './node.service.js';
 import { containerNameForApp } from '../utils/naming.js';
 import { emit } from '../realtime.js';
 import { CONFIG } from '../config.js';
@@ -315,6 +316,8 @@ export class CicdService {
     const branch = safeBranchName(options.branch || app.branch);
 
     if (app.sourceType === 'git' && app.gitUrl) await assertSafeGitUrl(app.gitUrl);
+
+    await NodeService.assertDeployTarget(app);
 
     const requestedCommitHash = safeCommitHash(options.commitHash);
     let commitHash = requestedCommitHash || 'unknown';
