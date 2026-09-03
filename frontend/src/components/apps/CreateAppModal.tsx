@@ -158,6 +158,9 @@ export const CreateAppModal: React.FC<CreateAppModalProps> = ({ onCreated, onCan
         nodeId,
       });
 
+      if (res.data?.overcommitWarning) {
+        alert(res.data.overcommitWarning);
+      }
       onCreated(res.data);
     } catch (err: any) {
       alert('Erro ao criar aplicação: ' + (err.response?.data?.error || err.message));

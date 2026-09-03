@@ -109,6 +109,8 @@ export interface AppRecord {
   lastCommitMessage?: string;
   lastCommitAuthor?: string;
   lastCommitAt?: string;
+  limits?: { memoryMb: number; cpus: number; pidsLimit: number };
+  healthcheck?: { path: string; intervalSec: number; timeoutSec: number; retries: number };
   createdAt: string;
   updatedAt: string;
 }
@@ -223,6 +225,8 @@ export interface AppMetricsSnapshot {
   memoryLimitBytes: number;
   memoryPercent: number;
   retainedLogBytes: number;
+  health?: 'healthy' | 'unhealthy' | 'starting' | 'none';
+  oomKilled?: boolean;
 }
 
 export interface AlertConfig {
@@ -254,6 +258,9 @@ export interface PanelSettings {
   autoBackup: boolean;
   backupIntervalHours: number;
   backupTarget?: BackupTargetPublic;
+  defaultAppLimits?: { memoryMb: number; cpus: number; pidsLimit: number };
+  defaultDbLimits?: { memoryMb: number; cpus: number; pidsLimit: number };
+  buildsDiskCapMb?: number;
   alertConfig: AlertConfig;
 }
 

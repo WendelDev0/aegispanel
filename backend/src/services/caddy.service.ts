@@ -5,7 +5,8 @@ import { dbStorage } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
 import { NodeService } from './node.service.js';
 import { isValidDomain } from '../utils/naming.js';
-import { resolveAppUpstream } from '../utils/app-upstream.js';
+import { isRemoteTarget, resolveAppUpstream } from '../utils/app-upstream.js';
+import { containerNameForApp } from '../utils/naming.js';
 
 const CADDY_CONTAINER = CONFIG.CADDY_CONTAINER;
 
@@ -69,7 +70,7 @@ export class CaddyService {
     domain: string,
     upstream: string,
     useInternalTls: boolean,
-    extras?: { securityHeaders?: boolean }
+    extras?: { securityHeaders?: boolean; unavailable?: boolean }
   ): string {
     const lines = [`${domain} {`];
     if (useInternalTls) {
@@ -89,17 +90,26 @@ export class CaddyService {
       lines.push('    -Server');
       lines.push('  }');
     }
-    lines.push(`  reverse_proxy ${upstream} {`);
-    lines.push('    header_up Host {host}');
-    lines.push('    header_up X-Real-IP {remote_host}');
-    lines.push('    header_up X-Forwarded-For {remote_host}');
-    lines.push('    header_up X-Forwarded-Proto {scheme}');
-    // Passive health checking: an upstream that refuses connections is taken
-    // out of rotation instead of returning 502 to the visitor on every retry.
-    lines.push('    lb_try_duration 5s');
-    lines.push('    fail_duration 10s');
-    lines.push('    max_fails 3');
-    lines.push('  }');
+    if (extras?.unavailable) {
+      // Portuguese 503 instead of a raw proxy error when the app is unhealthy.
+      // Braces are avoided in the HTML so Caddy does not treat them as placeholders.
+      lines.push('  header Content-Type "text/html; charset=utf-8"');
+      lines.push(
+        '  respond `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Indispon&iacute;vel</title></head><body><h1>Aplica&ccedil;&atilde;o indispon&iacute;vel</h1><p>Esta aplica&ccedil;&atilde;o est&aacute; temporariamente fora do ar. Tente novamente em instantes.</p></body></html>` 503'
+      );
+    } else {
+      lines.push(`  reverse_proxy ${upstream} {`);
+      lines.push('    header_up Host {host}');
+      lines.push('    header_up X-Real-IP {remote_host}');
+      lines.push('    header_up X-Forwarded-For {remote_host}');
+      lines.push('    header_up X-Forwarded-Proto {scheme}');
+      // Passive health checking: an upstream that refuses connections is taken
+      // out of rotation instead of returning 502 to the visitor on every retry.
+      lines.push('    lb_try_duration 5s');
+      lines.push('    fail_duration 10s');
+      lines.push('    max_fails 3');
+      lines.push('  }');
+    }
     lines.push('  encode gzip zstd');
     lines.push('  log {');
     lines.push(`    output file ${ACCESS_LOG_PATH}`);
@@ -165,9 +175,9 @@ export class CaddyService {
 
     const rendered = new Set<string>();
 
-    const addSite = (
+    const addSite = async (
       rawDomain: string,
-      app: { name: string; nodeId?: string; port: number; internalPort?: number } | undefined,
+      app: { name: string; nodeId?: string; port: number; internalPort?: number; status?: string } | undefined,
       hostPort: number,
       internalPort: number
     ) => {
@@ -188,7 +198,27 @@ export class CaddyService {
           )
         : `host.docker.internal:${hostPort}`;
 
-      content += this.renderSite(domain, upstream, CONFIG.LOCAL_MODE || isLocalDomain(domain));
+      let unavailable = false;
+      if (app) {
+        try {
+          const remote = isRemoteTarget(app.nodeId, app.nodeId ? NodeService.getById(app.nodeId) : null);
+          const client =
+            remote && app.nodeId ? await NodeService.getClient(app.nodeId).catch(() => undefined) : undefined;
+          const runtime = await dockerService.inspectRuntimeByName(containerNameForApp(app.name), client);
+          if (
+            runtime &&
+            (runtime.health === 'unhealthy' || (!runtime.running && runtime.health !== 'starting'))
+          ) {
+            unavailable = true;
+          }
+        } catch {
+          // Inspect failed: keep the current upstream rather than 503 everything.
+        }
+      }
+
+      content += this.renderSite(domain, upstream, CONFIG.LOCAL_MODE || isLocalDomain(domain), {
+        unavailable,
+      });
     };
 
     // The panel's own domain is rendered first, so an application that happens
@@ -213,12 +243,12 @@ export class CaddyService {
       const matchingApp =
         allApps.find((a) => a.domain?.toLowerCase().trim() === d.domain.toLowerCase().trim()) ||
         allApps.find((a) => a.port === d.targetPort);
-      addSite(d.domain, matchingApp, d.targetPort, matchingApp?.internalPort || d.targetPort);
+      await addSite(d.domain, matchingApp, d.targetPort, matchingApp?.internalPort || d.targetPort);
     }
 
     for (const app of allApps) {
       if (!app.domain) continue;
-      addSite(app.domain, app, app.port, app.internalPort || 3000);
+      await addSite(app.domain, app, app.port, app.internalPort || 3000);
     }
 
     fs.writeFileSync(this.caddyfilePath, content, 'utf-8');

@@ -3,6 +3,12 @@ import { dbStorage, AppRecord } from '../db/storage.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { DatabaseService } from './database.service.js';
 import { dockerService } from './docker.service.js';
+import {
+  clampAppLimits,
+  clampHealthcheck,
+  toDockerHealthcheck,
+  toDockerResources,
+} from '../utils/resource-limits.js';
 
 export interface AppTemplate {
   id: string;
@@ -459,6 +465,8 @@ export class TemplateService {
     const envList = Object.entries(app.env || {}).map(([k, v]) => `${k}=${v}`);
     const internalPort = app.internalPort || template.defaultPort;
     const ports: { [intPort: string]: number } = { [`${internalPort}/tcp`]: app.port };
+    const limits = clampAppLimits(app.limits, dbStorage.getSettings().defaultAppLimits);
+    const healthcheck = clampHealthcheck(app.healthcheck);
 
     try {
       const newContainerId = await dockerService.createAndStartContainer({
@@ -466,6 +474,9 @@ export class TemplateService {
         image: targetImage,
         env: envList,
         ports,
+        resources: toDockerResources(limits),
+        healthcheck: toDockerHealthcheck(healthcheck, internalPort),
+        waitHealthy: true,
         labels: {
           'aegis.type': 'app',
           'aegis.app.name': app.name,

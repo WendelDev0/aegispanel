@@ -1,17 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronDown, Lock, Settings2, X } from 'lucide-react';
 import { api } from '../../services/api.js';
-import type { AppRecord, ServerNode } from '../../types/index.js';
+import type { AppRecord, AppMetricsSnapshot, ServerNode } from '../../types/index.js';
 
 const LOCAL_NODE_ID = 'node-local';
 
 interface EditAppModalProps {
   app: AppRecord;
+  metrics?: AppMetricsSnapshot;
   onClose: () => void;
   onSaved: (app: AppRecord) => void;
 }
 
-export const EditAppModal: React.FC<EditAppModalProps> = ({ app, onClose, onSaved }) => {
+function formatRam(bytes: number): string {
+  if (!bytes) return '0 B';
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export const EditAppModal: React.FC<EditAppModalProps> = ({ app, metrics, onClose, onSaved }) => {
   const [editName, setEditName] = useState(app.name);
   const [editPort, setEditPort] = useState(app.port.toString());
   const [editInternalPort, setEditInternalPort] = useState(app.internalPort.toString());
@@ -29,6 +36,9 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({ app, onClose, onSave
   const [savingEdit, setSavingEdit] = useState(false);
   const [nodeId, setNodeId] = useState(app.nodeId || LOCAL_NODE_ID);
   const [nodes, setNodes] = useState<ServerNode[]>([]);
+  const [memoryMb, setMemoryMb] = useState(app.limits?.memoryMb ?? 512);
+  const [cpus, setCpus] = useState(app.limits?.cpus ?? 1);
+  const [healthPath, setHealthPath] = useState(app.healthcheck?.path ?? '/');
 
   useEffect(() => {
     let cancelled = false;
@@ -63,6 +73,8 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({ app, onClose, onSave
         branch: editBranch || undefined,
         githubToken: editGithubToken || undefined,
         nodeId,
+        limits: { memoryMb, cpus, pidsLimit: app.limits?.pidsLimit ?? 256 },
+        healthcheck: { path: healthPath || '/' },
       });
 
       onSaved(res.data);
@@ -241,6 +253,59 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({ app, onClose, onSave
               />
             </div>
           )}
+
+          <div className="border border-outline-variant rounded p-3 space-y-3">
+            <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Recursos</p>
+            {metrics && (
+              <p className="text-[11px] text-on-surface-variant">
+                Uso atual: CPU {metrics.cpuPercent}% · RAM {formatRam(metrics.memoryUsedBytes)}
+                {metrics.oomKilled ? ' · OOM' : ''}
+              </p>
+            )}
+            <div>
+              <label className="block text-[11px] text-on-surface-variant mb-1">
+                RAM: <span className="text-white font-mono">{memoryMb} MB</span>
+              </label>
+              <input
+                type="range"
+                min={128}
+                max={4096}
+                step={64}
+                value={memoryMb}
+                onChange={(e) => setMemoryMb(Number(e.target.value))}
+                className="w-full"
+                aria-label="Limite de RAM"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-on-surface-variant mb-1">
+                CPU: <span className="text-white font-mono">{cpus.toFixed(2)}</span>
+              </label>
+              <input
+                type="range"
+                min={0.25}
+                max={4}
+                step={0.25}
+                value={cpus}
+                onChange={(e) => setCpus(Number(e.target.value))}
+                className="w-full"
+                aria-label="Limite de CPU"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-on-surface-variant mb-1">Caminho do healthcheck</label>
+              <input
+                type="text"
+                value={healthPath}
+                onChange={(e) => setHealthPath(e.target.value)}
+                className="w-full bg-surface-container-low border border-outline-variant rounded px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-primary"
+                placeholder="/"
+              />
+              <p className="text-[10px] text-on-surface-variant/70 mt-1">
+                GET neste caminho. Default: / a cada 30s.
+              </p>
+            </div>
+          </div>
 
           <div className="flex justify-end gap-2 pt-2">
             <button

@@ -100,6 +100,8 @@ export interface AppRecord {
   lastCommitMessage?: string;
   lastCommitAuthor?: string;
   lastCommitAt?: string;
+  limits?: { memoryMb: number; cpus: number; pidsLimit: number };
+  healthcheck?: { path: string; intervalSec: number; timeoutSec: number; retries: number };
   createdAt: string;
   updatedAt: string;
 }
@@ -255,6 +257,9 @@ export interface PanelSettings {
   autoBackup: boolean;
   backupIntervalHours: number;
   backupTarget?: BackupTarget;
+  defaultAppLimits: { memoryMb: number; cpus: number; pidsLimit: number };
+  defaultDbLimits: { memoryMb: number; cpus: number; pidsLimit: number };
+  buildsDiskCapMb: number;
   alertConfig: AlertConfig;
 }
 
@@ -328,6 +333,9 @@ const DEFAULT_DATA: DatabaseSchema = {
     caddyEnabled: true,
     autoBackup: true,
     backupIntervalHours: 24,
+    defaultAppLimits: { memoryMb: 512, cpus: 1, pidsLimit: 256 },
+    defaultDbLimits: { memoryMb: 1024, cpus: 2, pidsLimit: 256 },
+    buildsDiskCapMb: 5120,
     alertConfig: {
       enabled: false,
       cpuThresholdPercent: 90,
@@ -400,6 +408,14 @@ class JsonStorage {
         alertConfig: {
           ...DEFAULT_DATA.settings.alertConfig,
           ...(parsed.settings?.alertConfig || {}),
+        },
+        defaultAppLimits: {
+          ...DEFAULT_DATA.settings.defaultAppLimits,
+          ...(parsed.settings?.defaultAppLimits || {}),
+        },
+        defaultDbLimits: {
+          ...DEFAULT_DATA.settings.defaultDbLimits,
+          ...(parsed.settings?.defaultDbLimits || {}),
         },
       },
     };
@@ -644,6 +660,14 @@ class JsonStorage {
         alertConfig: {
           ...DEFAULT_DATA.settings.alertConfig,
           ...(candidate.settings?.alertConfig || {}),
+        },
+        defaultAppLimits: {
+          ...DEFAULT_DATA.settings.defaultAppLimits,
+          ...(candidate.settings?.defaultAppLimits || {}),
+        },
+        defaultDbLimits: {
+          ...DEFAULT_DATA.settings.defaultDbLimits,
+          ...(candidate.settings?.defaultDbLimits || {}),
         },
       },
     };

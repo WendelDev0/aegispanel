@@ -9,6 +9,16 @@ import { isRemoteTarget } from '../utils/app-upstream.js';
 import { containerNameForApp, normalizeDomain } from '../utils/naming.js';
 import { CONFIG } from '../config.js';
 import { AppLogStore } from '../utils/app-log.store.js';
+import {
+  clampAppLimits,
+  clampHealthcheck,
+  describeMemoryOvercommit,
+  toDockerHealthcheck,
+  toDockerResources,
+  type HealthcheckSpec,
+  type ResourceLimits,
+} from '../utils/resource-limits.js';
+import os from 'os';
 
 export { containerNameForApp, normalizeDomain };
 
@@ -28,6 +38,8 @@ export interface CreateAppDTO {
   deployBranch?: string;
   /** Target node for deploy. Absent = local panel machine. */
   nodeId?: string;
+  limits?: Partial<ResourceLimits>;
+  healthcheck?: Partial<HealthcheckSpec>;
 }
 
 export interface AppMetricsSnapshot {
@@ -40,6 +52,8 @@ export interface AppMetricsSnapshot {
   memoryLimitBytes: number;
   memoryPercent: number;
   retainedLogBytes: number;
+  health: 'healthy' | 'unhealthy' | 'starting' | 'none';
+  oomKilled: boolean;
 }
 
 export class AppService {
@@ -82,16 +96,24 @@ export class AppService {
       memoryLimitBytes: 0,
       memoryPercent: 0,
       retainedLogBytes,
+      health: 'none' as const,
+      oomKilled: false,
     };
     if (!app.containerId) return empty;
 
     const client = await this.dockerForApp(app);
     const stats = await dockerService.getContainerStats(app.containerId, client);
+    const runtime = await dockerService.inspectRuntime(app.containerId, client);
+    if (!runtime) {
+      return empty;
+    }
     return {
       ...empty,
-      available: app.status === 'running',
+      available: runtime.running || app.status === 'running',
       ...stats,
       retainedLogBytes,
+      health: runtime.health,
+      oomKilled: runtime.oomKilled,
     };
   }
 
@@ -111,6 +133,8 @@ export class AppService {
           memoryLimitBytes: 0,
           memoryPercent: 0,
           retainedLogBytes: AppLogStore.size(app.id),
+          health: 'none' as const,
+          oomKilled: false,
         });
       }
     }
@@ -204,6 +228,9 @@ export class AppService {
     const hostPort = await PortService.allocate(dto.port, undefined, portOpts);
     const envRecord = this.validateEnv(dto.env || {});
     const envList = Object.entries(envRecord).map(([k, v]) => `${k}=${v}`);
+    const settings = dbStorage.getSettings();
+    const limits = clampAppLimits(dto.limits, settings.defaultAppLimits);
+    const healthcheck = clampHealthcheck(dto.healthcheck);
 
     const image = dto.imageName || 'node:20-alpine';
     let containerId: string | undefined;
@@ -221,6 +248,13 @@ export class AppService {
         bindIp: isRemote ? '0.0.0.0' : CONFIG.APP_BIND_IP,
         client: dockerClient,
         joinPanelNetwork: !isRemote,
+        resources: toDockerResources(limits),
+        ...(dto.sourceType === 'image' && dto.imageName
+          ? {
+              healthcheck: toDockerHealthcheck(healthcheck, internalPort),
+              waitHealthy: true,
+            }
+          : {}),
         labels: {
           'aegis.type': 'app',
           'aegis.app.name': dto.name,
@@ -253,6 +287,8 @@ export class AppService {
       autoDeploy: dto.autoDeploy ?? true,
       deployBranch: dto.deployBranch || dto.branch || 'main',
       nodeId,
+      limits,
+      healthcheck,
       status,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -349,5 +385,21 @@ export class AppService {
     const removed = dbStorage.removeApp(id);
     await CaddyService.syncCaddyfile();
     return removed;
+  }
+
+  static overcommitWarning(): string | undefined {
+    const hostMemoryMb = Math.round(os.totalmem() / 1024 / 1024);
+    const settings = dbStorage.getSettings();
+    const planned = [
+      ...dbStorage.getApps().map((app) => ({
+        name: app.name,
+        memoryMb: clampAppLimits(app.limits, settings.defaultAppLimits).memoryMb,
+      })),
+      ...dbStorage.getDatabases().map((db) => ({
+        name: db.name,
+        memoryMb: clampAppLimits(undefined, settings.defaultDbLimits).memoryMb,
+      })),
+    ];
+    return describeMemoryOvercommit({ hostMemoryMb, planned });
   }
 }

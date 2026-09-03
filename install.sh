@@ -81,9 +81,37 @@ echo "      manualmente com: sudo ufw allow <porta>/tcp"
 
 # 4. Código
 echo "📁 [4/6] Preparando $INSTALL_DIR..."
+
+sanitize_update_ref() {
+    local ref="$1"
+    case "$ref" in
+        *..*|*[[:space:]]*|*"@{ "*|*/)
+            echo "❌ AEGIS_UPDATE_REF inválido: $ref"
+            exit 1
+            ;;
+    esac
+    if ! printf '%s' "$ref" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._/-]*$'; then
+        echo "❌ AEGIS_UPDATE_REF inválido: $ref"
+        exit 1
+    fi
+}
+
+ENV_FILE="$INSTALL_DIR/.env"
+UPDATE_REF="${AEGIS_UPDATE_REF:-}"
+if [ -z "$UPDATE_REF" ] && [ -f "$ENV_FILE" ]; then
+    UPDATE_REF="$(grep -E '^AEGIS_UPDATE_REF=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
+fi
+UPDATE_REF="${UPDATE_REF:-main}"
+sanitize_update_ref "$UPDATE_REF"
+
+checkout_panel_ref() {
+    $SUDO git -c "safe.directory=$INSTALL_DIR" -C "$INSTALL_DIR" fetch origin "$UPDATE_REF"
+    $SUDO git -c "safe.directory=$INSTALL_DIR" -C "$INSTALL_DIR" checkout -B "$UPDATE_REF" FETCH_HEAD
+}
+
 if [ -d "$INSTALL_DIR/.git" ]; then
-    echo "🔄 Atualizando repositório existente..."
-    $SUDO git -C "$INSTALL_DIR" pull --ff-only origin main
+    echo "🔄 Atualizando repositório existente (ref: $UPDATE_REF)..."
+    checkout_panel_ref
 else
     if [ -e "$INSTALL_DIR" ]; then
         echo "❌ $INSTALL_DIR já existe e não é um clone do AegisPanel."
@@ -91,6 +119,7 @@ else
         exit 1
     fi
     $SUDO git clone "$REPO_URL" "$INSTALL_DIR"
+    checkout_panel_ref
 fi
 
 $SUDO mkdir -p "$INSTALL_DIR/caddy" "$INSTALL_DIR/data"
@@ -201,6 +230,13 @@ else
     printf 'AEGIS_COMPOSE_DIR=%s\n' "$INSTALL_DIR" >> "$ENV_FILE"
 fi
 echo "   ✅ AEGIS_COMPOSE_DIR=${INSTALL_DIR}"
+
+if grep -qE "^AEGIS_UPDATE_REF=" "$ENV_FILE"; then
+    sed -i "s|^AEGIS_UPDATE_REF=.*|AEGIS_UPDATE_REF=${UPDATE_REF}|" "$ENV_FILE"
+else
+    printf 'AEGIS_UPDATE_REF=%s\n' "$UPDATE_REF" >> "$ENV_FILE"
+fi
+echo "   ✅ AEGIS_UPDATE_REF=${UPDATE_REF}"
 
 chmod 600 "$ENV_FILE"
 

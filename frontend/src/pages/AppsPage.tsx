@@ -49,6 +49,46 @@ function formatRam(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function appRuntimeBadge(app: AppRecord, metrics?: AppMetricsSnapshot): {
+  label: string;
+  className: string;
+  dot: string;
+} {
+  if (metrics?.oomKilled) {
+    return {
+      label: 'OOM',
+      className: 'bg-crit/10 text-crit border border-crit/30',
+      dot: 'bg-crit',
+    };
+  }
+  if (app.status !== 'running') {
+    return {
+      label: 'Parado',
+      className: 'bg-surface-container-high text-on-surface-variant border border-outline-variant',
+      dot: 'bg-outline',
+    };
+  }
+  if (metrics?.health === 'starting') {
+    return {
+      label: 'Subindo',
+      className: 'bg-warn/10 text-warn border border-warn/30',
+      dot: 'bg-warn animate-pulse',
+    };
+  }
+  if (metrics?.health === 'unhealthy') {
+    return {
+      label: 'Indisponível',
+      className: 'bg-crit/10 text-crit border border-crit/30',
+      dot: 'bg-crit',
+    };
+  }
+  return {
+    label: 'Online',
+    className: 'bg-ok/10 text-ok border border-ok/30',
+    dot: 'bg-emerald-400 animate-pulse',
+  };
+}
+
 interface AppsPageProps {
   /** Opens the analytics view already focused on this application. */
   onOpenAnalytics?: (appId: string) => void;
@@ -375,20 +415,17 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                     </div>
                   </div>
 
+                  {(() => {
+                    const badge = appRuntimeBadge(app, appMetrics[app.id]);
+                    return (
                   <span
-                    className={`text-xs px-3 py-1 rounded-full font-semibold flex items-center gap-1.5 shrink-0 ${
-                      app.status === 'running'
-                        ? 'bg-ok/10 text-ok border border-ok/30'
-                        : 'bg-surface-container-high text-on-surface-variant border border-outline-variant'
-                    }`}
+                    className={`text-xs px-3 py-1 rounded-full font-semibold flex items-center gap-1.5 shrink-0 ${badge.className}`}
                   >
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        app.status === 'running' ? 'bg-emerald-400 animate-pulse' : 'bg-outline'
-                      }`}
-                    ></span>
-                    {app.status === 'running' ? 'Online' : 'Parado'}
+                    <span className={`w-2 h-2 rounded-full ${badge.dot}`}></span>
+                    {badge.label}
                   </span>
+                    );
+                  })()}
                 </div>
 
                 {/* Direct VPS IP + Port Access Banner */}
@@ -668,6 +705,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       {selectedEditApp && (
         <EditAppModal
           app={selectedEditApp}
+          metrics={appMetrics[selectedEditApp.id]}
           onClose={() => setSelectedEditApp(null)}
           onSaved={() => {
             setSelectedEditApp(null);

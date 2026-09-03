@@ -167,42 +167,42 @@ Backup que nunca foi restaurado é hipótese, não backup.
 - [x] CPU/RAM por app na UI, poll 8s (#6)
 - [x] Retenção de logs de runtime com teto 80 MB (#6)
 - [x] `RestartPolicy: unless-stopped`
-- [ ] Sem `Memory`, `NanoCpus`, `PidsLimit`, healthcheck
+- [x] `Memory`, `NanoCpus`, `PidsLimit`, healthcheck no create
 
 ### 3.1 — Limites por app
 
-- [ ] `AppRecord.limits?: { memoryMb, cpus, pidsLimit }` — default global em `settings.defaultAppLimits` (`512 MB · 1.0 cpu · 256 pids`)
-- [ ] `docker.service.createAndStartContainer` aplica `HostConfig.Memory`, `MemorySwap = Memory` (sem swap), `NanoCpus`, `PidsLimit`
-- [ ] Vale para local e nó remoto (mesmo `HostConfig`)
-- [ ] `oom-kill` detectado via `inspect().State.OOMKilled` → alerta “app matou por memória” + evento de auditoria + sugestão de subir o teto
-- [ ] UI em EditAppModal → “Recursos”: slider RAM/CPU com o consumo atual ao lado (dado do #6)
-- [ ] Bancos: mesmo mecanismo, default maior (`1 GB · 2 cpus`)
-- [ ] Soma dos limites > RAM do host → aviso (não bloqueio) na criação
+- [x] `AppRecord.limits?: { memoryMb, cpus, pidsLimit }` — default global em `settings.defaultAppLimits` (`512 MB · 1.0 cpu · 256 pids`)
+- [x] `docker.service.createAndStartContainer` aplica `HostConfig.Memory`, `MemorySwap = Memory` (sem swap), `NanoCpus`, `PidsLimit`
+- [x] Vale para local e nó remoto (mesmo `HostConfig`)
+- [x] `oom-kill` detectado via `inspect().State.OOMKilled` → alerta “app matou por memória” + evento de auditoria + sugestão de subir o teto
+- [x] UI em EditAppModal → “Recursos”: slider RAM/CPU com o consumo atual ao lado (dado do #6)
+- [x] Bancos: mesmo mecanismo, default maior (`1 GB · 2 cpus`)
+- [x] Soma dos limites > RAM do host → aviso (não bloqueio) na criação
 
 ### 3.2 — Healthcheck e restart inteligente
 
-- [ ] `AppRecord.healthcheck?: { path, intervalSec, timeoutSec, retries }` — default `GET /` em `internalPort`, 30s/5s/3
-- [ ] Aplicado em `HostConfig.Healthcheck` (`CMD-SHELL wget -qO- http://127.0.0.1:${internalPort}${path}`)
-- [ ] Status do card usa `State.Health.Status` (`healthy | unhealthy | starting`), não só `running`
-- [ ] Deploy: novo container só vira “sucesso” após `healthy` (ou timeout 120s → falha + rollback automático para a imagem anterior)
-- [ ] Caddy só inclui upstream `healthy`; `unhealthy` → página 503 do painel em vez de erro cru
-- [ ] Watchdog no loop de métricas: `unhealthy` por > 3 ciclos → restart (máx. 3/h, depois alerta e para)
+- [x] `AppRecord.healthcheck?: { path, intervalSec, timeoutSec, retries }` — default `GET /` em `internalPort`, 30s/5s/3
+- [x] Aplicado em `Healthcheck` do create (`CMD-SHELL wget -qO- … || curl -sf …`) — Docker coloca isso no Config, não no HostConfig
+- [x] Status do card usa `State.Health.Status` (`healthy | unhealthy | starting`), não só `running`
+- [x] Deploy: novo container só vira “sucesso” após `healthy` (ou timeout 120s → falha + rollback automático para a imagem anterior)
+- [x] Caddy só inclui upstream `healthy`; `unhealthy` → página 503 do painel em vez de erro cru
+- [x] Watchdog dedicado 8s (não o loop de métricas, que para sem clientes): `unhealthy` por > 3 ciclos → restart (máx. 3/h, depois alerta e para). Desligado em LOCAL_MODE
 
 ### 3.3 — Teto de disco para builds
 
 `DATA_DIR/builds/<appId>` cresce a cada deploy (clone + `node_modules`). Logs já têm teto; builds não.
 
-- [ ] `settings.buildsDiskCapMb` (default 5 GB) — após cada deploy, remove `node_modules`/`.next`/`dist` de clones antigos até caber
+- [x] `settings.buildsDiskCapMb` (default 5 GB) — após cada deploy, remove `node_modules`/`.next`/`dist` de clones antigos até caber
 - [x] `git clone --depth 1 --single-branch` (já é o padrão em `cicd.service.ts`)
-- [ ] Imagens `aegis-app-*` órfãs (sem deployment apontando) → `prune` semanal, preserva as 3 últimas por app para rollback
-- [ ] `GET /api/system/storage-health` passa a reportar `builds`, `images`, `logs`, `backups` separados
-- [ ] Alerta quando disco do host < 10% livre (já existe monitor de `panel_db.json`; estender)
+- [x] Imagens `aegis-app-*` órfãs (sem app apontando) → prune no storage timer; preserva as 3 últimas por app para rollback
+- [x] `GET /api/system/storage-health` passa a reportar `builds`, `images`, `logs`, `backups` separados (+ disco do host)
+- [x] Alerta quando disco do host < 10% livre (monitor existente `diskThresholdPercent` default 90; `storage-health` agora inclui `hostDisk`)
 
 ### Critérios de aceite — Fase 3
 
-- [ ] App com `memoryMb: 128` rodando `stress` é morto pelo kernel; painel mostra “OOM” e o host segue estável
-- [ ] Deploy de imagem que não sobe faz rollback sozinho em ≤ 2 min
-- [ ] `DATA_DIR/builds` nunca passa do teto após 20 deploys seguidos (teste)
+- [ ] App com `memoryMb: 128` rodando `stress` é morto pelo kernel; painel mostra “OOM” e o host segue estável (VPS real)
+- [x] Deploy de imagem que não sobe faz rollback sozinho em ≤ 2 min (waitHealthy 120s restaura o `-prev-`)
+- [ ] `DATA_DIR/builds` nunca passa do teto após 20 deploys seguidos (teste de carga na VPS)
 
 ---
 

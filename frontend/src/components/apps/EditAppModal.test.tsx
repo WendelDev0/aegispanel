@@ -82,4 +82,16 @@ describe('EditAppModal', () => {
     fireEvent.click(screen.getByRole('button', { name: /O app escuta numa porta diferente/i }));
     expect(screen.getByLabelText(/Porta que o app escuta/i)).toBeTruthy();
   });
+
+  it('shows a Recursos section with RAM and CPU sliders', async () => {
+    render(<EditAppModal app={app} onClose={() => {}} onSaved={() => {}} />);
+
+    await waitFor(() => {
+      expect(api.get).toHaveBeenCalledWith('/nodes');
+    });
+
+    expect(screen.getByText(/Recursos/i)).toBeTruthy();
+    expect(screen.getByLabelText(/Limite de RAM/i)).toBeTruthy();
+    expect(screen.getByLabelText(/Limite de CPU/i)).toBeTruthy();
+  });
 });

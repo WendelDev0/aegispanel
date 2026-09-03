@@ -12,9 +12,12 @@ import { CaddyService } from './services/caddy.service.js';
 import { CronService } from './services/cron.service.js';
 import { AnalyticsService } from './services/analytics.service.js';
 import { CicdService } from './services/cicd.service.js';
+import { HealthWatchdog } from './services/health-watchdog.service.js';
 import { authenticateToken, AuthUser } from './middleware/auth.js';
 import { dbStorage } from './db/storage.js';
 import { AuditStore } from './utils/audit.store.js';
+import { containerNameForApp } from './utils/naming.js';
+import { dockerService } from './services/docker.service.js';
 
 // Routers
 import { authRouter } from './routes/auth.routes.js';
@@ -219,11 +222,20 @@ const STORAGE_ALERT_THRESHOLD_MB = 20;
 let lastStorageAlertAt = 0;
 
 const storageTimer = setInterval(() => {
+  void (async () => {
   try {
     dbStorage.pruneSessions();
     AuditStore.archiveAndPrune(12, path.join(CONFIG.DATA_DIR, 'backups', 'audit-archive'));
 
     const health = dbStorage.getStorageHealth();
+
+    try {
+      await dockerService.pruneOrphanAppImages(
+        dbStorage.getApps().map((a) => containerNameForApp(a.name))
+      );
+    } catch {
+      /* prune is best-effort */
+    }
 
     // Auto-prune old deployment logs when the file gets large.
     if (health.fileSizeMB >= STORAGE_PRUNE_THRESHOLD_MB) {
@@ -265,6 +277,7 @@ const storageTimer = setInterval(() => {
   } catch (err: any) {
     console.warn('Falha ao verificar saúde do storage:', err?.message);
   }
+  })();
 }, STORAGE_CHECK_INTERVAL_MS);
 
 server.listen(CONFIG.PORT, () => {
@@ -283,6 +296,7 @@ server.listen(CONFIG.PORT, () => {
 
   CronService.start();
   AnalyticsService.start();
+  HealthWatchdog.start();
 
   const abandoned = CicdService.abandonInFlightDeploys();
   if (abandoned > 0) {
@@ -309,6 +323,7 @@ function shutdown(signal: string) {
   clearInterval(sessionWatchTimer);
   CronService.stop();
   AnalyticsService.stop();
+  HealthWatchdog.stop();
   io.close();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5000).unref();

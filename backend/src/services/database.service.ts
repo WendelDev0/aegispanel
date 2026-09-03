@@ -5,6 +5,7 @@ import { EncryptionService } from '../utils/crypto.js';
 import { CONFIG } from '../config.js';
 import { containerNameForDatabase } from '../utils/naming.js';
 import { PortService } from './port.service.js';
+import { clampDbLimits, toDockerResources } from '../utils/resource-limits.js';
 
 export interface CreateDbDTO {
   name: string;
@@ -18,6 +19,9 @@ export interface CreateDbDTO {
 }
 
 export class DatabaseService {
+  private static dbResources() {
+    return toDockerResources(clampDbLimits(undefined, dbStorage.getSettings().defaultDbLimits));
+  }
   /**
    * Lists databases without their credentials.
    *
@@ -247,6 +251,7 @@ export class DatabaseService {
       ports: { [`${launch.internalPort}/tcp`]: db.port },
       bindIp: CONFIG.DB_BIND_IP,
       volumes: { [`aegis-db-${db.id}`]: launch.volumeTarget },
+      resources: this.dbResources(),
       labels: {
         'aegis.type': 'database',
         'aegis.db.type': db.type,
@@ -279,6 +284,7 @@ export class DatabaseService {
       ...(launch.cmd ? { cmd: launch.cmd } : {}),
       restartPolicy: 'no',
       joinPanelNetwork: false,
+      resources: this.dbResources(),
       labels: { 'aegis.type': 'restore-drill' },
     });
   }
@@ -395,6 +401,7 @@ export class DatabaseService {
         // SSH tunnel.
         bindIp: CONFIG.DB_BIND_IP,
         volumes,
+        resources: this.dbResources(),
         labels: {
           'aegis.type': 'database',
           'aegis.db.type': dto.type,

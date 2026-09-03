@@ -8,6 +8,7 @@ import { dbStorage, PanelSettings, AlertConfig } from '../db/storage.js';
 import { authMiddleware, requireAdmin, AuthRequest, clientIp } from '../middleware/auth.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { PanelService } from '../services/panel.service.js';
+import { StorageHealthService } from '../services/storage-health.service.js';
 import { AuditStore } from '../utils/audit.store.js';
 import { validateBody } from '../middleware/validate.js';
 import {
@@ -131,8 +132,12 @@ systemRouter.get('/stats', async (req: Request, res: Response) => {
   }
 });
 
-systemRouter.get('/storage-health', requireAdmin, (req: Request, res: Response) => {
-  res.json(dbStorage.getStorageHealth());
+systemRouter.get('/storage-health', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    res.json(await StorageHealthService.snapshot());
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 systemRouter.get('/history', (req: Request, res: Response) => {

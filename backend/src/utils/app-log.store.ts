@@ -28,6 +28,19 @@ export class AppLogStore {
     return this.dirSize(this.appDir(appId));
   }
 
+  static totalBytes(): number {
+    if (!fs.existsSync(this.root)) return 0;
+    let total = 0;
+    try {
+      for (const name of fs.readdirSync(this.root)) {
+        total += this.dirSize(path.join(this.root, name));
+      }
+    } catch {
+      return total;
+    }
+    return total;
+  }
+
   static read(appId: string): string {
     const dir = this.appDir(appId);
     if (!fs.existsSync(dir)) return '';

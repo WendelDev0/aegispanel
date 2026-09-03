@@ -63,6 +63,21 @@ export const createAppBodySchema = z.object({
   autoDeploy: z.boolean().optional(),
   deployBranch: z.string().optional(),
   nodeId: z.string().optional(),
+  limits: z
+    .object({
+      memoryMb: z.number().min(32).max(65536).optional(),
+      cpus: z.number().min(0.1).max(32).optional(),
+      pidsLimit: z.number().min(16).max(4096).optional(),
+    })
+    .optional(),
+  healthcheck: z
+    .object({
+      path: z.string().max(200).optional(),
+      intervalSec: z.number().min(5).max(300).optional(),
+      timeoutSec: z.number().min(1).max(60).optional(),
+      retries: z.number().min(1).max(10).optional(),
+    })
+    .optional(),
 });
 
 export const updateAppBodySchema = z.object({
@@ -77,6 +92,21 @@ export const updateAppBodySchema = z.object({
   autoDeploy: z.boolean().optional(),
   deployBranch: z.string().optional(),
   nodeId: z.string().optional().nullable(),
+  limits: z
+    .object({
+      memoryMb: z.number().min(32).max(65536).optional(),
+      cpus: z.number().min(0.1).max(32).optional(),
+      pidsLimit: z.number().min(16).max(4096).optional(),
+    })
+    .optional(),
+  healthcheck: z
+    .object({
+      path: z.string().max(200).optional(),
+      intervalSec: z.number().min(5).max(300).optional(),
+      timeoutSec: z.number().min(1).max(60).optional(),
+      retries: z.number().min(1).max(10).optional(),
+    })
+    .optional(),
 });
 
 export const inspectRepoBodySchema = z.object({

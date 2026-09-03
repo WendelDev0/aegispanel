@@ -16,6 +16,7 @@ import { isValidDomain } from '../utils/naming.js';
 import { getPublicBaseUrl } from '../utils/public-url.js';
 import { NodeService } from '../services/node.service.js';
 import { isRemoteTarget } from '../utils/app-upstream.js';
+import { clampAppLimits, clampHealthcheck } from '../utils/resource-limits.js';
 import { authMiddleware, requireWrite, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import {
@@ -88,7 +89,7 @@ appRouter.post('/inspect-repo', requireWrite, validateBody(inspectRepoBodySchema
 
 appRouter.post('/', requireWrite, validateBody(createAppBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
-    const { name, sourceType, gitUrl, branch, imageName, port, internalPort, env, domain, githubToken, autoDeploy, deployBranch, nodeId } = req.body;
+    const { name, sourceType, gitUrl, branch, imageName, port, internalPort, env, domain, githubToken, autoDeploy, deployBranch, nodeId, limits, healthcheck } = req.body;
     if (!name) {
       res.status(400).json({ error: 'Nome é obrigatório' });
       return;
@@ -116,12 +117,18 @@ appRouter.post('/', requireWrite, validateBody(createAppBodySchema), async (req:
       autoDeploy,
       deployBranch,
       nodeId,
+      limits,
+      healthcheck,
     });
 
     // Returned immediately so the client can open the live deploy stream; the
     // pipeline reports its own outcome over the socket and in the deployment
     // history, so a failure here is never silent.
-    res.status(201).json(AppService.toPublic(created));
+    const warning = AppService.overcommitWarning();
+    res.status(201).json({
+      ...AppService.toPublic(created),
+      ...(warning ? { overcommitWarning: warning } : {}),
+    });
 
     CicdService.executeDeploy(created, {
       commitMessage: 'Initial Deployment Setup',
@@ -143,7 +150,7 @@ appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (re
       return;
     }
 
-    const { name, port, internalPort, imageName, gitUrl, branch, domain, githubToken, autoDeploy, deployBranch, nodeId } = req.body;
+    const { name, port, internalPort, imageName, gitUrl, branch, domain, githubToken, autoDeploy, deployBranch, nodeId, limits, healthcheck } = req.body;
 
     const previousName = app.name;
     const previousPort = app.port;
@@ -151,6 +158,8 @@ appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (re
     const previousImage = app.imageName;
     const previousGitUrl = app.gitUrl;
     const previousBranch = app.branch;
+    const previousLimits = JSON.stringify(app.limits || null);
+    const previousHealth = JSON.stringify(app.healthcheck || null);
 
     if (gitUrl && gitUrl !== previousGitUrl) await assertSafeGitUrl(String(gitUrl));
     if (domain !== undefined && domain !== '' && !isValidDomain(domain)) {
@@ -199,6 +208,12 @@ appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (re
     if (nodeId !== undefined) {
       app.nodeId = nodeId || undefined;
     }
+    if (limits) {
+      app.limits = clampAppLimits(limits, dbStorage.getSettings().defaultAppLimits);
+    }
+    if (healthcheck) {
+      app.healthcheck = clampHealthcheck(healthcheck);
+    }
 
     app.updatedAt = new Date().toISOString();
     dbStorage.saveApp(app);
@@ -234,7 +249,9 @@ appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (re
       app.internalPort !== previousInternalPort ||
       app.imageName !== previousImage ||
       app.gitUrl !== previousGitUrl ||
-      app.branch !== previousBranch;
+      app.branch !== previousBranch ||
+      JSON.stringify(app.limits || null) !== previousLimits ||
+      JSON.stringify(app.healthcheck || null) !== previousHealth;
 
     if (needsRedeploy) {
       try {

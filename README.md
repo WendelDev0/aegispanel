@@ -83,6 +83,7 @@ chmod 600 .env
 | `GEOIP_ENABLED` | Geolocalização externa de IPs. `false` é o padrão; ative apenas após revisar a política de privacidade. |
 | `CORS_ORIGINS` | Origens de navegador permitidas. Vazio = apenas mesma origem (padrão correto). |
 | `AEGIS_COMPOSE_DIR` | Caminho absoluto do clone com `docker-compose.yml`. Necessário para o self-update (o backend no container não vê o compose pelo cwd). O `install.sh` define como o diretório de instalação. Se o compose não existir nesse path, a instalação e o self-update falham em vez de adivinhar. |
+| `AEGIS_UPDATE_REF` | Branch ou tag que o self-update e o `install.sh` fazem checkout (default `main`). Não é lido do body HTTP. |
 
 > ⚠️ Trocar a `ENCRYPTION_KEY` depois que bancos já foram criados torna as senhas gravadas ilegíveis. O painel avisa em vez de gravar um valor corrompido por cima.
 

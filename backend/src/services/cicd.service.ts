@@ -17,6 +17,13 @@ import { assertSafeGitUrl, SafeGitTarget } from '../utils/url-security.js';
 import { injectPublicBuildArgs, publicBuildArgMap, publicBuildArgs } from '../utils/build-env.js';
 import { remoteWorkloadPlacement } from '../utils/app-upstream.js';
 import { redactSecrets as redactSecretText } from '../utils/redact.js';
+import {
+  clampAppLimits,
+  clampHealthcheck,
+  toDockerHealthcheck,
+  toDockerResources,
+} from '../utils/resource-limits.js';
+import { pruneBuildArtifacts } from '../utils/build-disk.js';
 
 const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 const BUILD_TIMEOUT_MS = 30 * 60 * 1000;
@@ -32,6 +39,17 @@ interface RunResult {
 function appendBounded(current: string, chunk: string, limit = MAX_LOG_BYTES): string {
   if (current.length >= limit) return current;
   return (current + chunk).slice(-limit);
+}
+
+function appRuntimeCreateFields(app: AppRecord) {
+  const settings = dbStorage.getSettings();
+  const limits = clampAppLimits(app.limits, settings.defaultAppLimits);
+  const healthcheck = clampHealthcheck(app.healthcheck);
+  return {
+    resources: toDockerResources(limits),
+    healthcheck: toDockerHealthcheck(healthcheck, app.internalPort || 3000),
+    waitHealthy: true as const,
+  };
 }
 
 function safeBranchName(value: unknown): string {
@@ -675,6 +693,9 @@ export class CicdService {
         });
 
         const placement = remoteWorkloadPlacement(isRemote);
+        log(
+          `[${new Date().toISOString()}] ⏳ Aguardando healthcheck (até 120s) antes de descartar o contêiner anterior...\n`
+        );
         app.containerId = await dockerService.createAndStartContainer({
           name: containerName,
           image: buildImageTag,
@@ -684,6 +705,7 @@ export class CicdService {
           client: placement.useRemoteDocker ? dockerClient : undefined,
           joinPanelNetwork: placement.joinPanelNetwork,
           labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
+          ...appRuntimeCreateFields(app),
         });
         logs += `[${new Date().toISOString()}] 🚀 Container online com ID: ${app.containerId.substring(0, 12)}\n`;
       } else if (app.sourceType === 'dockerfile') {
@@ -736,6 +758,7 @@ export class CicdService {
           client: dockerfilePlacement.useRemoteDocker ? dockerClient : undefined,
           joinPanelNetwork: dockerfilePlacement.joinPanelNetwork,
           labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
+          ...appRuntimeCreateFields(app),
         });
         logs += `[${new Date().toISOString()}] 🚀 Container online com ID: ${app.containerId.substring(0, 12)}\n`;
       } else {
@@ -758,6 +781,7 @@ export class CicdService {
           client: placement.useRemoteDocker ? dockerClient : undefined,
           joinPanelNetwork: placement.joinPanelNetwork,
           labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
+          ...appRuntimeCreateFields(app),
         });
         logs += `[${new Date().toISOString()}] 🚀 Container criado com ID: ${app.containerId.substring(0, 12)}\n`;
       }
@@ -788,6 +812,20 @@ export class CicdService {
         await CaddyService.syncCaddyfile();
       } catch (err: any) {
         console.warn('Caddy sync notice após deploy:', err.message);
+      }
+
+      try {
+        const cap = dbStorage.getSettings().buildsDiskCapMb || 5120;
+        const pruned = pruneBuildArtifacts(path.join(CONFIG.DATA_DIR, 'builds'), cap);
+        if (pruned.removed.length) {
+          logs += `[${new Date().toISOString()}] 🧹 Teto de builds: removidos ${pruned.removed.length} diretórios de cache.\n`;
+        }
+        await dockerService.pruneAppImages(containerName, 3, isRemote ? dockerClient : undefined);
+        await dockerService.pruneOrphanAppImages(
+          dbStorage.getApps().map((a) => containerNameForApp(a.name))
+        );
+      } catch (err: any) {
+        console.warn('Limpeza de disco após deploy:', err.message);
       }
 
       dbStorage.addActivity({
@@ -907,6 +945,7 @@ export class CicdService {
       client: rollbackPlacement.useRemoteDocker ? dockerClient : undefined,
       joinPanelNetwork: rollbackPlacement.joinPanelNetwork,
       labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
+      ...appRuntimeCreateFields(app),
     });
 
     app.status = 'running';

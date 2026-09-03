@@ -2,6 +2,13 @@ import Docker from 'dockerode';
 import { PassThrough, Readable } from 'stream';
 import { CONFIG } from '../config.js';
 import { collectBuildContextFiles } from '../utils/build-context.js';
+import {
+  HEALTH_WAIT_MS,
+  parseContainerHealth,
+  type ContainerHealth,
+  type DockerHealthcheck,
+  type DockerResources,
+} from '../utils/resource-limits.js';
 
 export interface ExecResult {
   stdout: string;
@@ -299,6 +306,95 @@ class DockerManager {
     }
   }
 
+  async inspectRuntime(
+    containerId: string,
+    client?: Docker
+  ): Promise<{ running: boolean; health: ContainerHealth; oomKilled: boolean } | null> {
+    try {
+      const docker = client || this.docker;
+      const info = await docker.getContainer(containerId).inspect();
+      return {
+        running: Boolean(info.State?.Running),
+        health: parseContainerHealth(info.State?.Health?.Status),
+        oomKilled: Boolean(info.State?.OOMKilled),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async inspectRuntimeByName(
+    name: string,
+    client?: Docker
+  ): Promise<{ running: boolean; health: ContainerHealth; oomKilled: boolean } | null> {
+    return this.inspectRuntime(name, client);
+  }
+
+  async appImageBytes(client?: Docker): Promise<number> {
+    const images = await this.listImages(client);
+    let total = 0;
+    for (const img of images) {
+      const tags: string[] = Array.isArray(img.repoTags) ? img.repoTags : [];
+      if (tags.some((tag) => tag.startsWith('aegis-app-'))) {
+        total += Number(img.size) || 0;
+      }
+    }
+    return total;
+  }
+
+  /**
+   * Keeps the newest `keep` unique images tagged aegis-app-<name>:* so
+   * rollback still has previous tags, then deletes the rest.
+   */
+  async pruneAppImages(containerName: string, keep = 3, client?: Docker): Promise<number> {
+    if (!/^aegis-app-[a-z0-9_-]+$/.test(containerName)) return 0;
+    const docker = client || this.docker;
+    const images = await this.listImages(docker === this.docker ? undefined : docker);
+    const matching = images
+      .filter((img) =>
+        (img.repoTags || []).some(
+          (tag: string) => tag === containerName || tag.startsWith(`${containerName}:`)
+        )
+      )
+      .sort((a, b) => (Number(b.created) || 0) - (Number(a.created) || 0));
+
+    const toRemove = matching.slice(Math.max(0, keep));
+    let removed = 0;
+    for (const img of toRemove) {
+      try {
+        await docker.getImage(img.id).remove({ force: false });
+        removed += 1;
+      } catch {
+        /* in use or already gone */
+      }
+    }
+    return removed;
+  }
+
+  async pruneOrphanAppImages(liveContainerNames: string[], client?: Docker): Promise<number> {
+    const live = new Set(liveContainerNames);
+    const docker = client || this.docker;
+    const images = await this.listImages(docker === this.docker ? undefined : docker);
+    let removed = 0;
+    for (const img of images) {
+      const tags: string[] = img.repoTags || [];
+      const repos = new Set(
+        tags
+          .map((tag) => tag.split(':')[0])
+          .filter((repo) => repo.startsWith('aegis-app-'))
+      );
+      if (!repos.size) continue;
+      if ([...repos].some((repo) => live.has(repo))) continue;
+      try {
+        await docker.getImage(img.id).remove({ force: false });
+        removed += 1;
+      } catch {
+        /* in use */
+      }
+    }
+    return removed;
+  }
+
   private parseContainerStats(statsStream: {
     cpu_stats: { cpu_usage: { total_usage: number }; system_cpu_usage: number; online_cpus?: number };
     precpu_stats: { cpu_usage: { total_usage: number }; system_cpu_usage: number };
@@ -461,6 +557,8 @@ class DockerManager {
      * A firewall that looks correct is not enough.
      */
     bindIp?: string;
+    resources?: DockerResources;
+    healthcheck?: DockerHealthcheck;
   }): Docker.ContainerCreateOptions {
     const PortBindings: { [key: string]: Array<{ HostIp?: string; HostPort: string }> } = {};
     const ExposedPorts: { [key: string]: object } = {};
@@ -487,6 +585,7 @@ class DockerManager {
         'aegis.managed': 'true',
         ...(options.labels || {}),
       },
+      ...(options.healthcheck ? { Healthcheck: options.healthcheck } : {}),
       HostConfig: {
         PortBindings,
         Binds,
@@ -495,6 +594,14 @@ class DockerManager {
         // by name immediately, instead of after a second connect call that may
         // land while the first request is already being proxied.
         ...(options.networkName ? { NetworkMode: options.networkName } : {}),
+        ...(options.resources
+          ? {
+              Memory: options.resources.Memory,
+              MemorySwap: options.resources.MemorySwap,
+              NanoCpus: options.resources.NanoCpus,
+              PidsLimit: options.resources.PidsLimit,
+            }
+          : {}),
       },
     };
   }
@@ -653,6 +760,14 @@ class DockerManager {
      * Must stay false on remote nodes — that network does not exist there.
      */
     joinPanelNetwork?: boolean;
+    resources?: DockerResources;
+    healthcheck?: DockerHealthcheck;
+    /**
+     * Wait until Docker reports healthy before deleting the previous
+     * container. Without this, a boot that never listens leaves the app gone.
+     */
+    waitHealthy?: boolean;
+    waitHealthyMs?: number;
   }): Promise<string> {
     const docker = options.client || this.docker;
     // Remote daemons have no panel aegis-net; attaching would fail the create.
@@ -711,6 +826,10 @@ class DockerManager {
       created = await docker.createContainer(createOptions);
       await created.start();
 
+      if (options.waitHealthy) {
+        await this.waitUntilHealthy(created.id, options.waitHealthyMs ?? HEALTH_WAIT_MS, docker);
+      }
+
       if (renamedOld) {
         try {
           await docker.getContainer(backupName).remove({ force: true });
@@ -764,6 +883,43 @@ class DockerManager {
       console.error('Failed to create and start container:', err);
       throw err;
     }
+  }
+
+  /**
+   * Polls inspect until healthy, or until the container is clearly unhealthy /
+   * dead. No Health block means the image has no check — treat running as ok.
+   */
+  private async waitUntilHealthy(containerId: string, timeoutMs: number, docker: Docker): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    let last = 'ainda iniciando';
+    while (Date.now() < deadline) {
+      let info: Docker.ContainerInspectInfo;
+      try {
+        info = await docker.getContainer(containerId).inspect();
+      } catch (err: any) {
+        throw new Error(`Healthcheck: contêiner desapareceu (${err.message || err}).`);
+      }
+
+      if (!info.State?.Running) {
+        if (info.State?.OOMKilled) {
+          throw new Error('O kernel matou o contêiner por falta de memória (OOM) antes do healthcheck.');
+        }
+        throw new Error('O contêiner parou antes de ficar saudável.');
+      }
+
+      const status = info.State.Health?.Status;
+      if (!status) return;
+      if (status === 'healthy') return;
+      if (status === 'unhealthy') {
+        throw new Error('Healthcheck unhealthy. O deploy será revertido para o contêiner anterior.');
+      }
+      last = status;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    throw new Error(
+      `Healthcheck não ficou saudável em ${Math.round(timeoutMs / 1000)}s (último estado: ${last}). ` +
+        'O contêiner anterior será restaurado.'
+    );
   }
 }
 

@@ -21,6 +21,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   Database,
+  Cpu,
 } from 'lucide-react';
 import { api, persistSession } from '../services/api.js';
 import { socket } from '../services/socket.js';
@@ -102,6 +103,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
   const [cpuThreshold, setCpuThreshold] = useState(90);
   const [memThreshold, setMemThreshold] = useState(85);
   const [diskThreshold, setDiskThreshold] = useState(90);
+  const [defaultMemoryMb, setDefaultMemoryMb] = useState(512);
+  const [defaultCpus, setDefaultCpus] = useState(1);
+  const [buildsDiskCapMb, setBuildsDiskCapMb] = useState(5120);
 
   /**
    * Which secrets already have a value stored on the server.
@@ -186,6 +190,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
       setCpuThreshold(alertConf.cpuThresholdPercent || 90);
       setMemThreshold(alertConf.memThresholdPercent || 85);
       setDiskThreshold(alertConf.diskThresholdPercent || 90);
+      setDefaultMemoryMb(data.defaultAppLimits?.memoryMb || 512);
+      setDefaultCpus(data.defaultAppLimits?.cpus || 1);
+      setBuildsDiskCapMb(data.buildsDiskCapMb || 5120);
     } else {
       console.error('Falha ao carregar configurações:', resSettings.reason);
     }
@@ -300,7 +307,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
           cpuThresholdPercent: cpuThreshold,
           memThresholdPercent: memThreshold,
           diskThresholdPercent: diskThreshold,
-        }
+        },
+        defaultAppLimits: { memoryMb: defaultMemoryMb, cpus: defaultCpus, pidsLimit: 256 },
+        buildsDiskCapMb,
       });
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 2500);
@@ -397,12 +406,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
   };
 
   const handleSelfUpdate = async () => {
-    if (!confirm('Atualizar a stack do painel agora? Isso reconstrói os contêineres aegis-*.')) return;
+    if (!confirm('Atualizar a stack do painel agora? Isso faz git pull e reconstrói os contêineres aegis-*.')) return;
     try {
       selfUpdatingRef.current = true;
       setSelfUpdating(true);
       setSelfUpdateOutput('[aegis] Iniciando self-update…\n');
-      const res = await api.post('/system/panel/self-update', {}, { timeout: 11 * 60 * 1000 });
+      const res = await api.post('/system/panel/self-update', {}, { timeout: 13 * 60 * 1000 });
       if (res.data.output) {
         setSelfUpdateOutput((prev) =>
           prev.includes(res.data.output) ? prev : `${prev}\n${res.data.output}`
@@ -517,6 +526,58 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
               <p className="text-[10px] text-on-surface-variant mt-1">
                 Acesse o dashboard via HTTPS diretamente pelo seu subdomínio.
               </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-5">
+          <h3 className="font-bold text-white text-base flex items-center gap-2">
+            <Cpu className="w-5 h-5 text-primary" />
+            Recursos padrão das aplicações
+          </h3>
+          <p className="text-xs text-on-surface-variant">
+            Tetos aplicados a apps e bancos novos. Cada app pode sobrescrever em Configurações → Recursos.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
+                RAM padrão (MB)
+              </label>
+              <input
+                type="number"
+                min={32}
+                max={65536}
+                value={defaultMemoryMb}
+                onChange={(e) => setDefaultMemoryMb(Number(e.target.value))}
+                className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
+                CPU padrão
+              </label>
+              <input
+                type="number"
+                min={0.1}
+                max={32}
+                step={0.25}
+                value={defaultCpus}
+                onChange={(e) => setDefaultCpus(Number(e.target.value))}
+                className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
+                Teto de builds (MB)
+              </label>
+              <input
+                type="number"
+                min={256}
+                max={102400}
+                value={buildsDiskCapMb}
+                onChange={(e) => setBuildsDiskCapMb(Number(e.target.value))}
+                className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm font-mono"
+              />
             </div>
           </div>
         </div>
@@ -1044,8 +1105,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
           <h3 className="font-bold text-white text-base">Autogestão do Painel</h3>
         </div>
         <p className="text-xs text-on-surface-variant">
-          Logs allowlisted da stack (backend, frontend, caddy, nginx) e self-update via Docker Compose.
-          O progresso do self-update chega em tempo real. Bloqueado em LOCAL_MODE.
+          Faz git pull da ref em AEGIS_UPDATE_REF (default main) e depois docker compose up -d --build.
+          A primeira vez nesta VPS, se o painel ainda não tiver esse git pull, rode o install.sh com
+          AEGIS_UPDATE_REF apontando para o branch desejado. Bloqueado em LOCAL_MODE.
         </p>
 
         <div className="flex flex-wrap items-center gap-3">

@@ -4,6 +4,7 @@ import fs from 'fs';
 import { CONFIG } from '../config.js';
 import { dockerService } from './docker.service.js';
 import { emit } from '../realtime.js';
+import { updateComposeCheckout } from '../utils/panel-update.js';
 
 /** Only these container name prefixes may be tailed through PanelService. */
 const ALLOWED_LOG_TARGETS = new Set([
@@ -98,7 +99,7 @@ export class PanelService {
   }
 
   /**
-   * Pulls the latest images / rebuilds the panel stack.
+   * Fetches the configured Git ref, then rebuilds the stack.
    * Blocked in LOCAL_MODE — a local panel_db must never restart production.
    * Chunks are also emitted on `panel:self-update` so the UI can stream.
    */
@@ -116,15 +117,31 @@ export class PanelService {
     this.updating = true;
     const composeDir = this.resolveComposeDir();
     this.emitUpdate({
-      line: `[aegis] Compose: ${composeDir}\n[aegis] docker compose up -d --build\n`,
+      line: `[aegis] Compose: ${composeDir}\n`,
       status: 'running',
     });
 
     try {
+      const git = await updateComposeCheckout(composeDir, {
+        onOutput: (chunk) => this.emitUpdate({ line: chunk, status: 'running' }),
+      });
+      if (git.skippedReason === 'no-git') {
+        this.emitUpdate({
+          line: `[aegis] Sem .git em ${composeDir}; rebuild da cópia que já está no disco.\n`,
+          status: 'running',
+        });
+      } else {
+        this.emitUpdate({
+          line: `[aegis] git: ${git.ref} atualizado.\n[aegis] docker compose up -d --build\n`,
+          status: 'running',
+        });
+      }
+
       const output = await this.runCompose(composeDir, ['up', '-d', '--build'], (chunk) => {
         this.emitUpdate({ line: chunk, status: 'running' });
       });
-      const safe = this.redactPanelSecrets(output);
+      const combined = [git.output, output].filter(Boolean).join('\n');
+      const safe = this.redactPanelSecrets(combined);
       this.emitUpdate({ line: `\n[aegis] Concluído.\n`, status: 'success', done: true });
       return { ok: true, output: safe };
     } catch (err: any) {
