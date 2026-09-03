@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Settings2, X, Lock } from 'lucide-react';
+import { ChevronDown, Lock, Settings2, X } from 'lucide-react';
 import { api } from '../../services/api.js';
 import type { AppRecord, ServerNode } from '../../types/index.js';
 
@@ -15,6 +15,10 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({ app, onClose, onSave
   const [editName, setEditName] = useState(app.name);
   const [editPort, setEditPort] = useState(app.port.toString());
   const [editInternalPort, setEditInternalPort] = useState(app.internalPort.toString());
+  const copiedHostAsInternal = app.internalPort === app.port;
+  const [showInternalPort, setShowInternalPort] = useState(
+    app.sourceType === 'image' || copiedHostAsInternal,
+  );
   const [editImageName, setEditImageName] = useState(app.imageName || '');
   const [editGitUrl, setEditGitUrl] = useState(app.gitUrl || '');
   const [editBranch, setEditBranch] = useState(app.branch || 'main');
@@ -118,36 +122,55 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({ app, onClose, onSave
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                Porta no Host
-              </label>
-              <input
-                type="number"
-                placeholder="Automática"
-                value={editPort}
-                onChange={(e) => setEditPort(e.target.value)}
-                className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3.5 py-2.5 text-on-surface font-mono text-sm focus:outline-none focus:border-primary"
-              />
-              <p className="text-[10px] text-on-surface-variant/70 mt-1">
-                Vazio = automática. Um valor fixa a porta e o painel nunca a move sozinho.
-              </p>
-            </div>
+          <div>
+            <label htmlFor="edit-host-port" className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
+              Porta
+            </label>
+            <input
+              id="edit-host-port"
+              type="number"
+              placeholder="Automática"
+              value={editPort}
+              onChange={(e) => setEditPort(e.target.value)}
+              className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3.5 py-2.5 text-on-surface font-mono text-sm focus:outline-none focus:border-primary"
+            />
+            <p className="text-[10px] text-on-surface-variant/70 mt-1">
+              Vazio = o painel escolhe uma porta livre. O site entra pelo domínio, não por este número.
+            </p>
+          </div>
 
+          {copiedHostAsInternal && (
+            <p className="text-[11px] text-warn">
+              A porta interna estava igual à do host (:{app.port}). Vite, Next e Node costumam escutar em 3000 — não copie a porta do host.
+            </p>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setShowInternalPort((open) => !open)}
+            className="text-[11px] text-on-surface-variant hover:text-white flex items-center gap-1"
+          >
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showInternalPort ? 'rotate-180' : ''}`} />
+            {showInternalPort ? 'Ocultar porta do app' : 'O app escuta numa porta diferente?'}
+          </button>
+
+          {showInternalPort && (
             <div>
-              <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                Porta Interna
+              <label htmlFor="edit-listen-port" className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
+                Porta que o app escuta
               </label>
               <input
+                id="edit-listen-port"
                 type="number"
-                required
                 value={editInternalPort}
                 onChange={(e) => setEditInternalPort(e.target.value)}
                 className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white font-mono text-sm focus:outline-none focus:border-primary"
               />
+              <p className="text-[10px] text-on-surface-variant/70 mt-1">
+                Só mude se o projeto não usar 3000 (nginx = 80, Flask = 5000). O painel detecta isso no deploy Git.
+              </p>
             </div>
-          </div>
+          )}
 
           {app.sourceType === 'git' && (
             <>

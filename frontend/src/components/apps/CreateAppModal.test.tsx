@@ -38,4 +38,16 @@ describe('CreateAppModal', () => {
 
     expect(screen.queryByText(/ainda só aceita origem imagem/i)).toBeNull();
   });
+
+  it('asks for a single Porta field, not host plus internal', async () => {
+    render(<CreateAppModal onCreated={() => {}} onCancel={() => {}} />);
+
+    await waitFor(() => {
+      expect(api.get).toHaveBeenCalledWith('/nodes');
+    });
+
+    expect(screen.getByLabelText(/^Porta$/i)).toBeTruthy();
+    expect(screen.queryByText(/Porta no Host/i)).toBeNull();
+    expect(screen.queryByText(/Porta Interna/i)).toBeNull();
+  });
 });
