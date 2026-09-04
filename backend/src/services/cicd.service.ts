@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import type Docker from 'dockerode';
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
@@ -20,6 +21,11 @@ import { redactSecrets as redactSecretText } from '../utils/redact.js';
 import { BuildsCleanupService } from './builds-cleanup.service.js';
 import { HealthService } from './health.service.js';
 import { DeployQueueService } from './deploy-queue.service.js';
+import {
+  gitBuildContext,
+  planBuildContext,
+  shouldFallBackToPanelClone,
+} from '../utils/remote-build.js';
 
 const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 const BUILD_TIMEOUT_MS = 30 * 60 * 1000;
@@ -540,46 +546,91 @@ export class CicdService {
       const ports: { [intPort: string]: number } = { [`${app.internalPort || 3000}/tcp`]: app.port };
 
       if (app.sourceType === 'git' && app.gitUrl) {
-        const buildsDir = path.join(CONFIG.DATA_DIR, 'builds', app.id);
-        fs.mkdirSync(buildsDir, { recursive: true });
+        /**
+         * Let the node's own daemon fetch the repository when it can.
+         *
+         * The panel used to clone every remote deploy into its own disk, tar
+         * the result and stream it over SSH — paying for the same bytes twice
+         * and keeping a working copy for a machine that never needed it here.
+         */
+        const daemon = await this.tryDaemonGitBuild(app, {
+          isRemote,
+          branch,
+          requestedCommitHash,
+          dockerClient,
+          buildImageTag,
+          versionedTag,
+          log,
+        });
+        logs += daemon.logs;
+        const daemonBuilt = daemon.built;
+        if (daemon.commitHash) commitHash = daemon.commitHash;
 
-        const token = AppService.getGithubToken(app);
-        const safeGitTarget = await assertSafeGitUrl(app.gitUrl);
-        const cloneUrl = this.buildCloneUrl(app.gitUrl);
-        const gitEnv = this.gitAuthEnv(app.gitUrl, token);
-        const gitNetworkArgs = this.gitNetworkArgs(safeGitTarget);
+        /**
+         * Panel-side clone: needed whenever the daemon cannot fetch the
+         * repository itself, and whenever the repository has no Dockerfile of
+         * its own — framework detection reads the files, so it can only run
+         * against a working copy.
+         */
+        if (!daemonBuilt) {
+          const buildsDir = path.join(CONFIG.DATA_DIR, 'builds', app.id);
+          fs.mkdirSync(buildsDir, { recursive: true });
 
-        log(
-          token
-            ? `[${new Date().toISOString()}] 🔑 [Step 1/5] Autenticando com GitHub Personal Access Token (PAT)...\n`
-            : `[${new Date().toISOString()}] 📦 [Step 1/5] Conectando ao repositório: ${app.gitUrl}\n`,
-          { step: 1, stepName: token ? 'Autenticação GitHub' : 'Conectando Repositório', percentage: 20 }
-        );
+          const token = AppService.getGithubToken(app);
+          const safeGitTarget = await assertSafeGitUrl(app.gitUrl);
+          const cloneUrl = this.buildCloneUrl(app.gitUrl);
+          const gitEnv = this.gitAuthEnv(app.gitUrl, token);
+          const gitNetworkArgs = this.gitNetworkArgs(safeGitTarget);
 
-        // Step 2: clone or update
-        if (fs.existsSync(path.join(buildsDir, '.git'))) {
-          log(`[${new Date().toISOString()}] 🌿 [Step 2/5] Atualizando código existente (branch ${branch})...\n`, {
-            step: 2,
-            stepName: 'Git Fetch',
-            percentage: 35,
-          });
+          log(
+            token
+              ? `[${new Date().toISOString()}] 🔑 [Step 1/5] Autenticando com GitHub Personal Access Token (PAT)...\n`
+              : `[${new Date().toISOString()}] 📦 [Step 1/5] Conectando ao repositório: ${app.gitUrl}\n`,
+            { step: 1, stepName: token ? 'Autenticação GitHub' : 'Conectando Repositório', percentage: 20 }
+          );
 
-          // fetch + hard reset rather than pull: a rebased or force-pushed
-          // branch makes a merge-based pull fail, and the previous fallback was
-          // to delete the whole working copy and clone again.
-          // Never leave a PAT in .git/config. It is used only for this fetch,
-          // then the remote is immediately restored to the public URL.
-          await run('git', ['remote', 'set-url', 'origin', cloneUrl], { cwd: buildsDir });
-          const fetched = await run('git', [...gitNetworkArgs, 'fetch', '--prune', 'origin', branch], {
-            cwd: buildsDir,
-            timeoutMs: CLONE_TIMEOUT_MS,
-            onOutput: (c) => log(this.redactSecrets(c)),
-            env: gitEnv,
-          });
+          // Step 2: clone or update
+          if (fs.existsSync(path.join(buildsDir, '.git'))) {
+            log(`[${new Date().toISOString()}] 🌿 [Step 2/5] Atualizando código existente (branch ${branch})...\n`, {
+              step: 2,
+              stepName: 'Git Fetch',
+              percentage: 35,
+            });
 
-          if (fetched.exitCode !== 0) {
-            log(`[Git] Fetch falhou, re-clonando repositório...\n`);
-            fs.rmSync(buildsDir, { recursive: true, force: true });
+            // fetch + hard reset rather than pull: a rebased or force-pushed
+            // branch makes a merge-based pull fail, and the previous fallback was
+            // to delete the whole working copy and clone again.
+            // Never leave a PAT in .git/config. It is used only for this fetch,
+            // then the remote is immediately restored to the public URL.
+            await run('git', ['remote', 'set-url', 'origin', cloneUrl], { cwd: buildsDir });
+            const fetched = await run('git', [...gitNetworkArgs, 'fetch', '--prune', 'origin', branch], {
+              cwd: buildsDir,
+              timeoutMs: CLONE_TIMEOUT_MS,
+              onOutput: (c) => log(this.redactSecrets(c)),
+              env: gitEnv,
+            });
+
+            if (fetched.exitCode !== 0) {
+              log(`[Git] Fetch falhou, re-clonando repositório...\n`);
+              fs.rmSync(buildsDir, { recursive: true, force: true });
+              const cloned = await run('git', [...gitNetworkArgs, 'clone', '-b', branch, '--single-branch', cloneUrl, buildsDir], {
+                timeoutMs: CLONE_TIMEOUT_MS,
+                env: gitEnv,
+              });
+              if (cloned.exitCode !== 0) {
+                throw new Error(`Falha ao clonar repositório: ${this.redactSecrets(cloned.stderr.trim())}`);
+              }
+            } else {
+              await run('git', ['reset', '--hard', `origin/${branch}`], { cwd: buildsDir });
+              await run('git', ['clean', '-fdx'], { cwd: buildsDir });
+            }
+            await run('git', ['remote', 'set-url', 'origin', app.gitUrl], { cwd: buildsDir });
+          } else {
+            log(`[${new Date().toISOString()}] 🌿 [Step 2/5] Clonando branch [${branch}]...\n`, {
+              step: 2,
+              stepName: 'Git Clone',
+              percentage: 35,
+            });
             const cloned = await run('git', [...gitNetworkArgs, 'clone', '-b', branch, '--single-branch', cloneUrl, buildsDir], {
               timeoutMs: CLONE_TIMEOUT_MS,
               env: gitEnv,
@@ -587,146 +638,130 @@ export class CicdService {
             if (cloned.exitCode !== 0) {
               throw new Error(`Falha ao clonar repositório: ${this.redactSecrets(cloned.stderr.trim())}`);
             }
-          } else {
-            await run('git', ['reset', '--hard', `origin/${branch}`], { cwd: buildsDir });
-            await run('git', ['clean', '-fdx'], { cwd: buildsDir });
-          }
-          await run('git', ['remote', 'set-url', 'origin', app.gitUrl], { cwd: buildsDir });
-        } else {
-          log(`[${new Date().toISOString()}] 🌿 [Step 2/5] Clonando branch [${branch}]...\n`, {
-            step: 2,
-            stepName: 'Git Clone',
-            percentage: 35,
-          });
-          const cloned = await run('git', [...gitNetworkArgs, 'clone', '-b', branch, '--single-branch', cloneUrl, buildsDir], {
-            timeoutMs: CLONE_TIMEOUT_MS,
-            env: gitEnv,
-          });
-          if (cloned.exitCode !== 0) {
-            throw new Error(`Falha ao clonar repositório: ${this.redactSecrets(cloned.stderr.trim())}`);
-          }
-          await run('git', ['remote', 'set-url', 'origin', app.gitUrl], { cwd: buildsDir });
-        }
-
-        this.ensureBuildContextIgnore(buildsDir);
-
-        if (requestedCommitHash) {
-          const target = await run('git', ['cat-file', '-e', `${requestedCommitHash}^{commit}`], { cwd: buildsDir });
-          if (target.exitCode !== 0) {
-            throw new Error(`O commit solicitado para rollback não está disponível localmente: ${requestedCommitHash}`);
-          }
-          const checkedOut = await run('git', ['reset', '--hard', requestedCommitHash], { cwd: buildsDir });
-          if (checkedOut.exitCode !== 0) {
-            throw new Error(`Não foi possível selecionar o commit ${requestedCommitHash} para o deploy.`);
-          }
-        }
-
-        // Real commit metadata
-        const logResult = await run('git', ['log', '-1', '--format=%H|%h|%s|%an|%cI'], { cwd: buildsDir });
-        if (logResult.exitCode === 0 && logResult.stdout.includes('|')) {
-          const [fullHash, shortHash, subject, authName, commitIso] = logResult.stdout.trim().split('|');
-          commitHash = shortHash || fullHash?.substring(0, 7) || commitHash;
-          commitMsg = subject || commitMsg;
-          author = authName || author;
-          commitDate = commitIso || commitDate;
-          log(`[${new Date().toISOString()}] 🏷️ [Git Commit] ${commitHash} - "${commitMsg}" por ${author}\n`, {
-            step: 2,
-            stepName: 'Commit Extraído',
-            percentage: 40,
-          });
-        }
-
-        // Step 3: Dockerfile resolution
-        const dockerfilePath = path.join(buildsDir, 'Dockerfile');
-        const internalPort = app.internalPort || 3000;
-
-        let hasGitCommittedDockerfile = false;
-        if (fs.existsSync(dockerfilePath)) {
-          const tracked = await run('git', ['ls-files', '--error-unmatch', 'Dockerfile'], { cwd: buildsDir });
-          hasGitCommittedDockerfile = tracked.exitCode === 0;
-        }
-
-        if (!hasGitCommittedDockerfile) {
-          if (fs.existsSync(dockerfilePath)) {
-            fs.rmSync(dockerfilePath, { force: true });
+            await run('git', ['remote', 'set-url', 'origin', app.gitUrl], { cwd: buildsDir });
           }
 
-          const detection = ProjectDetector.inspect(buildsDir, internalPort);
-          log(
-            `[${new Date().toISOString()}] ${detection.log}\n` +
-              `[${new Date().toISOString()}] 📦 [Step 3/5] Framework: ${detection.frameworkName} | Gerenciador: ${detection.packageManager.toUpperCase()} | Porta Interna: :${internalPort}\n`,
-            { step: 3, stepName: `Detectado: ${detection.frameworkName}`, percentage: 50 }
-          );
+          this.ensureBuildContextIgnore(buildsDir);
 
-          if (detection.type === 'static-html') {
-            delete ports[`${internalPort}/tcp`];
-            ports['80/tcp'] = app.port;
-          } else if (detection.recommendedInternalPort && detection.recommendedInternalPort !== internalPort && (!app.internalPort || app.internalPort === 3000)) {
-            delete ports[`${internalPort}/tcp`];
-            ports[`${detection.recommendedInternalPort}/tcp`] = app.port;
-            app.internalPort = detection.recommendedInternalPort;
-            dbStorage.saveApp(app);
-          }
-
-          fs.writeFileSync(dockerfilePath, injectPublicBuildArgs(detection.dockerfile, app.env || {}), 'utf-8');
-        } else {
-          try {
-            const dockerContent = fs.readFileSync(dockerfilePath, 'utf8');
-            const portMatch = dockerContent.match(/EXPOSE\s+(\d+)/i);
-            if (portMatch && portMatch[1]) {
-              const exposedPort = parseInt(portMatch[1], 10);
-              if (exposedPort && exposedPort !== internalPort && (!app.internalPort || app.internalPort === 3000)) {
-                delete ports[`${internalPort}/tcp`];
-                ports[`${exposedPort}/tcp`] = app.port;
-                app.internalPort = exposedPort;
-                dbStorage.saveApp(app);
-              }
+          if (requestedCommitHash) {
+            const target = await run('git', ['cat-file', '-e', `${requestedCommitHash}^{commit}`], { cwd: buildsDir });
+            if (target.exitCode !== 0) {
+              throw new Error(`O commit solicitado para rollback não está disponível localmente: ${requestedCommitHash}`);
             }
-          } catch (e) {
-            // ignore
+            const checkedOut = await run('git', ['reset', '--hard', requestedCommitHash], { cwd: buildsDir });
+            if (checkedOut.exitCode !== 0) {
+              throw new Error(`Não foi possível selecionar o commit ${requestedCommitHash} para o deploy.`);
+            }
           }
 
-          log(
-            `[${new Date().toISOString()}] 🔍 [Step 3/5] Dockerfile nativo do repositório encontrado. Compilando com o Dockerfile do desenvolvedor...\n`,
-            { step: 3, stepName: 'Dockerfile Nativo Git', percentage: 50 }
-          );
-        }
+          // Real commit metadata
+          const logResult = await run('git', ['log', '-1', '--format=%H|%h|%s|%an|%cI'], { cwd: buildsDir });
+          if (logResult.exitCode === 0 && logResult.stdout.includes('|')) {
+            const [fullHash, shortHash, subject, authName, commitIso] = logResult.stdout.trim().split('|');
+            commitHash = shortHash || fullHash?.substring(0, 7) || commitHash;
+            commitMsg = subject || commitMsg;
+            author = authName || author;
+            commitDate = commitIso || commitDate;
+            log(`[${new Date().toISOString()}] 🏷️ [Git Commit] ${commitHash} - "${commitMsg}" por ${author}\n`, {
+              step: 2,
+              stepName: 'Commit Extraído',
+              percentage: 40,
+            });
+          }
 
-        // Step 4: build, streaming output line by line
-        log(`[${new Date().toISOString()}] 🐳 [Step 4/5] Executando docker build -t ${buildImageTag}...\n`, {
-          step: 4,
-          stepName: 'Compilando Imagem Docker',
-          percentage: 65,
-        });
+          // Step 3: Dockerfile resolution
+          const dockerfilePath = path.join(buildsDir, 'Dockerfile');
+          const internalPort = app.internalPort || 3000;
 
-        // Only intentionally public variables may enter the image build. All
-        // other application variables are injected into the runtime container
-        // below and never become Docker build arguments or build-context files.
-        if (isRemote) {
-          log(
-            `[${new Date().toISOString()}] 📤 Contexto enviado ao Docker do nó (o socket do painel não recebe o build nem o start).\n`
-          );
-          await dockerService.buildImage({
-            contextDir: buildsDir,
-            tags: [buildImageTag, versionedTag],
-            buildArgs: publicBuildArgMap(app.env || {}),
-            client: dockerClient,
-            timeoutMs: BUILD_TIMEOUT_MS,
-            onOutput: (chunk) => log(this.redactSecrets(chunk)),
-          });
-        } else {
-          const buildArgs = publicBuildArgs(app.env || {});
-          const build = await run('docker', ['build', ...buildArgs, '-t', buildImageTag, '-t', versionedTag, '.'], {
-            cwd: buildsDir,
-            timeoutMs: BUILD_TIMEOUT_MS,
-            onOutput: (chunk) => log(this.redactSecrets(chunk)),
-          });
+          let hasGitCommittedDockerfile = false;
+          if (fs.existsSync(dockerfilePath)) {
+            const tracked = await run('git', ['ls-files', '--error-unmatch', 'Dockerfile'], { cwd: buildsDir });
+            hasGitCommittedDockerfile = tracked.exitCode === 0;
+          }
 
-          if (build.exitCode !== 0) {
-            throw new Error(
-              `Erro ao compilar imagem Docker (código ${build.exitCode}). Verifique os logs de build acima.`
+          if (!hasGitCommittedDockerfile) {
+            if (fs.existsSync(dockerfilePath)) {
+              fs.rmSync(dockerfilePath, { force: true });
+            }
+
+            const detection = ProjectDetector.inspect(buildsDir, internalPort);
+            log(
+              `[${new Date().toISOString()}] ${detection.log}\n` +
+                `[${new Date().toISOString()}] 📦 [Step 3/5] Framework: ${detection.frameworkName} | Gerenciador: ${detection.packageManager.toUpperCase()} | Porta Interna: :${internalPort}\n`,
+              { step: 3, stepName: `Detectado: ${detection.frameworkName}`, percentage: 50 }
+            );
+
+            if (detection.type === 'static-html') {
+              delete ports[`${internalPort}/tcp`];
+              ports['80/tcp'] = app.port;
+            } else if (detection.recommendedInternalPort && detection.recommendedInternalPort !== internalPort && (!app.internalPort || app.internalPort === 3000)) {
+              delete ports[`${internalPort}/tcp`];
+              ports[`${detection.recommendedInternalPort}/tcp`] = app.port;
+              app.internalPort = detection.recommendedInternalPort;
+              dbStorage.saveApp(app);
+            }
+
+            fs.writeFileSync(dockerfilePath, injectPublicBuildArgs(detection.dockerfile, app.env || {}), 'utf-8');
+          } else {
+            try {
+              const dockerContent = fs.readFileSync(dockerfilePath, 'utf8');
+              const portMatch = dockerContent.match(/EXPOSE\s+(\d+)/i);
+              if (portMatch && portMatch[1]) {
+                const exposedPort = parseInt(portMatch[1], 10);
+                if (exposedPort && exposedPort !== internalPort && (!app.internalPort || app.internalPort === 3000)) {
+                  delete ports[`${internalPort}/tcp`];
+                  ports[`${exposedPort}/tcp`] = app.port;
+                  app.internalPort = exposedPort;
+                  dbStorage.saveApp(app);
+                }
+              }
+            } catch (e) {
+              // ignore
+            }
+
+            log(
+              `[${new Date().toISOString()}] 🔍 [Step 3/5] Dockerfile nativo do repositório encontrado. Compilando com o Dockerfile do desenvolvedor...\n`,
+              { step: 3, stepName: 'Dockerfile Nativo Git', percentage: 50 }
             );
           }
+
+          // Step 4: build, streaming output line by line
+          log(`[${new Date().toISOString()}] 🐳 [Step 4/5] Executando docker build -t ${buildImageTag}...\n`, {
+            step: 4,
+            stepName: 'Compilando Imagem Docker',
+            percentage: 65,
+          });
+
+          // Only intentionally public variables may enter the image build. All
+          // other application variables are injected into the runtime container
+          // below and never become Docker build arguments or build-context files.
+          if (isRemote) {
+            log(
+              `[${new Date().toISOString()}] 📤 Contexto enviado ao Docker do nó (o socket do painel não recebe o build nem o start).\n`
+            );
+            await dockerService.buildImage({
+              contextDir: buildsDir,
+              tags: [buildImageTag, versionedTag],
+              buildArgs: publicBuildArgMap(app.env || {}),
+              client: dockerClient,
+              timeoutMs: BUILD_TIMEOUT_MS,
+              onOutput: (chunk) => log(this.redactSecrets(chunk)),
+            });
+          } else {
+            const buildArgs = publicBuildArgs(app.env || {});
+            const build = await run('docker', ['build', ...buildArgs, '-t', buildImageTag, '-t', versionedTag, '.'], {
+              cwd: buildsDir,
+              timeoutMs: BUILD_TIMEOUT_MS,
+              onOutput: (chunk) => log(this.redactSecrets(chunk)),
+            });
+
+            if (build.exitCode !== 0) {
+              throw new Error(
+                `Erro ao compilar imagem Docker (código ${build.exitCode}). Verifique os logs de build acima.`
+              );
+            }
+          }
+
         }
 
         // Step 5: start the container
@@ -948,6 +983,114 @@ export class CicdService {
   }
 
   /** Restores a previous deployment by re-running its tagged image. */
+  /**
+   * Builds on the target node from a Git URL the node's daemon fetches itself.
+   *
+   * Returns `built: false` whenever the panel has to do the clone instead, so
+   * the caller falls through to the existing path. That happens for a local
+   * deploy, a private repository, and — the case only discovered by trying —
+   * a repository that ships no Dockerfile, since framework detection reads the
+   * files and can only run against a working copy.
+   */
+  private static async tryDaemonGitBuild(
+    app: AppRecord,
+    ctx: {
+      isRemote: boolean;
+      branch: string;
+      requestedCommitHash?: string;
+      dockerClient: Docker;
+      buildImageTag: string;
+      versionedTag: string;
+      log: (line: string, progress?: { step: number; stepName: string; percentage: number }) => void;
+    }
+  ): Promise<{ built: boolean; logs: string; commitHash?: string }> {
+    let logs = '';
+    const emitLine = (line: string, progress?: { step: number; stepName: string; percentage: number }) => {
+      logs += line;
+      ctx.log(line, progress);
+    };
+
+    const token = AppService.getGithubToken(app);
+    const plan = planBuildContext({
+      isRemote: ctx.isRemote,
+      sourceType: app.sourceType,
+      gitUrl: app.gitUrl,
+      hasToken: Boolean(token),
+      remoteCloneDisabled: app.remoteClone === false,
+    });
+
+    if (plan.mode !== 'daemon-git') {
+      // Only worth saying when the node could have done it and did not.
+      if (ctx.isRemote) emitLine(`[${new Date().toISOString()}] ℹ️ ${plan.reason}\n`);
+      return { built: false, logs };
+    }
+
+    const safeGitTarget = await assertSafeGitUrl(app.gitUrl!);
+
+    // Resolves the branch to an exact commit without cloning, so the build is
+    // pinned and the deploy history records a real hash instead of a branch
+    // name that moves.
+    let ref = ctx.requestedCommitHash || ctx.branch;
+    let resolvedHash = ctx.requestedCommitHash;
+    if (!resolvedHash) {
+      const lsRemote = await run(
+        'git',
+        [...this.gitNetworkArgs(safeGitTarget), 'ls-remote', app.gitUrl!, ctx.branch],
+        { timeoutMs: 60_000 }
+      );
+      const sha = lsRemote.stdout.trim().split(/\s+/)[0];
+      if (lsRemote.exitCode === 0 && /^[a-f0-9]{40}$/i.test(sha)) {
+        ref = sha;
+        resolvedHash = sha.substring(0, 7);
+      }
+    }
+
+    let gitContext: string;
+    try {
+      gitContext = gitBuildContext(app.gitUrl!, ref);
+    } catch (err: any) {
+      emitLine(`[${new Date().toISOString()}] ℹ️ Contexto remoto indisponível: ${err.message}\n`);
+      return { built: false, logs };
+    }
+
+    emitLine(
+      `[${new Date().toISOString()}] 🛰️ [Step 2/5] O nó vai buscar o repositório sozinho (${ref.substring(0, 12)}); ` +
+        'o painel não clona nem envia contexto.\n',
+      { step: 2, stepName: 'Clone no nó', percentage: 35 }
+    );
+
+    try {
+      await dockerService.buildImageFromGitContext({
+        gitContext,
+        tags: [ctx.buildImageTag, ctx.versionedTag],
+        buildArgs: publicBuildArgMap(app.env || {}),
+        client: ctx.dockerClient,
+        timeoutMs: BUILD_TIMEOUT_MS,
+        onOutput: (chunk) => emitLine(this.redactSecrets(chunk)),
+      });
+    } catch (err: any) {
+      const message = this.redactSecrets(err?.message || String(err));
+      if (!shouldFallBackToPanelClone(message)) {
+        // A broken Dockerfile fails identically after a local clone; retrying
+        // would double the duration of every failed deploy and print the same
+        // error twice.
+        throw err;
+      }
+      emitLine(
+        `[${new Date().toISOString()}] ↩️ O nó não conseguiu usar o repositório como contexto (${message}). ` +
+          'Voltando ao clone no painel.\n'
+      );
+      return { built: false, logs };
+    }
+
+    emitLine(`[${new Date().toISOString()}] ✅ Imagem compilada no próprio nó.\n`, {
+      step: 4,
+      stepName: 'Compilado no nó',
+      percentage: 80,
+    });
+    return { built: true, logs, commitHash: resolvedHash };
+  }
+
   /** Deploy is only successful once the app answers. */
   private static readonly READINESS_TIMEOUT_MS = 120_000;
 

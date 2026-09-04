@@ -9,7 +9,7 @@
 
 ## Onde paramos
 
-Atualizado em **2026-09-04**. Estado local: `npm run check` verde — typecheck backend + frontend, **189 testes backend** (1 pulado no Windows: symlink), **19 testes frontend**.
+Atualizado em **2026-09-04**. Estado local: `npm run check` verde — typecheck backend + frontend, **202 testes backend** (1 pulado no Windows: symlink), **19 testes frontend**.
 
 | Fase | Estado | Falta |
 |------|--------|-------|
@@ -17,9 +17,9 @@ Atualizado em **2026-09-04**. Estado local: `npm run check` verde — typecheck 
 | 2 — Backup offsite | ✅ código completo | Ensaio de DR numa VPS descartável (ação humana) |
 | 3 — Apps com teto | ✅ completa | — |
 | 4 — Estado | ✅ completa | — |
-| 5 — Cluster | 🟡 5.1, 5.2 e 5.4 feitas | 5.3 clone no nó |
+| 5 — Cluster | ✅ completa | — |
 
-**Próximo na fila:** 5.3 — clone no nó em vez de no painel. Única peça de código restante do PRD.
+**Todo o código do PRD está entregue.** O que resta é humano: destravar o billing do GitHub Actions (1.5) e ensaiar o DR numa VPS descartável (2.3).
 
 > ⚠️ Fases 1 e 2 ainda **não estão no `main`**. Abrir o PR desta branch antes de seguir.
 
@@ -317,7 +317,7 @@ Quando disparar: `better-sqlite3`, mesmo `JsonStorage` como fachada, migração 
 - [x] Deploy image/git/dockerfile no Docker do nó via SSH (#5)
 - [x] Caddy aponta `hostIp:port` para apps remotas
 - [x] Chaves SSH cifradas, nunca ecoadas
-- [x] Fila por nó, health do nó e Caddy ciente entregues (5.1, 5.2, 5.4). Falta 5.3: o clone ainda acontece no painel.
+- [x] Fila por nó, health do nó, Caddy ciente e clone no nó entregues (5.1 a 5.4)
 
 ### 5.1 — Fila: um deploy por vez por nó ✅
 
@@ -343,15 +343,25 @@ Outras notas:
 - [x] Alerta quando o nó cai e quando volta (respeita `LOCAL_MODE` pelo guard do `AlertService`)
 - [x] Deploy para nó `error` continua recusado (`assertDeployTarget`)
 
-### 5.3 — Clone no nó, não no painel
+### 5.3 — Clone no nó, não no painel ✅
 
 Hoje: clone no painel → tar do contexto → stream para o Docker remoto. Custa disco e rede do painel.
 
-- [ ] Modo `remoteClone`: painel envia só `gitUrl + ref + token efêmero` por SSH; nó roda `git clone --depth 1` + `docker build` localmente
-- [ ] Token do GitHub **não** persiste no nó: passado via stdin, nunca argv nem arquivo
-- [ ] Logs do build streamam de volta pelo mesmo canal SSH para `deploy:<appId>:stream` (com `redactSecrets()`)
-- [ ] Fallback automático para o modo atual se o nó não tiver `git`
-- [ ] `DATA_DIR/builds/<appId>` só existe para apps locais (libera disco do painel)
+- [x] Modo `remoteClone`: o **daemon do nó** busca o repositório sozinho (contexto Git do builder do Docker, `remote=`); o painel não clona nem envia contexto
+- [x] Token do GitHub **não** chega ao nó — ver desvio abaixo
+- [x] Logs do build streamam de volta pelo mesmo canal (`followProgress` sobre o transporte SSH), passando por `redactSecrets()`
+- [x] Fallback automático para o clone no painel quando o contexto remoto não serve
+- [x] `DATA_DIR/builds/<appId>` deixa de ser criado quando o nó faz o clone
+
+**Desvio do PRD — não usamos SSH exec, e o token não vai para o nó.**
+
+O PRD pedia: painel manda `gitUrl + ref + token efêmero` por SSH, e o nó roda `git clone` + `docker build`. Isso exigiria um segundo canal de execução remota (`ssh2` como dependência direta, com verificação de host próprio) e colocaria um token do GitHub numa máquina que hoje só recebe chamadas de API do Docker.
+
+O builder do Docker já aceita uma URL Git como contexto, então o daemon do nó faz o clone **usando o canal que já existe** — sem dependência nova, sem shell remoto, sem token no nó. O `ref` é resolvido para um SHA exato via `git ls-remote` a partir do painel (uma chamada de rede, zero disco), então o build fica fixado no commit e o histórico registra um hash de verdade em vez de um nome de branch que se move.
+
+**Limitação consciente: repositório privado continua clonando no painel.** O contexto remoto é buscado pelo daemon *antes* do build começar, então não há mecanismo de segredo para ele — autenticar significaria embutir o token na URL, que vira query parameter registrado no log do daemon do nó. O painel já clona privado com o token num header de config do Git (nunca em argv, nunca em disco), e manter essa propriedade vale mais que o disco economizado.
+
+**Repositório sem Dockerfile próprio também cai no painel**, e isso só se descobre tentando: a detecção de framework lê os arquivos, então só roda sobre uma cópia de trabalho. O fallback distingue "o daemon não conseguiu buscar o repositório" de "o build falhou" — um Dockerfile quebrado falha igual depois de um clone local, e repetir dobraria a duração de todo deploy quebrado imprimindo o mesmo erro duas vezes.
 
 ### 5.4 — Caddy ciente do nó ✅
 
@@ -364,7 +374,7 @@ Hoje: clone no painel → tar do contexto → stream para o Docker remoto. Custa
 
 - [x] 3 deploys disparados juntos para o mesmo nó rodam em série; UI recebe a posição pelo evento `deploy:queue` (teste da regra em `test/deploy-queue.test.ts`)
 - [x] Nó desligado → `error` em ≤ 3 min (3 sondagens de 60s), apps saem do Caddy, site mostra 503 do painel
-- [ ] Deploy git para nó remoto não cria nada em `DATA_DIR/builds` do painel
+- [x] Deploy git para nó remoto não cria nada em `DATA_DIR/builds` do painel (repositório público com Dockerfile próprio; privado ou sem Dockerfile continua clonando — ver 5.3)
 
 ---
 

@@ -124,6 +124,11 @@ export interface AppRecord {
   deployBranch?: string;
   /** Optional remote node target. Absent / local node = this machine. */
   nodeId?: string;
+  /**
+   * Opt out of letting a remote node fetch the repository itself. Absent means
+   * the node does it whenever it can; false forces the panel-clone path.
+   */
+  remoteClone?: boolean;
   status: 'running' | 'stopped' | 'building' | 'error';
   lastDeployAt?: string;
   lastCommitHash?: string;

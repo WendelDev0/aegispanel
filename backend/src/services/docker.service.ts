@@ -657,6 +657,82 @@ class DockerManager {
    * deploy targeting a worker never `docker build`s against the panel socket
    * and never starts the resulting container there.
    */
+  /** Drains a build stream, surfacing each line and failing on the deadline. */
+  private followBuild(
+    docker: Docker,
+    stream: NodeJS.ReadableStream,
+    options: { onOutput?: (chunk: string) => void; timeoutMs?: number }
+  ): Promise<void> {
+    const timeoutMs = options.timeoutMs ?? 30 * 60 * 1000;
+
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`docker build excedeu ${Math.round(timeoutMs / 60000)} minutos.`));
+      }, timeoutMs);
+
+      docker.modem.followProgress(
+        stream,
+        (err: Error | null) => {
+          clearTimeout(timer);
+          if (err) reject(err);
+          else resolve();
+        },
+        (event: { stream?: string; status?: string; error?: string; errorDetail?: { message?: string } }) => {
+          const line = event.stream || event.status || event.error || event.errorDetail?.message;
+          if (line) options.onOutput?.(line);
+        }
+      );
+    });
+  }
+
+  /** Adds the remaining tags to an image that was just built. */
+  private async applyExtraTags(docker: Docker, primaryTag: string, extras: string[]): Promise<void> {
+    for (const extra of extras) {
+      if (typeof docker.getImage !== 'function') break;
+      const lastColon = extra.lastIndexOf(':');
+      const repo = lastColon > 0 ? extra.slice(0, lastColon) : extra;
+      const tag = lastColon > 0 ? extra.slice(lastColon + 1) : 'latest';
+      await docker.getImage(primaryTag).tag({ repo, tag });
+    }
+  }
+
+  /**
+   * Builds an image from a Git URL the target daemon fetches itself.
+   *
+   * The panel neither clones nor uploads a context: `remote=` makes the daemon
+   * do the fetch. For a remote node that removes both the disk the clone took
+   * on the panel and the second transfer of the same bytes over SSH.
+   *
+   * Public HTTPS only, enforced by gitBuildContext. The URL is a query
+   * parameter the daemon logs, so a token embedded in it would end up in that
+   * machine's logs — private repositories stay on the panel-clone path.
+   */
+  async buildImageFromGitContext(options: {
+    gitContext: string;
+    tags: string[];
+    buildArgs?: Record<string, string>;
+    client?: Docker;
+    onOutput?: (chunk: string) => void;
+    timeoutMs?: number;
+  }): Promise<void> {
+    const docker = options.client || this.docker;
+    const primaryTag = options.tags[0];
+    if (!primaryTag) throw new Error('Informe ao menos uma tag de imagem.');
+
+    // No body: the builder reads the context from `remote` instead of from an
+    // uploaded tar.
+    const stream = await docker.buildImage(null as never, {
+      remote: options.gitContext,
+      t: primaryTag,
+      dockerfile: 'Dockerfile',
+      buildargs:
+        options.buildArgs && Object.keys(options.buildArgs).length ? options.buildArgs : undefined,
+    } as Docker.ImageBuildOptions);
+
+    await this.followBuild(docker, stream as NodeJS.ReadableStream, options);
+    await this.applyExtraTags(docker, primaryTag, options.tags.slice(1));
+  }
+
   async buildImage(options: {
     contextDir: string;
     tags: string[];
@@ -680,32 +756,8 @@ class DockerManager {
       }
     );
 
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error(`docker build excedeu ${Math.round(timeoutMs / 60000)} minutos.`));
-      }, timeoutMs);
-
-      docker.modem.followProgress(
-        stream as NodeJS.ReadableStream,
-        (err: Error | null) => {
-          clearTimeout(timer);
-          if (err) reject(err);
-          else resolve();
-        },
-        (event: { stream?: string; status?: string; error?: string; errorDetail?: { message?: string } }) => {
-          const line = event.stream || event.status || event.error || event.errorDetail?.message;
-          if (line) options.onOutput?.(line);
-        }
-      );
-    });
-
-    for (const extra of options.tags.slice(1)) {
-      if (typeof docker.getImage !== 'function') break;
-      const lastColon = extra.lastIndexOf(':');
-      const repo = lastColon > 0 ? extra.slice(0, lastColon) : extra;
-      const tag = lastColon > 0 ? extra.slice(lastColon + 1) : 'latest';
-      await docker.getImage(primaryTag).tag({ repo, tag });
-    }
+    await this.followBuild(docker, stream as NodeJS.ReadableStream, { ...options, timeoutMs });
+    await this.applyExtraTags(docker, primaryTag, options.tags.slice(1));
   }
 
   /**
