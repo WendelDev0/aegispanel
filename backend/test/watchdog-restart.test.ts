@@ -47,6 +47,17 @@ test('the nginx config resolves the backend per request, not once at boot', () =
     /proxy_pass\s+http:\/\/backend:4000/,
     'nome literal em proxy_pass volta a cachear o IP do backend'
   );
-  assert.match(conf, /proxy_pass\s+http:\/\/\$aegis_backend\//, 'API via variável');
-  assert.match(conf, /proxy_pass\s+http:\/\/\$aegis_backend_ws\//, 'socket.io via variável');
+  // $request_uri, not a literal path: with a variable in proxy_pass nginx sends
+  // exactly the URI written, so `http://$var/api/` delivered `/api/` for every
+  // request and the backend answered 404 to the entire panel.
+  assert.match(
+    conf,
+    /proxy_pass\s+http:\/\/\$aegis_backend\$request_uri;/,
+    'a API precisa preservar a URI original'
+  );
+  assert.match(
+    conf,
+    /proxy_pass\s+http:\/\/\$aegis_backend_ws\$request_uri;/,
+    'socket.io precisa preservar a query string do handshake'
+  );
 });
