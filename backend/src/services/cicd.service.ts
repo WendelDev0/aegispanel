@@ -19,6 +19,7 @@ import { remoteWorkloadPlacement } from '../utils/app-upstream.js';
 import { redactSecrets as redactSecretText } from '../utils/redact.js';
 import { BuildsCleanupService } from './builds-cleanup.service.js';
 import { HealthService } from './health.service.js';
+import { DeployQueueService } from './deploy-queue.service.js';
 
 const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 const BUILD_TIMEOUT_MS = 30 * 60 * 1000;
@@ -291,12 +292,67 @@ export class CicdService {
       triggeredBy: 'webhook' | 'manual' | 'github_action';
     }
   ): Promise<DeploymentRecord> {
+    /**
+     * Queued, not rejected.
+     *
+     * Throwing "já existe um deploy em execução" is right for a button click
+     * and wrong for a webhook: a push arriving during a build was dropped, so
+     * the panel silently kept serving an older commit than the branch head with
+     * nothing in the UI saying so. The queue also stops two builds from
+     * fighting over the same Docker daemon, and two deploys of one app from
+     * racing over its container name and host port.
+     */
+    const queued = this.createQueuedDeployment(app, options);
+    return DeployQueueService.enqueue(app, options, queued);
+  }
+
+  /**
+   * Records the deploy as `queued` before it can start.
+   *
+   * The row has to exist while waiting: the UI opens the live stream as soon as
+   * the request returns, and a deploy with no record until it starts looks to
+   * the operator like the click did nothing.
+   */
+  private static createQueuedDeployment(
+    app: AppRecord,
+    options: { commitHash?: string; commitMessage?: string; authorName?: string; branch?: string; triggeredBy: 'webhook' | 'manual' | 'github_action' }
+  ): DeploymentRecord {
+    const deployment: DeploymentRecord = {
+      id: `dep-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
+      appId: app.id,
+      appName: app.name,
+      commitHash: options.commitHash,
+      commitMessage: String(options.commitMessage || 'Manual CI/CD Trigger from AegisPanel').slice(0, 500),
+      authorName: String(options.authorName || 'Developer').slice(0, 160),
+      branch: safeBranchName(options.branch || app.branch),
+      status: 'queued',
+      buildLogs: `[${new Date().toISOString()}] ⏳ Deploy na fila...\n`,
+      durationSeconds: 0,
+      triggeredBy: options.triggeredBy,
+      createdAt: new Date().toISOString(),
+    };
+    dbStorage.saveDeployment(deployment);
+    return deployment;
+  }
+
+  /** Runs one queued deploy. Called only by the queue. */
+  static async runQueuedDeploy(
+    app: AppRecord,
+    options: {
+      commitHash?: string;
+      commitMessage?: string;
+      authorName?: string;
+      branch?: string;
+      triggeredBy: 'webhook' | 'manual' | 'github_action';
+    },
+    deploymentId: string
+  ): Promise<DeploymentRecord> {
     if (activeDeployments.has(app.id)) {
       throw new Error(`Já existe um deploy em execução para a aplicação "${app.name}".`);
     }
     activeDeployments.add(app.id);
     try {
-      return await this.executeDeployUnlocked(app, options);
+      return await this.executeDeployUnlocked(app, options, deploymentId);
     } finally {
       activeDeployments.delete(app.id);
     }
@@ -334,9 +390,13 @@ export class CicdService {
       authorName?: string;
       branch?: string;
       triggeredBy: 'webhook' | 'manual' | 'github_action';
-    }
+    },
+    queuedDeploymentId?: string
   ): Promise<DeploymentRecord> {
-    const deploymentId = `dep-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+    // Reuses the row created while queued, so the id in the live stream the UI
+    // already subscribed to stays the same one that ends up in the history.
+    const deploymentId =
+      queuedDeploymentId || `dep-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
     const startTime = Date.now();
     const branch = safeBranchName(options.branch || app.branch);
 
@@ -1119,3 +1179,11 @@ jobs:
 `;
   }
 }
+
+/**
+ * Wired here rather than imported by the queue: CicdService already imports the
+ * queue to enqueue, so the queue importing it back would be a module cycle.
+ */
+DeployQueueService.setRunner((app, request, deploymentId) =>
+  CicdService.runQueuedDeploy(app, request, deploymentId)
+);

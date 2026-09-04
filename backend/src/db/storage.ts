@@ -269,6 +269,31 @@ export interface ServerNode {
   /** SHA256 fingerprint of the SSH host key, required to prevent MITM. */
   sshHostFingerprint?: string;
 
+  /**
+   * Last probe result.
+   *
+   * Free host RAM and disk are deliberately absent: the Docker API does not
+   * expose them, and the only way to get them is to run a container on the node
+   * to read /proc — which turns a read-only health probe into a workload the
+   * panel schedules without being asked. What Docker does report is here, and
+   * nothing is invented to fill the gap.
+   */
+  health?: {
+    at: string;
+    sshMs: number;
+    dockerOk: boolean;
+    containersRunning: number;
+    /** Containers on that node carrying the `aegis.managed` label. */
+    aegisRunning: number;
+    memTotalBytes?: number;
+    cpuCount?: number;
+    /** Bytes Docker itself holds there (images, containers, volumes). */
+    dockerDiskBytes?: number;
+    /** Consecutive failed probes. The node is `error` from three onwards. */
+    consecutiveFailures: number;
+    lastError?: string;
+  };
+
   // --- last health check --------------------------------------------------
   lastCheckedAt?: string;
   lastError?: string;

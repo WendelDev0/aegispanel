@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { socket } from '../services/socket.js';
-import { AppRecord, AppMetricsSnapshot, DeploymentRecord } from '../types/index.js';
+import { AppRecord, AppMetricsSnapshot, DeploymentRecord, ServerNode } from '../types/index.js';
 import { DeployHistoryModal } from '../components/apps/DeployHistoryModal.js';
 import { BuildLogsModal } from '../components/apps/BuildLogsModal.js';
 import { CreateAppModal } from '../components/apps/CreateAppModal.js';
@@ -59,12 +59,29 @@ function formatRam(bytes: number): string {
  * panel restart) falls back to the container state rather than claiming a
  * problem nobody has observed.
  */
-function appStatusBadge(app: AppRecord): {
+function appStatusBadge(
+  app: AppRecord,
+  nodes: ServerNode[] = [],
+): {
   label: string;
   title: string;
   className: string;
   dotClassName: string;
 } {
+  // A node the panel cannot reach says nothing about the container it hosts.
+  // Reporting "Online" there is a guess based on the last successful deploy,
+  // and it is the guess that sends someone debugging the app instead of the
+  // link to it.
+  const node = app.nodeId ? nodes.find((n) => n.id === app.nodeId) : undefined;
+  if (node && !node.isLocal && node.status === 'error') {
+    return {
+      label: 'Nó inacessível',
+      title: `O painel não consegue falar com o nó "${node.name}". O estado real desta aplicação é desconhecido.`,
+      className: 'bg-surface-container-high text-on-surface-variant border border-outline-variant opacity-70',
+      dotClassName: 'bg-outline',
+    };
+  }
+
   if (app.status !== 'running') {
     return {
       label: app.status === 'building' ? 'Publicando' : app.status === 'error' ? 'Erro' : 'Parado',
@@ -112,6 +129,9 @@ interface AppsPageProps {
 
 export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
   const [apps, setApps] = useState<AppRecord[]>([]);
+  // Only to grey out apps whose node is unreachable; failure is not worth
+  // blocking the page over, so an empty list simply disables that signal.
+  const [nodes, setNodes] = useState<ServerNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -148,6 +168,12 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
 
   useEffect(() => {
     fetchApps();
+    api
+      .get('/nodes')
+      .then((res) => setNodes(Array.isArray(res.data) ? res.data : []))
+      .catch(() => {
+        /* the node signal is optional; the page renders without it */
+      });
 
     const handleStream = (data: any) => {
       setLiveDeployModal(prev => {
@@ -435,7 +461,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                     // "running" only says the container exists. A crash-looping
                     // app is running and serving nothing, so the badge reports
                     // whether it actually answers when the panel knows.
-                    const badge = appStatusBadge(app);
+                    const badge = appStatusBadge(app, nodes);
                     return (
                       <span
                         title={badge.title}

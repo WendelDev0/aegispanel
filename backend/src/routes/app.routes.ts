@@ -4,6 +4,7 @@ import path from 'path';
 import { AppService } from '../services/app.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { CicdService } from '../services/cicd.service.js';
+import { DeployQueueService } from '../services/deploy-queue.service.js';
 import { CaddyService } from '../services/caddy.service.js';
 import { dbStorage } from '../db/storage.js';
 import { CONFIG } from '../config.js';
@@ -416,6 +417,24 @@ appRouter.post('/:id/deploy', requireWrite, validateBody(deployAppBodySchema), a
 });
 
 // 1-click rollback
+appRouter.delete('/:id/deployments/:deploymentId/queue', requireWrite, (req: Request, res: Response): void => {
+  // Only a queued deploy. A running one may be mid-swap — previous container
+  // renamed aside, new one starting — and killing it there leaves the app with
+  // neither.
+  const cancelled = DeployQueueService.cancel(req.params.deploymentId);
+  if (!cancelled) {
+    res.status(409).json({
+      error: 'Este deploy já começou ou não está mais na fila; não é possível cancelar.',
+    });
+    return;
+  }
+  res.json({ success: true });
+});
+
+appRouter.get('/queue', requireWrite, (req: Request, res: Response): void => {
+  res.json(DeployQueueService.status());
+});
+
 appRouter.post('/:id/rollback/:deploymentId', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     res.json(await CicdService.rollback(req.params.id, req.params.deploymentId));

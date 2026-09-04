@@ -14,6 +14,8 @@ import { AnalyticsService } from './services/analytics.service.js';
 import { CicdService } from './services/cicd.service.js';
 import { WatchdogService } from './services/watchdog.service.js';
 import { BuildsCleanupService } from './services/builds-cleanup.service.js';
+import { DeployQueueService } from './services/deploy-queue.service.js';
+import { NodeService } from './services/node.service.js';
 import { authenticateToken, AuthUser } from './middleware/auth.js';
 import { dbStorage } from './db/storage.js';
 import { AuditStore } from './utils/audit.store.js';
@@ -353,6 +355,9 @@ server.listen(CONFIG.PORT, () => {
   // Independent of the metrics loop, which skips when no client is connected —
   // precisely when an unattended app is being OOM-killed unnoticed.
   WatchdogService.start();
+  // Remote nodes: a node that goes down must take its apps out of the proxy,
+  // otherwise Caddy keeps waiting on a machine that is gone.
+  NodeService.startProbing();
 
   const abandoned = CicdService.abandonInFlightDeploys();
   if (abandoned > 0) {

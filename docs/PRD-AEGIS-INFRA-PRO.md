@@ -9,7 +9,7 @@
 
 ## Onde paramos
 
-Atualizado em **2026-09-04**. Estado local: `npm run check` verde — typecheck backend + frontend, **176 testes backend** (1 pulado no Windows: symlink), **19 testes frontend**.
+Atualizado em **2026-09-04**. Estado local: `npm run check` verde — typecheck backend + frontend, **189 testes backend** (1 pulado no Windows: symlink), **19 testes frontend**.
 
 | Fase | Estado | Falta |
 |------|--------|-------|
@@ -17,9 +17,9 @@ Atualizado em **2026-09-04**. Estado local: `npm run check` verde — typecheck 
 | 2 — Backup offsite | ✅ código completo | Ensaio de DR numa VPS descartável (ação humana) |
 | 3 — Apps com teto | ✅ completa | — |
 | 4 — Estado | ✅ completa | — |
-| 5 — Cluster | ⬜ não começado | 5.1 → 5.2 → 5.4 → 5.3 |
+| 5 — Cluster | 🟡 5.1, 5.2 e 5.4 feitas | 5.3 clone no nó |
 
-**Próximo na fila:** fase 5 — 5.1 fila de deploy → 5.2 health do nó → 5.4 Caddy ciente → 5.3 clone no nó.
+**Próximo na fila:** 5.3 — clone no nó em vez de no painel. Única peça de código restante do PRD.
 
 > ⚠️ Fases 1 e 2 ainda **não estão no `main`**. Abrir o PR desta branch antes de seguir.
 
@@ -317,24 +317,31 @@ Quando disparar: `better-sqlite3`, mesmo `JsonStorage` como fachada, migração 
 - [x] Deploy image/git/dockerfile no Docker do nó via SSH (#5)
 - [x] Caddy aponta `hostIp:port` para apps remotas
 - [x] Chaves SSH cifradas, nunca ecoadas
-- [ ] Clone continua no painel; sem fila; Caddy não sabe se o nó caiu
+- [x] Fila por nó, health do nó e Caddy ciente entregues (5.1, 5.2, 5.4). Falta 5.3: o clone ainda acontece no painel.
 
-### 5.1 — Fila: um deploy por vez por nó
+### 5.1 — Fila: um deploy por vez por nó ✅
 
-- [ ] `DeployQueue` em memória por `nodeId`: FIFO, `maxConcurrent: 1` (host local pode ser 2 — configurável)
-- [ ] `deployments[].status` ganha `queued` **de verdade** (já existe no tipo, não é usado): UI mostra “na fila, posição N”
-- [ ] `abandonInFlightDeploys()` no boot já marca `building` como falha; estender para reenfileirar `queued`
-- [ ] Cancelar deploy na fila (antes de começar) sem tocar no Docker
-- [ ] Webhook em rajada (5 pushes em 1 min) → colapsa para o último commit, ignora os intermediários (evento de auditoria)
+- [x] `DeployQueue` em memória por `nodeId`: FIFO, `maxConcurrent: 1` remoto e 2 no host local
+- [x] `deployments[].status` ganha `queued` de verdade; posição na fila em `GET /api/apps/queue` e no evento `deploy:queue`
+- [x] `abandonInFlightDeploys()` já cobre `queued` — a fila é em memória e não sobrevive ao restart, então relançar seria pior que marcar como falha
+- [x] Cancelar deploy na fila (`DELETE /api/apps/:id/deployments/:depId/queue`) sem tocar no Docker
+- [x] Rajada de pushes colapsa para o último commit; os intermediários viram evento `deploy.superseded` na auditoria
 
-### 5.2 — Health do nó no card
+### 5.2 — Health do nó no card ✅
 
-- [ ] `NodeService.probe(nodeId)` a cada 60s: latência SSH, `docker info` OK, disco livre, RAM livre, containers `aegis-*` rodando
-- [ ] `serverNodes[].health: { at, sshMs, dockerOk, diskFreePct, memFreePct, appsRunning }`
-- [ ] Card do nó: semáforo + últimos 3 números; `error` após 3 probes falhos consecutivos
-- [ ] Nó `error` → apps dele aparecem em cinza no AppsPage com “nó inacessível”, não “rodando”
-- [ ] Alerta quando nó cai / volta (respeita `LOCAL_MODE`)
-- [ ] Deploy para nó `error` continua recusado (`assertDeployTarget` já faz) — agora com o motivo do probe
+- [x] `NodeService.probe(nodeId)` a cada 60s: latência SSH, `docker info`, contêineres rodando, RAM total e disco do Docker
+- [x] `serverNodes[].health: { at, sshMs, dockerOk, containersRunning, aegisRunning, memTotalBytes, cpuCount, dockerDiskBytes, consecutiveFailures }`
+
+**Desvio do PRD:** o PRD pedia `diskFreePct` e `memFreePct` do host. **A API do Docker não expõe nenhum dos dois.** O único jeito de obtê-los é rodar um contêiner no nó para ler `/proc` — o que transforma uma sondagem read-only numa carga que o painel agenda sem ninguém pedir, e num nó já sobrecarregado é justamente o que não se quer fazer. Reportamos o que o Docker realmente dá (RAM total, CPUs, disco ocupado pelo Docker) e não inventamos número para preencher a lacuna.
+
+Outras notas:
+
+- `error` só a partir de **3** falhas: uma conexão SSH derrubada acontece em qualquer link, e virar `error` na primeira tiraria todos os apps do nó do Caddy — a indisponibilidade seria do painel, não do nó.
+- `unknown` roteia normalmente, mesma razão do 3.2: é o estado antes da primeira sondagem.
+- [x] `error` após 3 sondagens falhas consecutivas
+- [x] Nó `error` → apps dele aparecem em cinza no AppsPage com “nó inacessível”, não “rodando”
+- [x] Alerta quando o nó cai e quando volta (respeita `LOCAL_MODE` pelo guard do `AlertService`)
+- [x] Deploy para nó `error` continua recusado (`assertDeployTarget`)
 
 ### 5.3 — Clone no nó, não no painel
 
@@ -346,17 +353,17 @@ Hoje: clone no painel → tar do contexto → stream para o Docker remoto. Custa
 - [ ] Fallback automático para o modo atual se o nó não tiver `git`
 - [ ] `DATA_DIR/builds/<appId>` só existe para apps locais (libera disco do painel)
 
-### 5.4 — Caddy ciente do nó
+### 5.4 — Caddy ciente do nó ✅
 
-- [ ] `CaddyService` só emite upstream de app cujo nó está `online`; nó `error` → página 503 do painel (“serviço temporariamente indisponível”) em vez de timeout
-- [ ] `health_uri` / `lb_try_duration` no `reverse_proxy` para upstreams remotos
-- [ ] Nó volta → sync do Caddyfile automático (já existe o sync; ligar ao evento de health)
+- [x] `CaddyService` serve a página 503 do painel quando o nó está `error`, em vez de esperar por uma máquina que sumiu
+- [x] `lb_try_duration` / `fail_duration` / `max_fails` já no `reverse_proxy` (health check passivo do Caddy). `health_uri` ativo não foi adicionado: a sondagem do painel já decide roteamento, e duas sondagens independentes divergiriam sem que ninguém soubesse qual manda.
+- [x] Nó volta → sync do Caddyfile automático, ligado ao evento de recuperação
 - [ ] Fora de escopo: Caddy em cada nó, failover de app entre nós (isso é orquestrador, não painel)
 
 ### Critérios de aceite — Fase 5
 
-- [ ] 3 deploys disparados juntos para o mesmo nó rodam em série, UI mostra a fila
-- [ ] Desligar um nó: card fica `error` em ≤ 3 min, apps dele saem do Caddy, site mostra 503 do painel
+- [x] 3 deploys disparados juntos para o mesmo nó rodam em série; UI recebe a posição pelo evento `deploy:queue` (teste da regra em `test/deploy-queue.test.ts`)
+- [x] Nó desligado → `error` em ≤ 3 min (3 sondagens de 60s), apps saem do Caddy, site mostra 503 do painel
 - [ ] Deploy git para nó remoto não cria nada em `DATA_DIR/builds` do painel
 
 ---

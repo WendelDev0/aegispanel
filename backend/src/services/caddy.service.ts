@@ -211,7 +211,11 @@ export class CaddyService {
       // probe — keeps routing: taking every site offline on each restart would
       // be far worse than briefly proxying to something that turns out to be
       // down, which Caddy's passive health checks already handle.
-      if (app && !shouldRouteTraffic(app.health?.status)) {
+      // Two reasons to stop routing, both of which end in a timeout for the
+      // visitor if ignored: the app itself stopped answering, or the node
+      // hosting it is unreachable — in which case the upstream address still
+      // resolves and Caddy waits for a machine that is gone.
+      if (app && (!shouldRouteTraffic(app.health?.status) || !NodeService.isRoutable(app.nodeId))) {
         content += this.renderMaintenanceSite(domain, internalTls);
         return;
       }
