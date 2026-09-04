@@ -1,5 +1,7 @@
+import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { ToastProvider } from '../Toast';
 import { EnvModal } from './EnvModal';
 import type { AppRecord } from '../../types';
 
@@ -25,13 +27,17 @@ const app: AppRecord = {
   updatedAt: new Date().toISOString(),
 };
 
+/** These modals report through toasts, which require the provider. */
+const renderWithToast = (ui: React.ReactElement): ReturnType<typeof render> =>
+  render(<ToastProvider>{ui}</ToastProvider>);
+
 describe('EnvModal', () => {
   beforeEach(() => {
     vi.mocked(api.get).mockResolvedValue({ data: { env: { PORT: '3000' } } });
   });
 
   it('loads env and shows save control', async () => {
-    render(<EnvModal app={app} onClose={() => {}} onSaved={() => {}} />);
+    renderWithToast(<EnvModal app={app} onClose={() => {}} onSaved={() => {}} />);
 
     await waitFor(() => {
       expect(api.get).toHaveBeenCalledWith('/apps/app-1/env');

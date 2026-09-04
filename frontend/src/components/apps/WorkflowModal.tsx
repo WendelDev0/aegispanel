@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Check, Copy, FileCode2, X } from 'lucide-react';
 import { api } from '../../services/api.js';
+import { useToast } from '../Toast.js';
 import type { AppRecord } from '../../types/index.js';
 
 interface WorkflowModalProps {
@@ -9,6 +10,7 @@ interface WorkflowModalProps {
 }
 
 export const WorkflowModal: React.FC<WorkflowModalProps> = ({ app, onClose }) => {
+  const toast = useToast();
   const [workflowYaml, setWorkflowYaml] = useState('');
   const [copiedWorkflow, setCopiedWorkflow] = useState(false);
 
@@ -19,7 +21,7 @@ export const WorkflowModal: React.FC<WorkflowModalProps> = ({ app, onClose }) =>
         const res = await api.get(`/apps/${app.id}/workflow`);
         if (!cancelled) setWorkflowYaml(res.data.yaml);
       } catch (err: any) {
-        alert('Erro ao gerar workflow: ' + err.message);
+        toast.error(String(err.message), 'Erro ao gerar workflow');
       }
     })();
     return () => {

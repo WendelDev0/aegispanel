@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronDown, Cpu, HeartPulse, Lock, MemoryStick, Settings2, X } from 'lucide-react';
 import { api } from '../../services/api.js';
+import { useToast } from '../Toast.js';
 import type { AppRecord, HealthcheckConfig, ResourceLimits, ServerNode } from '../../types/index.js';
 
 const LOCAL_NODE_ID = 'node-local';
@@ -22,6 +23,7 @@ interface EditAppModalProps {
 }
 
 export const EditAppModal: React.FC<EditAppModalProps> = ({ app, onClose, onSaved }) => {
+  const toast = useToast();
   const [editName, setEditName] = useState(app.name);
   const [editPort, setEditPort] = useState(app.port.toString());
   const [editInternalPort, setEditInternalPort] = useState(app.internalPort.toString());
@@ -113,9 +115,9 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({ app, onClose, onSave
       });
 
       onSaved(res.data);
-      alert(`🎉 Aplicação atualizada. Porta no host: :${res.data?.port ?? editPort}`);
+      toast.success(`🎉 Aplicação atualizada. Porta no host: :${res.data?.port ?? editPort}`);
     } catch (err: any) {
-      alert('Erro ao atualizar: ' + (err.response?.data?.error || err.message));
+      toast.error(err.response?.data?.error || err.message, 'Erro ao atualizar');
     } finally {
       setSavingEdit(false);
     }

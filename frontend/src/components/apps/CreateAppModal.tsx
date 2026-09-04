@@ -10,6 +10,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { api } from '../../services/api.js';
+import { useToast } from '../Toast.js';
 import { EnvEditor } from '../EnvEditor.js';
 import type { AppRecord, ServerNode } from '../../types/index.js';
 
@@ -21,6 +22,7 @@ interface CreateAppModalProps {
 }
 
 export const CreateAppModal: React.FC<CreateAppModalProps> = ({ onCreated, onCancel }) => {
+  const toast = useToast();
   const [appName, setAppName] = useState('');
   const [sourceType, setSourceType] = useState<'image' | 'git' | 'dockerfile'>('git');
   const [imageName, setImageName] = useState('nginx:alpine');
@@ -160,7 +162,7 @@ export const CreateAppModal: React.FC<CreateAppModalProps> = ({ onCreated, onCan
 
       onCreated(res.data);
     } catch (err: any) {
-      alert('Erro ao criar aplicação: ' + (err.response?.data?.error || err.message));
+      toast.error(err.response?.data?.error || err.message, 'Erro ao criar aplicação');
     } finally {
       setSubmitting(false);
     }

@@ -173,8 +173,40 @@ export class WatchdogService {
 
     for (const app of dbStorage.getApps()) {
       // Only apps that are supposed to be up. A stopped app is not unhealthy,
-      // it is stopped, and restarting it would fight the operator.
-      if (!app.containerId || app.status !== 'running') continue;
+      if (!app.containerId) continue;
+      // A deploy owns the record while it runs; reconciling underneath it would
+      // fight the pipeline over the same fields.
+      if (app.status === 'building') continue;
+
+      /**
+       * The container's own state decides `status`, not the stored value.
+       *
+       * Filtering on `app.status === 'running'` here created a trap: an app
+       * wrongly recorded as `error` was never probed, so nothing could ever
+       * correct it. On the production VPS an app sat marked `error` while
+       * answering HTTP 200, and the card said it was broken indefinitely.
+       */
+      const runtime = await dockerService.inspectRuntime(
+        app.containerId,
+        await this.clientFor(app)
+      );
+
+      if (!runtime || !runtime.running) {
+        // Stopped is a fact, not a failure: the operator may have stopped it.
+        // `error` is reserved for a container that died on its own.
+        const observed: AppRecord['status'] =
+          runtime && runtime.exitCode !== 0 ? 'error' : 'stopped';
+        if (app.status !== observed) {
+          app.status = observed;
+          app.health = {
+            status: 'unknown',
+            checkedAt: new Date().toISOString(),
+            consecutiveFailures: 0,
+          };
+          dbStorage.saveApp(app);
+        }
+        continue;
+      }
 
       const probe = await HealthService.probeApp(app);
       const previous = app.health?.consecutiveFailures ?? 0;
@@ -192,6 +224,10 @@ export class WatchdogService {
         consecutiveFailures,
         lastError: probe.reachable ? undefined : probe.error,
       };
+      // The container is up, so `running` is the truth regardless of what a
+      // past failed deploy left behind. Whether it *answers* is `health`, which
+      // is a separate question and has its own field.
+      app.status = 'running';
       dbStorage.saveApp(app);
 
       // Answering again clears the "cannot be restarted" mark: whatever was

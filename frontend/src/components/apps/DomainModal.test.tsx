@@ -1,5 +1,7 @@
+import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { ToastProvider } from '../Toast';
 import { DomainModal } from './DomainModal';
 import type { AppRecord } from '../../types';
 
@@ -20,9 +22,13 @@ const app: AppRecord = {
   updatedAt: new Date().toISOString(),
 };
 
+/** These modals report through toasts, which require the provider. */
+const renderWithToast = (ui: React.ReactElement): ReturnType<typeof render> =>
+  render(<ToastProvider>{ui}</ToastProvider>);
+
 describe('DomainModal', () => {
   it('prefills the current domain', () => {
-    render(<DomainModal app={app} onClose={() => {}} onSaved={() => {}} />);
+    renderWithToast(<DomainModal app={app} onClose={() => {}} onSaved={() => {}} />);
     expect(screen.getByText(/Domínio \/ Subdomínio/)).toBeTruthy();
     expect(screen.getByDisplayValue('api.meusite.com.br')).toBeTruthy();
     expect(screen.getByRole('button', { name: /Salvar Domínio/ })).toBeTruthy();

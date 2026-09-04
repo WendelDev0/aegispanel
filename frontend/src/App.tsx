@@ -17,6 +17,7 @@ import { ConfirmProvider } from './components/ConfirmModal.js';
 const DashboardPage = lazy(() => import('./pages/DashboardPage.js').then(m => ({ default: m.DashboardPage })));
 const TemplatesPage = lazy(() => import('./pages/TemplatesPage.js').then(m => ({ default: m.TemplatesPage })));
 const AppsPage = lazy(() => import('./pages/AppsPage.js').then(m => ({ default: m.AppsPage })));
+const AppDetailPage = lazy(() => import('./pages/AppDetailPage.js').then(m => ({ default: m.AppDetailPage })));
 const NodesPage = lazy(() => import('./pages/NodesPage.js').then(m => ({ default: m.NodesPage })));
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage.js').then(m => ({ default: m.AnalyticsPage })));
 const DatabasesPage = lazy(() => import('./pages/DatabasesPage.js').then(m => ({ default: m.DatabasesPage })));
@@ -172,7 +173,16 @@ export function App() {
       case 'templates':
         return <TemplatesPage setActiveTab={setActiveTab} />;
       case 'apps':
-        return <AppsPage onOpenAnalytics={(appId) => setActiveTab('analytics', appId)} />;
+        // `/apps/<id>` opens one application. The route already carried the id
+        // and nothing read it, so no view of an app could be linked to.
+        return routeParam ? (
+          <AppDetailPage appId={routeParam} onBack={() => setActiveTab('apps')} />
+        ) : (
+          <AppsPage
+            onOpenAnalytics={(appId) => setActiveTab('analytics', appId)}
+            onOpenApp={(appId) => setActiveTab('apps', appId)}
+          />
+        );
       case 'nodes':
         return <NodesPage />;
       case 'analytics':

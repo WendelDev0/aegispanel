@@ -6,18 +6,22 @@ interface DeployHistoryModalProps {
   app: AppRecord;
   deployments: DeploymentRecord[];
   rollingBackId: string | null;
+  redeployingId: string | null;
   onClose: () => void;
   onOpenLogs: (dep: DeploymentRecord) => void;
   onRollback: (appId: string, deploymentId: string) => void;
+  onRedeploy: (appId: string, dep: DeploymentRecord) => void;
 }
 
 export const DeployHistoryModal: React.FC<DeployHistoryModalProps> = ({
   app,
   deployments,
   rollingBackId,
+  redeployingId,
   onClose,
   onOpenLogs,
   onRollback,
+  onRedeploy,
 }) => (
   <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
     <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
@@ -70,11 +74,29 @@ export const DeployHistoryModal: React.FC<DeployHistoryModalProps> = ({
                   Ver Logs
                 </button>
 
+                {/*
+                  Rebuild, not reuse. Rollback restarts the image that was
+                  already built — seconds, no build. Redeploy compiles the same
+                  commit again with the configuration as it is today, which is
+                  the only way to apply a changed NEXT_PUBLIC_/VITE_ value: the
+                  pipeline bakes those into the image at build time, so
+                  restarting keeps serving a bundle with the old value.
+                */}
+                <button
+                  onClick={() => onRedeploy(app.id, dep)}
+                  disabled={redeployingId === dep.id}
+                  title="Reconstruir este commit do zero, com a configuração atual"
+                  className="px-3 py-1.5 rounded bg-primary/10 hover:bg-primary/15 text-primary border border-primary/30 text-xs font-semibold transition-colors flex items-center gap-1 active:scale-95 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${redeployingId === dep.id ? 'animate-spin' : ''}`} />
+                  <span>{redeployingId === dep.id ? 'Enviando...' : 'Redeploy'}</span>
+                </button>
+
                 {dep.status === 'success' && (
                   <button
                     onClick={() => onRollback(app.id, dep.id)}
                     disabled={rollingBackId === dep.id}
-                    title="Reverter a aplicação para este commit/versão"
+                    title="Voltar para a imagem já construída deste deploy — sem recompilar"
                     className="px-3 py-1.5 rounded bg-warn/10 hover:bg-warn/15 text-warn border border-warn/30 text-xs font-semibold transition-colors flex items-center gap-1 active:scale-95 disabled:opacity-50"
                   >
                     <Clock className={`w-3.5 h-3.5 ${rollingBackId === dep.id ? 'animate-spin' : ''}`} />

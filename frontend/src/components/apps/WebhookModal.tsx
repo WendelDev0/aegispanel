@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Check, Copy, Webhook, X } from 'lucide-react';
 import { api } from '../../services/api.js';
+import { useToast } from '../Toast.js';
 import type { AppRecord } from '../../types/index.js';
 
 interface WebhookModalProps {
@@ -9,6 +10,7 @@ interface WebhookModalProps {
 }
 
 export const WebhookModal: React.FC<WebhookModalProps> = ({ app, onClose }) => {
+  const toast = useToast();
   const [webhookUrl, setWebhookUrl] = useState('');
   const [webhookLoading, setWebhookLoading] = useState(true);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
@@ -23,7 +25,7 @@ export const WebhookModal: React.FC<WebhookModalProps> = ({ app, onClose }) => {
       } catch (err: any) {
         if (!cancelled) {
           setWebhookUrl('');
-          alert('Não foi possível obter a URL do webhook: ' + (err.response?.data?.error || err.message));
+          toast.error(err.response?.data?.error || err.message, 'Não foi possível obter a URL do webhook');
         }
       } finally {
         if (!cancelled) setWebhookLoading(false);
@@ -44,7 +46,7 @@ export const WebhookModal: React.FC<WebhookModalProps> = ({ app, onClose }) => {
       const res = await api.get(`/apps/${app.id}/webhook`);
       setWebhookUrl(res.data.url);
     } catch (err: any) {
-      alert('Falha ao gerar novo segredo: ' + (err.response?.data?.error || err.message));
+      toast.error(err.response?.data?.error || err.message, 'Falha ao gerar novo segredo');
     } finally {
       setWebhookLoading(false);
     }

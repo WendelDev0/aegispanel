@@ -1,5 +1,7 @@
+import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { ToastProvider } from '../Toast';
 import { WorkflowModal } from './WorkflowModal';
 import type { AppRecord } from '../../types';
 
@@ -21,6 +23,10 @@ const app: AppRecord = {
   updatedAt: new Date().toISOString(),
 };
 
+/** These modals report through toasts, which require the provider. */
+const renderWithToast = (ui: React.ReactElement): ReturnType<typeof render> =>
+  render(<ToastProvider>{ui}</ToastProvider>);
+
 describe('WorkflowModal', () => {
   beforeEach(() => {
     vi.mocked(api.get).mockResolvedValue({
@@ -29,7 +35,7 @@ describe('WorkflowModal', () => {
   });
 
   it('renders generated GitHub Actions yaml', async () => {
-    render(<WorkflowModal app={app} onClose={() => {}} />);
+    renderWithToast(<WorkflowModal app={app} onClose={() => {}} />);
 
     await waitFor(() => {
       expect(api.get).toHaveBeenCalledWith('/apps/app-1/workflow');
