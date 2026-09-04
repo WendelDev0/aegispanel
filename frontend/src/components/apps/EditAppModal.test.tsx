@@ -1,5 +1,7 @@
+import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { ToastProvider } from '../Toast';
 import { EditAppModal } from './EditAppModal';
 import type { AppRecord } from '../../types';
 
@@ -21,6 +23,10 @@ const app: AppRecord = {
   updatedAt: new Date().toISOString(),
 };
 
+/** These modals report through toasts, which require the provider. */
+const renderWithToast = (ui: React.ReactElement): ReturnType<typeof render> =>
+  render(<ToastProvider>{ui}</ToastProvider>);
+
 describe('EditAppModal', () => {
   beforeEach(() => {
     vi.mocked(api.get).mockResolvedValue({
@@ -33,7 +39,7 @@ describe('EditAppModal', () => {
   });
 
   it('shows destination node select', async () => {
-    render(<EditAppModal app={app} onClose={() => {}} onSaved={() => {}} />);
+    renderWithToast(<EditAppModal app={app} onClose={() => {}} onSaved={() => {}} />);
 
     await waitFor(() => {
       expect(api.get).toHaveBeenCalledWith('/nodes');
@@ -44,7 +50,7 @@ describe('EditAppModal', () => {
   });
 
   it('shows a single Porta field and hides the app listen port', async () => {
-    render(<EditAppModal app={app} onClose={() => {}} onSaved={() => {}} />);
+    renderWithToast(<EditAppModal app={app} onClose={() => {}} onSaved={() => {}} />);
 
     await waitFor(() => {
       expect(api.get).toHaveBeenCalledWith('/nodes');
@@ -56,8 +62,7 @@ describe('EditAppModal', () => {
   });
 
   it('warns when host and listen ports were copied as the same value', async () => {
-    render(
-      <EditAppModal
+    renderWithToast(<EditAppModal
         app={{ ...app, port: 4104, internalPort: 4104 }}
         onClose={() => {}}
         onSaved={() => {}}
@@ -73,7 +78,7 @@ describe('EditAppModal', () => {
   });
 
   it('reveals the listen port behind the advanced toggle', async () => {
-    render(<EditAppModal app={app} onClose={() => {}} onSaved={() => {}} />);
+    renderWithToast(<EditAppModal app={app} onClose={() => {}} onSaved={() => {}} />);
 
     await waitFor(() => {
       expect(api.get).toHaveBeenCalledWith('/nodes');

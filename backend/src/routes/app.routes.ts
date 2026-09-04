@@ -416,6 +416,73 @@ appRouter.post('/:id/deploy', requireWrite, validateBody(deployAppBodySchema), a
   }
 });
 
+/**
+ * Rebuilds a past deployment's exact commit.
+ *
+ * Distinct from the two verbs that already existed, and the panel needed all
+ * three:
+ *
+ *   deploy   — builds whatever is at the branch head
+ *   rollback — restarts an image that was already built, in seconds, no build
+ *   redeploy — builds the same commit again, with today's configuration
+ *
+ * The third matters here more than it would elsewhere, because this pipeline
+ * bakes public build-time values (NEXT_PUBLIC_ and VITE_ prefixes) into the
+ * image via injectPublicBuildArgs. Editing one of those and restarting keeps serving a
+ * bundle with the old value; the only way to apply it was to deploy the branch
+ * head, which also publishes any code that landed since. Redeploy applies the
+ * new configuration to the commit that is actually in production.
+ */
+appRouter.post(
+  '/:id/deployments/:deploymentId/redeploy',
+  requireWrite,
+  validateBody(emptyBodySchema),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const app = dbStorage.getAppById(req.params.id);
+      if (!app) {
+        res.status(404).json({ error: 'App não encontrado' });
+        return;
+      }
+
+      const deployment = dbStorage.getDeploymentById(app.id, req.params.deploymentId);
+      if (!deployment) {
+        res.status(404).json({ error: 'Deploy não encontrado no histórico desta aplicação.' });
+        return;
+      }
+
+      // Without a commit there is nothing to pin the rebuild to, and building
+      // the branch head under the label "redeploy" would publish code the user
+      // did not ask for.
+      if (app.sourceType === 'git' && !deployment.commitHash) {
+        res.status(400).json({
+          error:
+            'Este deploy não registrou o commit de origem, então não é possível reconstruí-lo. Use "Deploy" para publicar o topo da branch.',
+        });
+        return;
+      }
+
+      // Answered before the build for the same reason as /deploy: the pipeline
+      // outlives the proxy's request timeout.
+      res.status(202).json({ accepted: true, appId: app.id, commitHash: deployment.commitHash });
+
+      CicdService.executeDeploy(app, {
+        commitHash: deployment.commitHash,
+        commitMessage: deployment.commitMessage
+          ? `[Redeploy] ${deployment.commitMessage}`
+          : `Redeploy do commit #${deployment.commitHash}`,
+        authorName: deployment.authorName,
+        branch: deployment.branch,
+        triggeredBy: 'manual',
+      }).catch((err) => {
+        console.error(`Redeploy error for app ${app.name}:`, err.message);
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
 // 1-click rollback
 appRouter.delete('/:id/deployments/:deploymentId/queue', requireWrite, (req: Request, res: Response): void => {
   // Only a queued deploy. A running one may be mid-swap — previous container

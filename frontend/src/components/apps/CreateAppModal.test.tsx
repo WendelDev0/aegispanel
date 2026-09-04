@@ -1,5 +1,7 @@
+import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { ToastProvider } from '../Toast';
 import { CreateAppModal } from './CreateAppModal';
 
 vi.mock('../../services/api.js', () => ({
@@ -11,6 +13,10 @@ vi.mock('../../services/api.js', () => ({
 
 import { api } from '../../services/api.js';
 
+/** These modals report through toasts, which require the provider. */
+const renderWithToast = (ui: React.ReactElement): ReturnType<typeof render> =>
+  render(<ToastProvider>{ui}</ToastProvider>);
+
 describe('CreateAppModal', () => {
   beforeEach(() => {
     vi.mocked(api.get).mockReset();
@@ -20,7 +26,7 @@ describe('CreateAppModal', () => {
   });
 
   it('shows destination node select label', async () => {
-    render(<CreateAppModal onCreated={() => {}} onCancel={() => {}} />);
+    renderWithToast(<CreateAppModal onCreated={() => {}} onCancel={() => {}} />);
 
     await waitFor(() => {
       expect(api.get).toHaveBeenCalledWith('/nodes');
@@ -30,7 +36,7 @@ describe('CreateAppModal', () => {
   });
 
   it('does not block git with the old image-only remote warning', async () => {
-    render(<CreateAppModal onCreated={() => {}} onCancel={() => {}} />);
+    renderWithToast(<CreateAppModal onCreated={() => {}} onCancel={() => {}} />);
 
     await waitFor(() => {
       expect(api.get).toHaveBeenCalledWith('/nodes');
@@ -40,7 +46,7 @@ describe('CreateAppModal', () => {
   });
 
   it('asks for a single Porta field, not host plus internal', async () => {
-    render(<CreateAppModal onCreated={() => {}} onCancel={() => {}} />);
+    renderWithToast(<CreateAppModal onCreated={() => {}} onCancel={() => {}} />);
 
     await waitFor(() => {
       expect(api.get).toHaveBeenCalledWith('/nodes');

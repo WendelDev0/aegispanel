@@ -13,6 +13,7 @@ import {
   Save,
 } from 'lucide-react';
 import { api } from '../../services/api.js';
+import { useToast } from '../Toast.js';
 import type { AppRecord } from '../../types/index.js';
 
 interface AppFileItem {
@@ -30,6 +31,7 @@ interface AppFilesModalProps {
 }
 
 export const AppFilesModal: React.FC<AppFilesModalProps> = ({ app, onClose }) => {
+  const toast = useToast();
   const [currentSubPath, setCurrentSubPath] = useState('');
   const [appFiles, setAppFiles] = useState<AppFileItem[]>([]);
   const [selectedFileContent, setSelectedFileContent] = useState<{
@@ -53,7 +55,7 @@ export const AppFilesModal: React.FC<AppFilesModalProps> = ({ app, onClose }) =>
       const res = await api.get(`/apps/${app.id}/files`, { params: { subPath } });
       setAppFiles(res.data.items || []);
     } catch (err: any) {
-      alert('Erro ao listar arquivos da aplicação: ' + (err.response?.data?.error || err.message));
+      toast.error(err.response?.data?.error || err.message, 'Erro ao listar arquivos da aplicação');
     } finally {
       setLoadingFiles(false);
     }
@@ -71,7 +73,7 @@ export const AppFilesModal: React.FC<AppFilesModalProps> = ({ app, onClose }) =>
       setSelectedFileContent(res.data);
       setFileContentDraft(res.data.content);
     } catch (err: any) {
-      alert('Erro ao ler arquivo: ' + (err.response?.data?.error || err.message));
+      toast.error(err.response?.data?.error || err.message, 'Erro ao ler arquivo');
     } finally {
       setLoadingFiles(false);
     }
@@ -85,10 +87,10 @@ export const AppFilesModal: React.FC<AppFilesModalProps> = ({ app, onClose }) =>
         filePath: selectedFileContent.path,
         content: fileContentDraft,
       });
-      alert('✅ Arquivo salvo com sucesso!');
+      toast.success('✅ Arquivo salvo com sucesso!');
       setSelectedFileContent((prev) => (prev ? { ...prev, content: fileContentDraft } : null));
     } catch (err: any) {
-      alert('Erro ao salvar arquivo: ' + (err.response?.data?.error || err.message));
+      toast.error(err.response?.data?.error || err.message, 'Erro ao salvar arquivo');
     } finally {
       setSavingFile(false);
     }

@@ -1,5 +1,7 @@
+import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { ToastProvider } from '../Toast';
 import { WebhookModal } from './WebhookModal';
 import type { AppRecord } from '../../types';
 
@@ -21,6 +23,10 @@ const app: AppRecord = {
   updatedAt: new Date().toISOString(),
 };
 
+/** These modals report through toasts, which require the provider. */
+const renderWithToast = (ui: React.ReactElement): ReturnType<typeof render> =>
+  render(<ToastProvider>{ui}</ToastProvider>);
+
 describe('WebhookModal', () => {
   beforeEach(() => {
     vi.mocked(api.get).mockResolvedValue({
@@ -29,7 +35,7 @@ describe('WebhookModal', () => {
   });
 
   it('shows the payload URL from the dedicated endpoint', async () => {
-    render(<WebhookModal app={app} onClose={() => {}} />);
+    renderWithToast(<WebhookModal app={app} onClose={() => {}} />);
 
     await waitFor(() => {
       expect(api.get).toHaveBeenCalledWith('/apps/app-1/webhook');

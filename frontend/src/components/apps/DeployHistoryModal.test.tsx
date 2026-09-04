@@ -41,6 +41,8 @@ describe('DeployHistoryModal', () => {
         onClose={() => {}}
         onOpenLogs={() => {}}
         onRollback={() => {}}
+      redeployingId={null}
+      onRedeploy={() => {}}
       />
     );
     expect(screen.getByText(/Histórico de Deploys: demo/)).toBeTruthy();

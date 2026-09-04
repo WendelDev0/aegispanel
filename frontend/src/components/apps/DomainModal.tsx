@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Globe, X } from 'lucide-react';
 import { api } from '../../services/api.js';
+import { useToast } from '../Toast.js';
 import type { AppRecord } from '../../types/index.js';
 
 interface DomainModalProps {
@@ -10,6 +11,7 @@ interface DomainModalProps {
 }
 
 export const DomainModal: React.FC<DomainModalProps> = ({ app, onClose, onSaved }) => {
+  const toast = useToast();
   const [domainInput, setDomainInput] = useState(app.domain || '');
   const [savingDomain, setSavingDomain] = useState(false);
 
@@ -18,9 +20,9 @@ export const DomainModal: React.FC<DomainModalProps> = ({ app, onClose, onSaved 
       setSavingDomain(true);
       await api.put(`/apps/${app.id}/domain`, { domain: domainInput });
       onSaved();
-      alert('✅ Domínio e certificado SSL configurados com sucesso!');
+      toast.success('✅ Domínio e certificado SSL configurados com sucesso!');
     } catch (err: any) {
-      alert('Erro ao salvar domínio: ' + (err.response?.data?.error || err.message));
+      toast.error(err.response?.data?.error || err.message, 'Erro ao salvar domínio');
     } finally {
       setSavingDomain(false);
     }

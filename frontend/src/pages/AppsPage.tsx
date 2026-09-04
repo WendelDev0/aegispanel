@@ -27,6 +27,7 @@ import {
   Activity,
 } from 'lucide-react';
 import { api } from '../services/api.js';
+import { useToast } from '../components/Toast.js';
 import { socket } from '../services/socket.js';
 import { AppRecord, AppMetricsSnapshot, DeploymentRecord, ServerNode } from '../types/index.js';
 import { DeployHistoryModal } from '../components/apps/DeployHistoryModal.js';
@@ -125,9 +126,12 @@ function appStatusBadge(
 interface AppsPageProps {
   /** Opens the analytics view already focused on this application. */
   onOpenAnalytics?: (appId: string) => void;
+  /** Navigates to /apps/<id>, the addressable view of one application. */
+  onOpenApp?: (appId: string) => void;
 }
 
-export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
+export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }) => {
+  const toast = useToast();
   const [apps, setApps] = useState<AppRecord[]>([]);
   // Only to grey out apps whose node is unreachable; failure is not worth
   // blocking the page over, so an empty list simply disables that signal.
@@ -152,6 +156,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
   const [deployingId, setDeployingId] = useState<string | null>(null);
   const [liveDeployModal, setLiveDeployModal] = useState<LiveDeployState | null>(null);
   const [rollingBackId, setRollingBackId] = useState<string | null>(null);
+  const [redeployingId, setRedeployingId] = useState<string | null>(null);
   const [showAiHelpModal, setShowAiHelpModal] = useState(false);
 
   const fetchApps = async () => {
@@ -245,9 +250,38 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       });
       fetchApps();
     } catch (err: any) {
-      alert('Erro ao disparar deploy: ' + (err.response?.data?.error || err.message));
+      toast.error(err.response?.data?.error || err.message, 'Erro ao disparar deploy');
     } finally {
       setTimeout(() => setDeployingId(null), 1000);
+    }
+  };
+
+  /**
+   * Rebuilds the exact commit of a past deployment.
+   *
+   * Distinct from Rollback, which restarts an image that already exists. The
+   * rebuild is what applies a changed NEXT_PUBLIC_/VITE_ value, because those
+   * are baked into the image at build time.
+   */
+  const handleRedeploy = async (appId: string, dep: DeploymentRecord) => {
+    const alvo = dep.commitHash ? `#${dep.commitHash}` : 'este deploy';
+    if (
+      !confirm(
+        `Reconstruir ${alvo} do zero com a configuração atual? O build leva o mesmo tempo de um deploy normal.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      setRedeployingId(dep.id);
+      await api.post(`/apps/${appId}/deployments/${dep.id}/redeploy`);
+      toast.info('O build começou. Acompanhe pelos logs em tempo real.', 'Redeploy disparado');
+      setSelectedDeploymentsApp(null);
+      fetchApps();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || err.message, 'Erro ao redeployar');
+    } finally {
+      setRedeployingId(null);
     }
   };
 
@@ -256,13 +290,13 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
     try {
       setRollingBackId(deploymentId);
       const res = await api.post(`/apps/${appId}/rollback/${deploymentId}`);
-      alert('✅ ' + res.data.message);
+      toast.success(res.data.message);
       fetchApps();
       if (selectedDeploymentsApp) {
         openDeploymentsHistory(selectedDeploymentsApp);
       }
     } catch (err: any) {
-      alert('Erro ao executar rollback: ' + (err.response?.data?.error || err.message));
+      toast.error(err.response?.data?.error || err.message, 'Erro ao executar rollback');
     } finally {
       setRollingBackId(null);
     }
@@ -274,7 +308,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       const res = await api.get(`/apps/${app.id}/deployments`);
       setDeploymentsList(res.data);
     } catch (err: any) {
-      alert('Erro ao carregar histórico: ' + err.message);
+      toast.error(err.message, 'Erro ao carregar histórico');
     }
   };
 
@@ -297,7 +331,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       await api.post(`/apps/${id}/start`);
       fetchApps();
     } catch (err: any) {
-      alert('Erro ao iniciar app: ' + (err.response?.data?.error || err.message));
+      toast.error(err.response?.data?.error || err.message, 'Erro ao iniciar app');
     }
   };
 
@@ -306,7 +340,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       await api.post(`/apps/${id}/stop`);
       fetchApps();
     } catch (err: any) {
-      alert('Erro ao parar app: ' + (err.response?.data?.error || err.message));
+      toast.error(err.response?.data?.error || err.message, 'Erro ao parar app');
     }
   };
 
@@ -315,7 +349,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       await api.post(`/apps/${id}/restart`);
       fetchApps();
     } catch (err: any) {
-      alert('Erro ao reiniciar app: ' + (err.response?.data?.error || err.message));
+      toast.error(err.response?.data?.error || err.message, 'Erro ao reiniciar app');
     }
   };
 
@@ -325,7 +359,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
       await api.delete(`/apps/${id}`);
       fetchApps();
     } catch (err: any) {
-      alert('Erro ao deletar app: ' + (err.response?.data?.error || err.message));
+      toast.error(err.response?.data?.error || err.message, 'Erro ao deletar app');
     }
   };
 
@@ -433,8 +467,20 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
+                        {/* The name is the way in, so an application has a URL
+                            someone can send. */}
                         <h3 className="font-bold text-white text-lg">
-                          {app.name}
+                          {onOpenApp ? (
+                            <button
+                              onClick={() => onOpenApp(app.id)}
+                              title="Abrir a página desta aplicação"
+                              className="hover:text-primary transition-colors text-left"
+                            >
+                              {app.name}
+                            </button>
+                          ) : (
+                            app.name
+                          )}
                         </h3>
                         {app.sourceType === 'git' ? (
                           <span className="text-[10px] font-mono text-primary bg-primary/20 px-2 py-0.5 rounded-md flex items-center gap-1 border border-primary/30">
@@ -786,6 +832,8 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
           app={selectedDeploymentsApp}
           deployments={deploymentsList}
           rollingBackId={rollingBackId}
+          redeployingId={redeployingId}
+          onRedeploy={handleRedeploy}
           onClose={() => setSelectedDeploymentsApp(null)}
           onOpenLogs={openBuildLogs}
           onRollback={handleRollback}

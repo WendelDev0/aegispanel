@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { RefreshCw, Save, Sliders, X } from 'lucide-react';
 import { api } from '../../services/api.js';
+import { useToast } from '../Toast.js';
 import { EnvEditor } from '../EnvEditor.js';
 import type { AppRecord } from '../../types/index.js';
 
@@ -11,6 +12,7 @@ interface EnvModalProps {
 }
 
 export const EnvModal: React.FC<EnvModalProps> = ({ app, onClose, onSaved }) => {
+  const toast = useToast();
   const [envRecordDraft, setEnvRecordDraft] = useState<Record<string, string>>({});
   const [loadingEnv, setLoadingEnv] = useState(true);
   const [savingEnv, setSavingEnv] = useState(false);
@@ -25,7 +27,7 @@ export const EnvModal: React.FC<EnvModalProps> = ({ app, onClose, onSaved }) => 
         if (cancelled) return;
         setEnvRecordDraft(res.data.env || {});
       } catch (err: any) {
-        alert('Erro ao carregar variáveis: ' + (err.response?.data?.error || err.message));
+        toast.error(err.response?.data?.error || err.message, 'Erro ao carregar variáveis');
       } finally {
         if (!cancelled) setLoadingEnv(false);
       }
@@ -40,9 +42,9 @@ export const EnvModal: React.FC<EnvModalProps> = ({ app, onClose, onSaved }) => 
       setSavingEnv(true);
       await api.put(`/apps/${app.id}/env?redeploy=${redeployOnSave}`, { env: envRecordDraft });
       onSaved();
-      alert('✅ Variáveis de ambiente (.env) atualizadas e aplicadas com sucesso!');
+      toast.success('✅ Variáveis de ambiente (.env) atualizadas e aplicadas com sucesso!');
     } catch (err: any) {
-      alert('Erro ao salvar .env: ' + (err.response?.data?.error || err.message));
+      toast.error(err.response?.data?.error || err.message, 'Erro ao salvar .env');
     } finally {
       setSavingEnv(false);
     }

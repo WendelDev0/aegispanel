@@ -1,5 +1,7 @@
+import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { ToastProvider } from '../Toast';
 import { AppFilesModal } from './AppFilesModal';
 import type { AppRecord } from '../../types';
 
@@ -22,6 +24,10 @@ const app: AppRecord = {
   updatedAt: new Date().toISOString(),
 };
 
+/** These modals report through toasts, which require the provider. */
+const renderWithToast = (ui: React.ReactElement): ReturnType<typeof render> =>
+  render(<ToastProvider>{ui}</ToastProvider>);
+
 describe('AppFilesModal', () => {
   beforeEach(() => {
     vi.mocked(api.get).mockResolvedValue({
@@ -30,7 +36,7 @@ describe('AppFilesModal', () => {
   });
 
   it('lists application files', async () => {
-    render(<AppFilesModal app={app} onClose={() => {}} />);
+    renderWithToast(<AppFilesModal app={app} onClose={() => {}} />);
 
     await waitFor(() => {
       expect(api.get).toHaveBeenCalledWith('/apps/app-1/files', { params: { subPath: '' } });
