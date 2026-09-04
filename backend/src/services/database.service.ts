@@ -5,6 +5,11 @@ import { EncryptionService } from '../utils/crypto.js';
 import { CONFIG } from '../config.js';
 import { containerNameForDatabase } from '../utils/naming.js';
 import { PortService } from './port.service.js';
+import {
+  DEFAULT_DATABASE_LIMITS,
+  normalizeLimits,
+  type ResourceLimits,
+} from '../utils/resource-limits.js';
 
 export interface CreateDbDTO {
   name: string;
@@ -15,9 +20,24 @@ export interface CreateDbDTO {
   dbPassword?: string;
   dbName?: string;
   withGui?: boolean;
+  /** Omit to inherit settings.defaultDatabaseLimits. */
+  limits?: ResourceLimits;
 }
 
 export class DatabaseService {
+  /**
+   * The ceiling this engine runs under. Higher default than an app: engines
+   * size their buffer pools from what they see and fork per connection, so an
+   * app-sized cap turns a healthy Postgres into a restart loop.
+   */
+  static resolveLimits(db: Pick<DatabaseRecord, 'limits'>): ResourceLimits {
+    const fallback = normalizeLimits(
+      dbStorage.getSettings().defaultDatabaseLimits,
+      DEFAULT_DATABASE_LIMITS
+    );
+    return db.limits ? normalizeLimits(db.limits, fallback) : fallback;
+  }
+
   /**
    * Lists databases without their credentials.
    *
@@ -246,6 +266,7 @@ export class DatabaseService {
       ...(launch.cmd ? { cmd: launch.cmd } : {}),
       ports: { [`${launch.internalPort}/tcp`]: db.port },
       bindIp: CONFIG.DB_BIND_IP,
+      limits: this.resolveLimits(db),
       volumes: { [`aegis-db-${db.id}`]: launch.volumeTarget },
       labels: {
         'aegis.type': 'database',
@@ -394,6 +415,7 @@ export class DatabaseService {
         // published port at all; this one exists for local tools and for an
         // SSH tunnel.
         bindIp: CONFIG.DB_BIND_IP,
+        limits: this.resolveLimits({ limits: dto.limits }),
         volumes,
         labels: {
           'aegis.type': 'database',
@@ -427,6 +449,9 @@ export class DatabaseService {
       // file, defeating the encryption entirely. getCredentials() substitutes
       // the decrypted value back in on read.
       connectionString: connString.replace(rawPassword, '***ENCRYPTED***'),
+      // Stored only when set explicitly, so the record follows the global
+      // default as the operator adjusts it.
+      limits: dto.limits ? normalizeLimits(dto.limits, DEFAULT_DATABASE_LIMITS) : undefined,
       withGui: dto.withGui,
       createdAt: new Date().toISOString(),
     };

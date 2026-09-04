@@ -12,6 +12,7 @@ import { CaddyService } from './services/caddy.service.js';
 import { CronService } from './services/cron.service.js';
 import { AnalyticsService } from './services/analytics.service.js';
 import { CicdService } from './services/cicd.service.js';
+import { WatchdogService } from './services/watchdog.service.js';
 import { authenticateToken, AuthUser } from './middleware/auth.js';
 import { dbStorage } from './db/storage.js';
 import { AuditStore } from './utils/audit.store.js';
@@ -284,6 +285,9 @@ server.listen(CONFIG.PORT, () => {
 
   CronService.start();
   AnalyticsService.start();
+  // Independent of the metrics loop, which skips when no client is connected —
+  // precisely when an unattended app is being OOM-killed unnoticed.
+  WatchdogService.start();
 
   const abandoned = CicdService.abandonInFlightDeploys();
   if (abandoned > 0) {
@@ -314,6 +318,7 @@ function shutdown(signal: string) {
   clearInterval(sessionWatchTimer);
   CronService.stop();
   AnalyticsService.stop();
+  WatchdogService.stop();
   io.close();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5000).unref();

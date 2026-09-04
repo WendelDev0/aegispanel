@@ -1,9 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronDown, Lock, Settings2, X } from 'lucide-react';
+import { ChevronDown, Cpu, Lock, MemoryStick, Settings2, X } from 'lucide-react';
 import { api } from '../../services/api.js';
-import type { AppRecord, ServerNode } from '../../types/index.js';
+import type { AppRecord, ResourceLimits, ServerNode } from '../../types/index.js';
 
 const LOCAL_NODE_ID = 'node-local';
+
+/** Mirrors settings.defaultAppLimits, used until the panel answers. */
+const FALLBACK_LIMITS: ResourceLimits = { memoryMb: 512, cpus: 1, pidsLimit: 256 };
+
+const MEMORY_STEPS = [128, 256, 512, 1024, 2048, 4096, 8192];
+const CPU_STEPS = [0.25, 0.5, 1, 2, 4, 8];
+
+function formatMb(mb: number): string {
+  return mb >= 1024 ? `${(mb / 1024).toFixed(mb % 1024 === 0 ? 0 : 1)} GB` : `${mb} MB`;
+}
 
 interface EditAppModalProps {
   app: AppRecord;
@@ -30,6 +40,13 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({ app, onClose, onSave
   const [nodeId, setNodeId] = useState(app.nodeId || LOCAL_NODE_ID);
   const [nodes, setNodes] = useState<ServerNode[]>([]);
 
+  // null means "follow the global default"; the app record only stores a value
+  // when the user set one, so raising the default later still reaches this app.
+  const [customLimits, setCustomLimits] = useState<ResourceLimits | null>(app.limits ?? null);
+  const [defaultLimits, setDefaultLimits] = useState<ResourceLimits>(FALLBACK_LIMITS);
+  const [usage, setUsage] = useState<{ memoryUsedBytes: number; cpuPercent: number } | null>(null);
+  const effectiveLimits = customLimits ?? defaultLimits;
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -47,6 +64,30 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({ app, onClose, onSave
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // Settings is admin-only and metrics can fail while the app is stopped.
+      // Neither is worth blocking the form: the defaults above already render a
+      // usable slider, and the usage line simply stays hidden.
+      try {
+        const res = await api.get('/system/settings');
+        if (!cancelled && res.data?.defaultAppLimits) setDefaultLimits(res.data.defaultAppLimits);
+      } catch {
+        /* keeps FALLBACK_LIMITS */
+      }
+      try {
+        const res = await api.get(`/apps/${app.id}/metrics`);
+        if (!cancelled && res.data?.available) setUsage(res.data);
+      } catch {
+        /* usage line stays hidden */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [app.id]);
+
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -63,6 +104,9 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({ app, onClose, onSave
         branch: editBranch || undefined,
         githubToken: editGithubToken || undefined,
         nodeId,
+        // null clears the per-app ceiling on the server; undefined would read
+        // as "unchanged" and leave the old value in place.
+        limits: customLimits,
       });
 
       onSaved(res.data);
@@ -241,6 +285,102 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({ app, onClose, onSave
               />
             </div>
           )}
+
+          <div className="border-t border-outline-variant pt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
+                Recursos
+              </span>
+              <label className="flex items-center gap-2 text-[11px] text-on-surface-variant cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={customLimits !== null}
+                  onChange={(e) => setCustomLimits(e.target.checked ? { ...defaultLimits } : null)}
+                  className="accent-primary"
+                />
+                Limite próprio
+              </label>
+            </div>
+
+            <p className="text-[10px] text-on-surface-variant/70">
+              {customLimits === null
+                ? `Seguindo o padrão do painel: ${formatMb(defaultLimits.memoryMb)} · ${defaultLimits.cpus} CPU. Mudar o padrão em Configurações passa a valer aqui no próximo deploy.`
+                : 'Sem teto, um app com vazamento derruba a VPS inteira — inclusive o painel, deixando você sem como pará-lo.'}
+            </p>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1.5 text-on-surface">
+                  <MemoryStick className="w-3.5 h-3.5 text-primary" /> Memória
+                </span>
+                <span className="font-mono text-on-surface">
+                  {formatMb(effectiveLimits.memoryMb)}
+                  {usage && (
+                    <span className="text-on-surface-variant/70">
+                      {' '}
+                      · usando {formatMb(Math.round(usage.memoryUsedBytes / 1024 / 1024))}
+                    </span>
+                  )}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={MEMORY_STEPS.length - 1}
+                step={1}
+                disabled={customLimits === null}
+                value={Math.max(
+                  0,
+                  MEMORY_STEPS.findIndex((mb) => mb >= effectiveLimits.memoryMb),
+                )}
+                onChange={(e) =>
+                  setCustomLimits((prev) => ({
+                    ...(prev ?? defaultLimits),
+                    memoryMb: MEMORY_STEPS[Number(e.target.value)],
+                  }))
+                }
+                className="w-full accent-primary disabled:opacity-40"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1.5 text-on-surface">
+                  <Cpu className="w-3.5 h-3.5 text-primary" /> CPU
+                </span>
+                <span className="font-mono text-on-surface">
+                  {effectiveLimits.cpus} {effectiveLimits.cpus === 1 ? 'núcleo' : 'núcleos'}
+                  {usage && (
+                    <span className="text-on-surface-variant/70"> · usando {usage.cpuPercent}%</span>
+                  )}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={CPU_STEPS.length - 1}
+                step={1}
+                disabled={customLimits === null}
+                value={Math.max(
+                  0,
+                  CPU_STEPS.findIndex((c) => c >= effectiveLimits.cpus),
+                )}
+                onChange={(e) =>
+                  setCustomLimits((prev) => ({
+                    ...(prev ?? defaultLimits),
+                    cpus: CPU_STEPS[Number(e.target.value)],
+                  }))
+                }
+                className="w-full accent-primary disabled:opacity-40"
+              />
+            </div>
+
+            {customLimits !== null && (
+              <p className="text-[10px] text-warn">
+                O teto só entra em vigor recriando o contêiner: salvar aqui dispara um deploy.
+              </p>
+            )}
+          </div>
 
           <div className="flex justify-end gap-2 pt-2">
             <button

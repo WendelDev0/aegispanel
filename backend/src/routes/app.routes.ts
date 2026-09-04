@@ -116,12 +116,19 @@ appRouter.post('/', requireWrite, validateBody(createAppBodySchema), async (req:
       autoDeploy,
       deployBranch,
       nodeId,
+      limits: req.body.limits,
     });
 
     // Returned immediately so the client can open the live deploy stream; the
     // pipeline reports its own outcome over the socket and in the deployment
     // history, so a failure here is never silent.
-    res.status(201).json(AppService.toPublic(created));
+    res.status(201).json({
+      ...AppService.toPublic(created),
+      // A warning, never a block: overcommit is normal and usually fine, since
+      // workloads rarely peak together. What is not fine is discovering during
+      // an incident that nobody ever did the arithmetic.
+      overcommit: AppService.overcommitStatus(),
+    });
 
     CicdService.executeDeploy(created, {
       commitMessage: 'Initial Deployment Setup',
@@ -143,9 +150,10 @@ appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (re
       return;
     }
 
-    const { name, port, internalPort, imageName, gitUrl, branch, domain, githubToken, autoDeploy, deployBranch, nodeId } = req.body;
+    const { name, port, internalPort, imageName, gitUrl, branch, domain, githubToken, autoDeploy, deployBranch, nodeId, limits } = req.body;
 
     const previousName = app.name;
+    const previousLimits = JSON.stringify(AppService.resolveLimits(app));
     const previousPort = app.port;
     const previousInternalPort = app.internalPort;
     const previousImage = app.imageName;
@@ -199,6 +207,11 @@ appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (re
     if (nodeId !== undefined) {
       app.nodeId = nodeId || undefined;
     }
+    // null clears the per-app ceiling and hands the app back to the global
+    // default, mirroring how an empty port field restores automatic allocation.
+    if (limits !== undefined) {
+      app.limits = limits === null ? undefined : limits;
+    }
 
     app.updatedAt = new Date().toISOString();
     dbStorage.saveApp(app);
@@ -234,7 +247,10 @@ appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (re
       app.internalPort !== previousInternalPort ||
       app.imageName !== previousImage ||
       app.gitUrl !== previousGitUrl ||
-      app.branch !== previousBranch;
+      app.branch !== previousBranch ||
+      // Memory, NanoCpus and PidsLimit are fixed at create time; the container
+      // has to be recreated for a new ceiling to take effect at all.
+      JSON.stringify(AppService.resolveLimits(app)) !== previousLimits;
 
     if (needsRedeploy) {
       try {

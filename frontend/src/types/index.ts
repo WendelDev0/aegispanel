@@ -80,6 +80,13 @@ export interface DeploymentRecord {
   finishedAt?: string;
 }
 
+/** Container ceiling. Absent on a record means the global default applies. */
+export interface ResourceLimits {
+  memoryMb: number;
+  cpus: number;
+  pidsLimit: number;
+}
+
 export interface AppRecord {
   id: string;
   name: string;
@@ -103,6 +110,8 @@ export interface AppRecord {
   deployBranch?: string;
   /** Target node id. Absent = local panel machine. */
   nodeId?: string;
+  /** Per-app ceiling. Absent = follows settings.defaultAppLimits. */
+  limits?: ResourceLimits;
   status: 'running' | 'stopped' | 'building' | 'error';
   lastDeployAt?: string;
   lastCommitHash?: string;

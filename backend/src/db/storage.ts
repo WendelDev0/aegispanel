@@ -5,6 +5,12 @@ import type { UserRole } from '../middleware/auth.js';
 import { DeployLogStore } from '../utils/deploy-log.store.js';
 import { AppLogStore } from '../utils/app-log.store.js';
 import { acquirePanelLock } from '../utils/panel-lock.js';
+import {
+  DEFAULT_APP_LIMITS,
+  DEFAULT_DATABASE_LIMITS,
+  normalizeLimits,
+  type ResourceLimits,
+} from '../utils/resource-limits.js';
 
 export interface User {
   id: string;
@@ -45,6 +51,8 @@ export interface DatabaseRecord {
   dbName: string;
   status: 'running' | 'stopped' | 'creating' | 'error';
   connectionString: string;
+  /** Absent means settings.defaultDatabaseLimits applies. */
+  limits?: ResourceLimits;
   withGui?: boolean;
   guiContainerId?: string;
   guiPort?: number;
@@ -87,6 +95,12 @@ export interface AppRecord {
    * explicitly is never moved without telling them.
    */
   autoPort?: boolean;
+  /**
+   * Per-app resource ceiling. Absent means settings.defaultAppLimits applies,
+   * which is also what every app created before limits existed gets on its
+   * next deploy.
+   */
+  limits?: ResourceLimits;
   env: Record<string, string>;
   domain?: string;
   webhookSecret?: string;
@@ -256,6 +270,10 @@ export interface PanelSettings {
   autoBackup: boolean;
   backupIntervalHours: number;
   backupTarget?: BackupTarget;
+  /** Applied to any app whose record carries no explicit `limits`. */
+  defaultAppLimits: ResourceLimits;
+  /** Same, for provisioned database engines. */
+  defaultDatabaseLimits: ResourceLimits;
   alertConfig: AlertConfig;
 }
 
@@ -329,6 +347,8 @@ const DEFAULT_DATA: DatabaseSchema = {
     caddyEnabled: true,
     autoBackup: true,
     backupIntervalHours: 24,
+    defaultAppLimits: { ...DEFAULT_APP_LIMITS },
+    defaultDatabaseLimits: { ...DEFAULT_DATABASE_LIMITS },
     alertConfig: {
       enabled: false,
       cpuThresholdPercent: 90,
@@ -409,6 +429,17 @@ export class JsonStorage {
           ...DEFAULT_DATA.settings.alertConfig,
           ...(parsed.settings?.alertConfig || {}),
         },
+        // Same reason as alertConfig: a stored object carrying only memoryMb
+        // would replace the whole default and leave cpus/pidsLimit undefined,
+        // which reaches Docker as "unlimited".
+        defaultAppLimits: normalizeLimits(
+          parsed.settings?.defaultAppLimits,
+          DEFAULT_APP_LIMITS
+        ),
+        defaultDatabaseLimits: normalizeLimits(
+          parsed.settings?.defaultDatabaseLimits,
+          DEFAULT_DATABASE_LIMITS
+        ),
       },
     };
   }
@@ -653,6 +684,14 @@ export class JsonStorage {
           ...DEFAULT_DATA.settings.alertConfig,
           ...(candidate.settings?.alertConfig || {}),
         },
+        defaultAppLimits: normalizeLimits(
+          candidate.settings?.defaultAppLimits,
+          DEFAULT_APP_LIMITS
+        ),
+        defaultDatabaseLimits: normalizeLimits(
+          candidate.settings?.defaultDatabaseLimits,
+          DEFAULT_DATABASE_LIMITS
+        ),
       },
     };
     // Imported state may contain users from a previous installation. Bump the
@@ -1069,7 +1108,17 @@ export class JsonStorage {
   }
 
   updateSettings(settings: Partial<PanelSettings>): PanelSettings {
-    this.data.settings = { ...this.data.settings, ...settings };
+    const merged = { ...this.data.settings, ...settings };
+    // The settings route accepts an open patch, so a client sending only
+    // `{ defaultAppLimits: { memoryMb: 256 } }` would drop cpus and pidsLimit.
+    // Undefined there reaches Docker as "unlimited", which is the one value the
+    // whole feature exists to avoid.
+    merged.defaultAppLimits = normalizeLimits(merged.defaultAppLimits, DEFAULT_APP_LIMITS);
+    merged.defaultDatabaseLimits = normalizeLimits(
+      merged.defaultDatabaseLimits,
+      DEFAULT_DATABASE_LIMITS
+    );
+    this.data.settings = merged;
     this.save();
     return this.data.settings;
   }

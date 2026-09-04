@@ -2,6 +2,7 @@ import Docker from 'dockerode';
 import { PassThrough, Readable } from 'stream';
 import { CONFIG } from '../config.js';
 import { collectBuildContextFiles } from '../utils/build-context.js';
+import { toHostConfigLimits, type ResourceLimits } from '../utils/resource-limits.js';
 
 export interface ExecResult {
   stdout: string;
@@ -284,6 +285,44 @@ class DockerManager {
     return (await this.getManagedContainerType(containerId)) !== null;
   }
 
+  /**
+   * Runtime state the panel acts on, from a single inspect call.
+   *
+   * `restartCount` is what makes an OOM event countable: `oomKilled` stays true
+   * on the record of the last exit, so it alone cannot tell one kill from the
+   * same kill observed ten times. Health is read here too so the watchdog in
+   * phase 3.2 needs no second call.
+   */
+  async inspectRuntime(
+    containerId: string,
+    client?: Docker
+  ): Promise<{
+    running: boolean;
+    oomKilled: boolean;
+    exitCode: number;
+    restartCount: number;
+    health?: 'healthy' | 'unhealthy' | 'starting' | 'none';
+    memoryLimitBytes: number;
+  } | null> {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(containerId)) return null;
+    try {
+      const docker = client || this.docker;
+      const info = await docker.getContainer(containerId).inspect();
+      if (info.Config?.Labels?.['aegis.managed'] !== 'true') return null;
+      const state = info.State as typeof info.State & { Health?: { Status?: string } };
+      return {
+        running: Boolean(state?.Running),
+        oomKilled: Boolean(state?.OOMKilled),
+        exitCode: Number(state?.ExitCode ?? 0),
+        restartCount: Number((info as { RestartCount?: number }).RestartCount ?? 0),
+        health: (state?.Health?.Status as 'healthy' | 'unhealthy' | 'starting') || 'none',
+        memoryLimitBytes: Number(info.HostConfig?.Memory ?? 0),
+      };
+    } catch {
+      return null;
+    }
+  }
+
   async getContainerStats(containerId: string, client?: Docker) {
     const empty = { cpuPercent: 0, memoryUsedBytes: 0, memoryLimitBytes: 0, memoryPercent: 0 };
     try {
@@ -461,6 +500,12 @@ class DockerManager {
      * A firewall that looks correct is not enough.
      */
     bindIp?: string;
+    /**
+     * Resource ceiling. Absent means the container is created without limits,
+     * which is only correct for short-lived helpers (restore drills); every
+     * long-running workload passes one.
+     */
+    limits?: ResourceLimits;
   }): Docker.ContainerCreateOptions {
     const PortBindings: { [key: string]: Array<{ HostIp?: string; HostPort: string }> } = {};
     const ExposedPorts: { [key: string]: object } = {};
@@ -491,6 +536,11 @@ class DockerManager {
         PortBindings,
         Binds,
         RestartPolicy: { Name: options.restartPolicy || 'unless-stopped' },
+        // Applied here rather than at each call site so a remote node gets the
+        // identical HostConfig: this is the only place a managed container is
+        // described, and an unlimited container on a node is just as capable of
+        // taking that machine down as one on the panel's own host.
+        ...(options.limits ? toHostConfigLimits(options.limits) : {}),
         // Joining the panel network at creation lets Caddy reach the container
         // by name immediately, instead of after a second connect call that may
         // land while the first request is already being proxied.
@@ -646,6 +696,8 @@ class DockerManager {
     labels?: { [key: string]: string };
     /** '127.0.0.1' keeps the published port off the internet. See buildCreateOptions. */
     bindIp?: string;
+    /** Memory / CPU / pid ceiling. See buildCreateOptions. */
+    limits?: ResourceLimits;
     /** Remote Docker daemon (SSH). Defaults to the local panel daemon. */
     client?: Docker;
     /**

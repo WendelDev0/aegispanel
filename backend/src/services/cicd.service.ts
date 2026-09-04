@@ -682,6 +682,7 @@ export class CicdService {
           ports,
           bindIp: placement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
           client: placement.useRemoteDocker ? dockerClient : undefined,
+          limits: AppService.resolveLimits(app),
           joinPanelNetwork: placement.joinPanelNetwork,
           labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
         });
@@ -734,6 +735,7 @@ export class CicdService {
           ports,
           bindIp: dockerfilePlacement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
           client: dockerfilePlacement.useRemoteDocker ? dockerClient : undefined,
+          limits: AppService.resolveLimits(app),
           joinPanelNetwork: dockerfilePlacement.joinPanelNetwork,
           labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
         });
@@ -756,6 +758,7 @@ export class CicdService {
           ports,
           bindIp: placement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
           client: placement.useRemoteDocker ? dockerClient : undefined,
+          limits: AppService.resolveLimits(app),
           joinPanelNetwork: placement.joinPanelNetwork,
           labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
         });
@@ -905,6 +908,7 @@ export class CicdService {
       ports,
       bindIp: rollbackPlacement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
       client: rollbackPlacement.useRemoteDocker ? dockerClient : undefined,
+      limits: AppService.resolveLimits(app),
       joinPanelNetwork: rollbackPlacement.joinPanelNetwork,
       labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
     });

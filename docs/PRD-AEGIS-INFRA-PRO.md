@@ -7,6 +7,22 @@
 
 **Como usar:** `[x]` = feito · `[ ]` = falta. Marque aqui quando fechar um item, no mesmo PR.
 
+## Onde paramos
+
+Atualizado em **2026-09-04**. Estado local: `npm run check` verde — typecheck backend + frontend, **136 testes backend** (1 pulado no Windows: symlink), **19 testes frontend**.
+
+| Fase | Estado | Falta |
+|------|--------|-------|
+| 1 — Acesso | ✅ código completo | 1.5: billing do GitHub Actions (ação humana) |
+| 2 — Backup offsite | ✅ código completo | Ensaio de DR numa VPS descartável (ação humana) |
+| 3 — Apps com teto | 🟡 3.1 feito | 3.2 healthcheck · 3.3 teto de builds |
+| 4 — Estado | 🟡 4.2 feito | 4.1 snapshots · 4.3 métrica de save + ADR |
+| 5 — Cluster | ⬜ não começado | 5.1 → 5.2 → 5.4 → 5.3 |
+
+**Próximo na fila:** 3.3 (teto de builds — o disco enche sozinho hoje), depois 3.2.
+
+> ⚠️ Fases 1 e 2 ainda **não estão no `main`**. Abrir o PR desta branch antes de seguir.
+
 ---
 
 ## Problem statement
@@ -167,17 +183,24 @@ Backup que nunca foi restaurado é hipótese, não backup.
 - [x] CPU/RAM por app na UI, poll 8s (#6)
 - [x] Retenção de logs de runtime com teto 80 MB (#6)
 - [x] `RestartPolicy: unless-stopped`
-- [ ] Sem `Memory`, `NanoCpus`, `PidsLimit`, healthcheck
+- [x] `Memory`, `MemorySwap`, `NanoCpus`, `PidsLimit` aplicados (3.1); healthcheck ainda falta (3.2)
 
-### 3.1 — Limites por app
+### 3.1 — Limites por app ✅
 
-- [ ] `AppRecord.limits?: { memoryMb, cpus, pidsLimit }` — default global em `settings.defaultAppLimits` (`512 MB · 1.0 cpu · 256 pids`)
-- [ ] `docker.service.createAndStartContainer` aplica `HostConfig.Memory`, `MemorySwap = Memory` (sem swap), `NanoCpus`, `PidsLimit`
-- [ ] Vale para local e nó remoto (mesmo `HostConfig`)
-- [ ] `oom-kill` detectado via `inspect().State.OOMKilled` → alerta “app matou por memória” + evento de auditoria + sugestão de subir o teto
-- [ ] UI em EditAppModal → “Recursos”: slider RAM/CPU com o consumo atual ao lado (dado do #6)
-- [ ] Bancos: mesmo mecanismo, default maior (`1 GB · 2 cpus`)
-- [ ] Soma dos limites > RAM do host → aviso (não bloqueio) na criação
+- [x] `AppRecord.limits?: { memoryMb, cpus, pidsLimit }` — default global em `settings.defaultAppLimits` (`512 MB · 1.0 cpu · 256 pids`)
+- [x] `docker.service.createAndStartContainer` aplica `HostConfig.Memory`, `MemorySwap = Memory` (sem swap), `NanoCpus`, `PidsLimit`
+- [x] Vale para local e nó remoto (mesmo `HostConfig`) — aplicado em `buildCreateOptions`, o único ponto onde um contêiner gerenciado é descrito
+- [x] `oom-kill` detectado via `inspect().State.OOMKilled` → alerta “app matou por memória” + evento de auditoria + sugestão de subir o teto (`services/watchdog.service.ts`, varredura de 30s)
+- [x] UI em EditAppModal → “Recursos”: slider RAM/CPU com o consumo atual ao lado (dado do #6)
+- [x] Bancos: mesmo mecanismo, default maior (`1 GB · 2 cpus`)
+- [x] Soma dos limites > RAM do host → aviso (não bloqueio) na criação (`AppService.overcommitStatus()`)
+
+Notas de implementação:
+
+- O limite resolvido **nunca é gravado** no registro: `limits` só existe quando o usuário definiu um. Assim, subir o padrão global passa a valer para os apps que nunca escolheram teto, no próximo deploy.
+- Trocar o teto entra em `needsRedeploy`: `Memory`/`NanoCpus`/`PidsLimit` são fixados na criação do contêiner.
+- O watchdog roda **fora** do loop de métricas de 2s, que pula quando ninguém tem o painel aberto — exatamente quando um app sem supervisão está morrendo.
+- Dedup por `RestartCount`: `State.OOMKilled` continua `true` no registro de saída de um contêiner já reiniciado, então alertar pela flag sozinha repetiria a mesma morte para sempre.
 
 ### 3.2 — Healthcheck e restart inteligente
 
@@ -200,9 +223,9 @@ Backup que nunca foi restaurado é hipótese, não backup.
 
 ### Critérios de aceite — Fase 3
 
-- [ ] App com `memoryMb: 128` rodando `stress` é morto pelo kernel; painel mostra “OOM” e o host segue estável
-- [ ] Deploy de imagem que não sobe faz rollback sozinho em ≤ 2 min
-- [ ] `DATA_DIR/builds` nunca passa do teto após 20 deploys seguidos (teste)
+- [ ] App com `memoryMb: 128` rodando `stress` é morto pelo kernel; painel mostra “OOM” e o host segue estável — **código pronto (3.1), falta validar numa VPS de verdade**
+- [ ] Deploy de imagem que não sobe faz rollback sozinho em ≤ 2 min — depende de 3.2
+- [ ] `DATA_DIR/builds` nunca passa do teto após 20 deploys seguidos (teste) — depende de 3.3
 
 ---
 
@@ -228,12 +251,20 @@ Backup que nunca foi restaurado é hipótese, não backup.
 - [ ] Tela em Settings → Estado do Painel: lista de snapshots com “o que mudou” (diff de contagens por coleção)
 - [ ] Snapshot também no boot, **antes** de `load()` aplicar merge de schema novo
 
-### 4.2 — Um writer, provado
+### 4.2 — Um writer, provado ✅
 
-- [ ] Lock file `DATA_DIR/panel_db.lock` (pid + hostname); segundo processo **recusa subir** com mensagem clara
-- [ ] `docker compose` do painel: `deploy.replicas: 1` explícito + comentário do porquê
-- [ ] Teste: abrir segundo `JsonStorage` no mesmo `DATA_DIR` lança erro
-- [ ] Self-update: recreate do backend libera o lock (lock com pid morto é considerado stale após 30s)
+- [x] Lock file `DATA_DIR/panel_db.lock` (pid + hostname); segundo processo **recusa subir** com mensagem clara (`utils/panel-lock.ts`, tomado no construtor do `JsonStorage`)
+- [x] `docker compose` do painel: `deploy.replicas: 1` explícito + comentário do porquê
+- [x] Teste: abrir segundo `JsonStorage` no mesmo `DATA_DIR` lança erro (`test/panel-lock-storage.test.ts`)
+- [x] Self-update: recreate do backend libera o lock (`shutdown()` libera antes de tudo; lock sem heartbeat é considerado stale após 30s)
+- [x] **`install.sh --restore-from` ajustado**: `dr-restore` rodava via `docker compose exec` com o daemon de pé. Agora para o backend, roda o script num contêiner one-off e sobe de volta.
+
+Notas de implementação:
+
+- O risco não é corrupção — toda escrita é atômica. É **perda silenciosa**: cada processo guarda o documento inteiro em memória e reescreve tudo a partir da sua cópia, então quem salvar por último descarta os registros do outro. `dr-restore` e `reset-admin` faziam exatamente isso ao lado do daemon vivo.
+- Dentro de um contêiner, `hostname` é o id do contêiner: depois de um self-update o processo novo não consegue perguntar se o pid antigo está vivo, porque ele pertencia a um contêiner que não existe mais. Por isso o heartbeat existe, e por isso o `shutdown()` libera primeiro.
+- Pid reutilizado depois de um boot é tratado como arquivo órfão — senão o painel ficaria permanentemente sem subir.
+- `reset-admin` agora falha alto se o daemon estiver de pé, dizendo para parar o backend. É melhor que o comportamento anterior, que gravava por cima e deixava o processo servindo estado velho.
 
 ### 4.3 — Gatilho para SQLite (não agora)
 
@@ -251,7 +282,7 @@ Quando disparar: `better-sqlite3`, mesmo `JsonStorage` como fachada, migração 
 ### Critérios de aceite — Fase 4
 
 - [ ] Importar um estado quebrado e voltar ao anterior em 1 clique
-- [ ] Segundo backend no mesmo volume não sobe
+- [x] Segundo backend no mesmo volume não sobe
 - [ ] Dashboard mostra tamanho do JSON, p95 de save e distância até o gatilho
 
 ---

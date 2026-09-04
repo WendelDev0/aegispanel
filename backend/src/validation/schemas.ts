@@ -6,6 +6,20 @@ const username = z
 
 const password = z.string().min(12).max(512);
 
+/**
+ * Resource ceiling for a container.
+ *
+ * Bounds are stated here as well as in normalizeLimits so a typo comes back as
+ * a 400 naming the field, instead of being silently clamped to something the
+ * user did not ask for. normalizeLimits stays the last line of defence for
+ * records written by older versions.
+ */
+const resourceLimits = z.object({
+  memoryMb: z.number().int().min(64).max(1024 * 1024),
+  cpus: z.number().min(0.1).max(256),
+  pidsLimit: z.number().int().min(16).max(32_768),
+});
+
 export const loginBodySchema = z
   .object({
     username: z.string().min(1),
@@ -63,6 +77,7 @@ export const createAppBodySchema = z.object({
   autoDeploy: z.boolean().optional(),
   deployBranch: z.string().optional(),
   nodeId: z.string().optional(),
+  limits: resourceLimits.optional(),
 });
 
 export const updateAppBodySchema = z.object({
@@ -77,6 +92,8 @@ export const updateAppBodySchema = z.object({
   autoDeploy: z.boolean().optional(),
   deployBranch: z.string().optional(),
   nodeId: z.string().optional().nullable(),
+  /** null clears the per-app ceiling and restores the global default. */
+  limits: resourceLimits.optional().nullable(),
 });
 
 export const inspectRepoBodySchema = z.object({
@@ -110,6 +127,7 @@ export const createDatabaseBodySchema = z.object({
   dbPassword: z.string().optional(),
   dbName: z.string().optional(),
   withGui: z.boolean().optional(),
+  limits: resourceLimits.optional(),
 });
 
 export const createCronBodySchema = z.object({

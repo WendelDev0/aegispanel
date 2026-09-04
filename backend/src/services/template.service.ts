@@ -463,6 +463,7 @@ export class TemplateService {
     try {
       const newContainerId = await dockerService.createAndStartContainer({
         name: `aegis-app-${app.name}`,
+        limits: AppService.resolveLimits(app),
         image: targetImage,
         env: envList,
         ports,
