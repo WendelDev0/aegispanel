@@ -15,6 +15,7 @@ import { CicdService } from './services/cicd.service.js';
 import { authenticateToken, AuthUser } from './middleware/auth.js';
 import { dbStorage } from './db/storage.js';
 import { AuditStore } from './utils/audit.store.js';
+import { releasePanelLock } from './utils/panel-lock.js';
 
 // Routers
 import { authRouter } from './routes/auth.routes.js';
@@ -304,6 +305,10 @@ server.listen(CONFIG.PORT, () => {
 
 function shutdown(signal: string) {
   console.log(`\n${signal} recebido, encerrando...`);
+  // Released first: a self-update recreates this container, and the replacement
+  // starts before the heartbeat of a hard-killed owner would look abandoned.
+  // Without this the new backend refuses to boot for up to 30s.
+  releasePanelLock();
   clearInterval(metricsTimer);
   clearInterval(storageTimer);
   clearInterval(sessionWatchTimer);

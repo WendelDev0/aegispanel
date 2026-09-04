@@ -224,7 +224,18 @@ if [ -n "$RESTORE_FROM" ]; then
         echo "❌ Backend não ficou pronto a tempo. Veja: docker compose logs backend"
         exit 1
     fi
-    docker compose exec -T backend node dist/scripts/dr-restore.js --from "$RESTORE_FROM"
+    # The daemon has to be down while the restore writes panel_db.json. Both
+    # processes hold the whole document in memory and rewrite it wholesale, so
+    # a restore next to a running backend is overwritten by the first metrics
+    # tick that saves. The writer lock in DATA_DIR now refuses that outright,
+    # which is why this stops the service instead of using `exec`.
+    echo "   Parando o backend durante o restore..."
+    docker compose stop backend
+    # --name is explicit because the service pins container_name; without it
+    # compose refuses to create the one-off container.
+    docker compose run --rm --name aegis-dr-restore -T backend \
+        node dist/scripts/dr-restore.js --from "$RESTORE_FROM"
+    docker compose start backend
     echo "   ✅ Restore remoto concluído."
 fi
 

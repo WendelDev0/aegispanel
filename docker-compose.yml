@@ -27,6 +27,14 @@ services:
       dockerfile: Dockerfile
     container_name: aegis-backend
     restart: unless-stopped
+    # Exactly one. The panel keeps its whole state in a single JSON document
+    # held in memory and rewritten on every mutation, so a second replica does
+    # not corrupt the file — it silently overwrites the first one's records on
+    # its next save. The backend refuses to boot when the lock in DATA_DIR is
+    # already held (utils/panel-lock.ts); this makes the intent explicit so a
+    # `--scale backend=2` is a config error, not a support ticket.
+    deploy:
+      replicas: 1
     # No published ports on purpose. The API is reached through the frontend's
     # nginx proxy on the internal network; publishing 4000 exposed the API and
     # the terminal WebSocket directly to the internet.

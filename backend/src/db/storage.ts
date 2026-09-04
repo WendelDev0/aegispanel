@@ -4,6 +4,7 @@ import { CONFIG } from '../config.js';
 import type { UserRole } from '../middleware/auth.js';
 import { DeployLogStore } from '../utils/deploy-log.store.js';
 import { AppLogStore } from '../utils/app-log.store.js';
+import { acquirePanelLock } from '../utils/panel-lock.js';
 
 export interface User {
   id: string;
@@ -337,7 +338,7 @@ const DEFAULT_DATA: DatabaseSchema = {
   }
 };
 
-class JsonStorage {
+export class JsonStorage {
   private filePath: string;
   private data: DatabaseSchema;
 
@@ -348,6 +349,13 @@ class JsonStorage {
     } else if (!CONFIG.IS_WINDOWS) {
       try { fs.chmodSync(dataDir, 0o700); } catch { /* best effort */ }
     }
+
+    // Claimed before the document is read. A second writer over the same
+    // DATA_DIR does not corrupt the file — every save is atomic — it keeps its
+    // own copy in memory and rewrites the whole document from it, so whichever
+    // process saves last silently discards the other's records.
+    acquirePanelLock(dataDir);
+
     this.filePath = path.join(dataDir, 'panel_db.json');
     this.data = this.load();
   }
