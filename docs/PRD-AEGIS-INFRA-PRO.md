@@ -9,17 +9,17 @@
 
 ## Onde paramos
 
-Atualizado em **2026-09-04**. Estado local: `npm run check` verde — typecheck backend + frontend, **165 testes backend** (1 pulado no Windows: symlink), **19 testes frontend**.
+Atualizado em **2026-09-04**. Estado local: `npm run check` verde — typecheck backend + frontend, **176 testes backend** (1 pulado no Windows: symlink), **19 testes frontend**.
 
 | Fase | Estado | Falta |
 |------|--------|-------|
 | 1 — Acesso | ✅ código completo | 1.5: billing do GitHub Actions (ação humana) |
 | 2 — Backup offsite | ✅ código completo | Ensaio de DR numa VPS descartável (ação humana) |
 | 3 — Apps com teto | ✅ completa | — |
-| 4 — Estado | 🟡 4.2 feito | 4.1 snapshots · 4.3 métrica de save + ADR |
+| 4 — Estado | ✅ completa | — |
 | 5 — Cluster | ⬜ não começado | 5.1 → 5.2 → 5.4 → 5.3 |
 
-**Próximo na fila:** 4.1 (snapshots de estado), depois 4.3 e a fase 5.
+**Próximo na fila:** fase 5 — 5.1 fila de deploy → 5.2 health do nó → 5.4 Caddy ciente → 5.3 clone no nó.
 
 > ⚠️ Fases 1 e 2 ainda **não estão no `main`**. Abrir o PR desta branch antes de seguir.
 
@@ -264,15 +264,15 @@ Notas de implementação:
 - [x] JSON corrompido → quarentena `.corrupt-<ts>` e abort (nunca reseta para default)
 - [x] `load()` faz merge de coleções novas em `DEFAULT_DATA`
 - [x] Monitor de crescimento do arquivo
-- [ ] Sem histórico: um save errado (ex.: import de estado ruim) não tem volta
+- [x] Histórico versionado: `state-history` + rollback em 1 clique (4.1)
 
 ### 4.1 — Snapshots versionados
 
-- [ ] `DATA_DIR/state-history/panel_db.<ts>.json` gravado **antes** de mutações grandes: `importState`, `restorePanelState`, `removeApp`, `removeDatabase`, `saveSettings`, migração de schema
-- [ ] Retenção: últimos 20 + 1 por dia nos últimos 7 dias; hardlink/copy, nunca move
-- [ ] `POST /api/system/state/rollback/:ts` (admin, 2FA) — restaura snapshot, reinicia serviços dependentes (Caddy sync)
-- [ ] Tela em Settings → Estado do Painel: lista de snapshots com “o que mudou” (diff de contagens por coleção)
-- [ ] Snapshot também no boot, **antes** de `load()` aplicar merge de schema novo
+- [x] `DATA_DIR/state-history/panel_db.<ts>.<motivo>.json` gravado **antes** de `importState`, `removeApp`, `removeDatabase` e no boot (`utils/state-history.ts`)
+- [x] Retenção: últimos 20 + 1 por dia nos últimos 7 dias; cópia, nunca hardlink nem move
+- [x] `POST /api/system/state/rollback/:name` (admin + **2FA**) — restaura o snapshot e ressincroniza o Caddy
+- [x] Tela em Settings → Estado do Painel: lista de snapshots com o diff de contagens por coleção
+- [x] Snapshot também no boot, **antes** de `load()` aplicar o merge de schema novo
 
 ### 4.2 — Um writer, provado ✅
 
@@ -289,7 +289,7 @@ Notas de implementação:
 - Pid reutilizado depois de um boot é tratado como arquivo órfão — senão o painel ficaria permanentemente sem subir.
 - `reset-admin` agora falha alto se o daemon estiver de pé, dizendo para parar o backend. É melhor que o comportamento anterior, que gravava por cima e deixava o processo servindo estado velho.
 
-### 4.3 — Gatilho para SQLite (não agora)
+### 4.3 — Gatilho para SQLite (não agora) ✅
 
 Migrar **só** quando **um** destes for verdade em produção:
 
@@ -299,14 +299,14 @@ Migrar **só** quando **um** destes for verdade em produção:
 
 Quando disparar: `better-sqlite3`, mesmo `JsonStorage` como fachada, migração 1:1 por coleção, JSON vira export. **Nunca** cluster/Postgres para o estado do painel.
 
-- [ ] Métrica `save()` duration no `storage-health` para observar o gatilho
-- [ ] Documento `docs/ADR-0001-panel-state-json.md` registrando a decisão e o gatilho
+- [x] Métrica `save()` p95 no `storage-health`, com o valor atual ao lado do limite (`migrationTrigger`)
+- [x] Documento [`docs/ADR-0001-panel-state-json.md`](./ADR-0001-panel-state-json.md) registrando a decisão e o gatilho
 
 ### Critérios de aceite — Fase 4
 
-- [ ] Importar um estado quebrado e voltar ao anterior em 1 clique
+- [x] Importar um estado quebrado e voltar ao anterior em 1 clique
 - [x] Segundo backend no mesmo volume não sobe
-- [ ] Dashboard mostra tamanho do JSON, p95 de save e distância até o gatilho
+- [x] `storage-health` mostra tamanho do JSON, p95 de save e distância até o gatilho
 
 ---
 

@@ -27,6 +27,7 @@ import { socket } from '../services/socket.js';
 import { User } from '../types/index.js';
 import { SecuritySection } from '../components/settings/SecuritySection.js';
 import { AuditSection } from '../components/settings/AuditSection.js';
+import { StateHistorySection } from '../components/settings/StateHistorySection.js';
 
 /** Placeholder the API sends in place of a stored secret. */
 const SECRET_MASK = '••••••••';
@@ -1204,6 +1205,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
         </div>
       )}
 
+      {isAdmin && <StateHistorySection />}
       {isAdmin && <AuditSection />}
     </div>
   );

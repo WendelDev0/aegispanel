@@ -6,7 +6,7 @@ import { AlertService } from '../services/alert.service.js';
 import { BackupService } from '../services/backup.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { dbStorage, PanelSettings, AlertConfig } from '../db/storage.js';
-import { authMiddleware, requireAdmin, AuthRequest, clientIp } from '../middleware/auth.js';
+import { authMiddleware, requireAdmin, requireAdmin2fa, AuthRequest, clientIp } from '../middleware/auth.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { PanelService } from '../services/panel.service.js';
 import { AuditStore } from '../utils/audit.store.js';
@@ -124,6 +124,31 @@ function encryptAlertSecrets(patch: Partial<PanelSettings>): Partial<PanelSettin
   return { ...next, alertConfig: alert };
 }
 
+/**
+ * Distance to the thresholds that would justify moving panel state to SQLite.
+ *
+ * Recorded in docs/ADR-0001-panel-state-json.md. Reported as numbers so the
+ * decision is made on evidence instead of on someone's impression that the
+ * panel feels slow — and so that "we are at 40% of the trigger" is a visible
+ * fact rather than a thing nobody measured until it hurt.
+ */
+function migrationTriggerStatus() {
+  const health = dbStorage.getStorageHealth();
+  const records = health.recordCounts;
+  const workloads = (records.apps || 0) + (records.databases || 0);
+  const saveP95Ms = dbStorage.saveP95Ms();
+
+  const limits = { fileSizeMB: 8, workloads: 150, saveP95Ms: 200 };
+  return {
+    limits,
+    current: { fileSizeMB: health.fileSizeMB, workloads, saveP95Ms },
+    reached:
+      health.fileSizeMB >= limits.fileSizeMB ||
+      workloads >= limits.workloads ||
+      (saveP95Ms > 0 && saveP95Ms >= limits.saveP95Ms),
+  };
+}
+
 systemRouter.get('/stats', async (req: Request, res: Response) => {
   try {
     res.json(await SystemService.getRealtimeStats());
@@ -141,8 +166,104 @@ systemRouter.get('/storage-health', requireAdmin, async (req: Request, res: Resp
     directories: BuildsCleanupService.directoryUsage(),
     buildsCapMb: dbStorage.getSettings().buildsDiskCapMb,
     hostDisk: await primaryDiskUsage(),
+    // The migration trigger from ADR-0001, reported rather than guessed at.
+    migrationTrigger: migrationTriggerStatus(),
   });
 });
+
+/**
+ * Point-in-time copies of panel_db.json taken before destructive changes.
+ *
+ * Admin-only like every other view of panel state: the delta exposes how many
+ * users, apps and databases exist.
+ */
+systemRouter.get('/state/snapshots', requireAdmin, (req: Request, res: Response) => {
+  res.json(
+    dbStorage.listSnapshots().map((snapshot) => ({
+      name: snapshot.name,
+      reason: snapshot.reason,
+      takenAt: new Date(snapshot.takenAtMs).toISOString(),
+      sizeBytes: snapshot.sizeBytes,
+    }))
+  );
+});
+
+/** What restoring a snapshot would change, per collection. */
+systemRouter.get('/state/snapshots/:name/delta', requireAdmin, (req: Request, res: Response): void => {
+  try {
+    res.json(dbStorage.snapshotDelta(req.params.name));
+  } catch (err: any) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+/**
+ * Restores a snapshot. Behind 2FA, not just the admin role.
+ *
+ * This replaces every user, application and database record in one call, which
+ * is the same blast radius as the host terminal. A stolen session that only had
+ * to be an admin token could roll the panel back to a state containing an
+ * account the attacker controls.
+ */
+systemRouter.post(
+  '/state/rollback/:name',
+  requireAdmin,
+  requireAdmin2fa,
+  validateBody(emptyBodySchema),
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const restored = dbStorage.restoreSnapshot(req.params.name);
+
+      AuditStore.append({
+        actor: req.user
+          ? { id: req.user.id, username: req.user.username, role: req.user.role }
+          : undefined,
+        sid: req.user?.sid,
+        ip: clientIp(req),
+        action: 'system.state.rollback',
+        outcome: 'success',
+        target: { type: 'snapshot', name: req.params.name },
+      });
+
+      dbStorage.addActivity({
+        type: 'system',
+        title: 'Estado do painel restaurado',
+        description: `Snapshot ${req.params.name} restaurado por ${req.user?.username || 'admin'}.`,
+        status: 'warning',
+        metadata: { snapshot: req.params.name },
+      });
+
+      // Domains and applications may differ from what Caddy is serving; a
+      // rollback that left the proxy pointing at the previous set would route
+      // traffic to containers the restored state does not know about.
+      await CaddyService.syncCaddyfile().catch((err: any) =>
+        console.warn('Caddy sync após rollback de estado:', err?.message)
+      );
+
+      res.json({
+        success: true,
+        message: 'Estado restaurado. Todas as sessões foram revogadas; faça login novamente.',
+        counts: {
+          users: restored.users.length,
+          apps: restored.apps.length,
+          databases: restored.databases.length,
+        },
+      });
+    } catch (err: any) {
+      AuditStore.append({
+        actor: req.user
+          ? { id: req.user.id, username: req.user.username, role: req.user.role }
+          : undefined,
+        ip: clientIp(req),
+        action: 'system.state.rollback',
+        outcome: 'failure',
+        target: { type: 'snapshot', name: req.params.name },
+        meta: { error: err.message },
+      });
+      res.status(400).json({ error: err.message });
+    }
+  }
+);
 
 systemRouter.get('/history', (req: Request, res: Response) => {
   const range = (req.query.range as string) || 'realtime';

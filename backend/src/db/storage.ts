@@ -12,6 +12,12 @@ import {
   type ResourceLimits,
 } from '../utils/resource-limits.js';
 import type { AppHealth, HealthcheckConfig } from '../utils/health-probe.js';
+import {
+  StateHistory,
+  collectionDelta,
+  type SnapshotFile,
+  type SnapshotReason,
+} from '../utils/state-history.js';
 
 export interface User {
   id: string;
@@ -430,6 +436,12 @@ export class JsonStorage {
       );
     }
 
+    // Taken before the merge below, not after: a new panel version adds
+    // collections and normalises settings, and the first save rewrites the file
+    // in the new shape. Without a copy of the pre-migration document, a
+    // downgrade or a bad migration has nothing to go back to.
+    StateHistory.capture(this.filePath, this.historyDir(), 'boot');
+
     // Merge one level into the defaults so a file written by an older version
     // gains newly added collections, and nested settings gain new fields
     // instead of being replaced wholesale by the stored object.
@@ -476,7 +488,85 @@ export class JsonStorage {
    * simple in-process guard, since deploys and the metrics loop both mutate
    * state from different async paths.
    */
+  /** Directory holding point-in-time copies of panel_db.json. */
+  historyDir(): string {
+    return path.join(CONFIG.DATA_DIR, 'state-history');
+  }
+
+  /**
+   * Copies the current state file aside before a destructive change.
+   *
+   * The atomic write already stops a half-written file, and a corrupt one is
+   * quarantined. Neither helps against the failure that actually happens: a
+   * *valid* save that is wrong — an import from the wrong server, a delete of
+   * the wrong app. The document is rewritten whole on every mutation, so
+   * without this the previous contents are gone from disk in seconds.
+   *
+   * Never throws. Refusing a mutation because its safety net could not be
+   * written would be a worse outcome than doing it without one.
+   */
+  snapshot(reason: SnapshotReason): SnapshotFile | null {
+    const taken = StateHistory.capture(this.filePath, this.historyDir(), reason);
+    if (taken) StateHistory.prune(this.historyDir());
+    return taken;
+  }
+
+  listSnapshots(): SnapshotFile[] {
+    return StateHistory.list(this.historyDir());
+  }
+
+  /**
+   * What a snapshot would change if restored, counted per collection.
+   *
+   * Counts rather than a field-level diff: the question in front of a rollback
+   * button is "does this still have my 12 apps".
+   */
+  snapshotDelta(name: string): Record<string, { before: number; after: number; delta: number }> {
+    const stored = StateHistory.read(this.historyDir(), name) as Record<string, unknown>;
+    return collectionDelta(this.data as unknown as Record<string, unknown>, stored);
+  }
+
+  /**
+   * Restores a snapshot through importState, so it goes through the same
+   * validation and the same in-memory instance as any other write — and takes
+   * its own snapshot first, because rolling back to the wrong one has to be
+   * undoable too.
+   */
+  restoreSnapshot(name: string): DatabaseSchema {
+    const stored = StateHistory.read(this.historyDir(), name) as Partial<DatabaseSchema>;
+    const problems = this.validateState(stored);
+    if (problems.length) {
+      throw new Error(`Snapshot inválido, restauração recusada: ${problems.join(' ')}`);
+    }
+    return this.importState(stored);
+  }
+
+  /**
+   * Recent save durations, for the SQLite migration trigger.
+   *
+   * The decision to keep panel state in one JSON document is right for one
+   * process, and wrong past some size — the whole document is serialised and
+   * fsynced on every mutation, so cost grows with total state, not with the
+   * change. Measuring it means the migration is triggered by evidence rather
+   * than by someone's impression that the panel "feels slow".
+   */
+  private saveDurations: number[] = [];
+
+  private recordSaveDuration(ms: number): void {
+    this.saveDurations.push(ms);
+    if (this.saveDurations.length > 200) this.saveDurations.shift();
+  }
+
+  /** p95 of the recent saves, in ms. Zero until enough samples exist. */
+  saveP95Ms(): number {
+    if (this.saveDurations.length < 5) return 0;
+    const sorted = [...this.saveDurations].sort((a, b) => a - b);
+    const index = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95));
+    return Math.round(sorted[index] * 100) / 100;
+  }
+
   private save(data?: DatabaseSchema) {
+    const startedAt = Date.now();
     const toWrite = data || this.data;
     const payload = JSON.stringify(toWrite, null, 2);
     const tmpPath = path.join(
@@ -496,6 +586,7 @@ export class JsonStorage {
       if (!CONFIG.IS_WINDOWS) {
         try { fs.chmodSync(this.filePath, 0o600); } catch { /* best effort */ }
       }
+      this.recordSaveDuration(Date.now() - startedAt);
     } catch (err) {
       try {
         if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
@@ -689,6 +780,7 @@ export class JsonStorage {
    * state until the next restart.
    */
   importState(candidate: Partial<DatabaseSchema>): DatabaseSchema {
+    this.snapshot('import-state');
     this.data = {
       ...DEFAULT_DATA,
       ...candidate,
@@ -744,6 +836,7 @@ export class JsonStorage {
   }
 
   removeDatabase(id: string): boolean {
+    this.snapshot('remove-database');
     const initialLen = this.data.databases.length;
     this.data.databases = this.data.databases.filter(d => d.id !== id);
     if (this.data.databases.length !== initialLen) {
@@ -774,6 +867,7 @@ export class JsonStorage {
   }
 
   removeApp(id: string): boolean {
+    this.snapshot('remove-app');
     const initialLen = this.data.apps.length;
     this.data.apps = this.data.apps.filter(a => a.id !== id);
     if (this.data.apps.length !== initialLen) {
