@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import type Docker from 'dockerode';
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
@@ -16,6 +17,15 @@ import { CONFIG } from '../config.js';
 import { assertSafeGitUrl, SafeGitTarget } from '../utils/url-security.js';
 import { injectPublicBuildArgs, publicBuildArgMap, publicBuildArgs } from '../utils/build-env.js';
 import { remoteWorkloadPlacement } from '../utils/app-upstream.js';
+import { redactSecrets as redactSecretText } from '../utils/redact.js';
+import { BuildsCleanupService } from './builds-cleanup.service.js';
+import { HealthService } from './health.service.js';
+import { DeployQueueService } from './deploy-queue.service.js';
+import {
+  gitBuildContext,
+  planBuildContext,
+  shouldFallBackToPanelClone,
+} from '../utils/remote-build.js';
 
 const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 const BUILD_TIMEOUT_MS = 30 * 60 * 1000;
@@ -144,10 +154,7 @@ export class CicdService {
 
   /** Removes embedded credentials from anything that may reach a log or the UI. */
   static redactSecrets(text: string): string {
-    return text
-      .replace(/https:\/\/[^@\s/]+@/g, 'https://***@')
-      .replace(/\b(gh[pousr]_[A-Za-z0-9]{16,})\b/g, '***')
-      .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, '***');
+    return redactSecretText(text);
   }
 
   private static redactAppSecrets(text: string, app: AppRecord): string {
@@ -291,12 +298,67 @@ export class CicdService {
       triggeredBy: 'webhook' | 'manual' | 'github_action';
     }
   ): Promise<DeploymentRecord> {
+    /**
+     * Queued, not rejected.
+     *
+     * Throwing "já existe um deploy em execução" is right for a button click
+     * and wrong for a webhook: a push arriving during a build was dropped, so
+     * the panel silently kept serving an older commit than the branch head with
+     * nothing in the UI saying so. The queue also stops two builds from
+     * fighting over the same Docker daemon, and two deploys of one app from
+     * racing over its container name and host port.
+     */
+    const queued = this.createQueuedDeployment(app, options);
+    return DeployQueueService.enqueue(app, options, queued);
+  }
+
+  /**
+   * Records the deploy as `queued` before it can start.
+   *
+   * The row has to exist while waiting: the UI opens the live stream as soon as
+   * the request returns, and a deploy with no record until it starts looks to
+   * the operator like the click did nothing.
+   */
+  private static createQueuedDeployment(
+    app: AppRecord,
+    options: { commitHash?: string; commitMessage?: string; authorName?: string; branch?: string; triggeredBy: 'webhook' | 'manual' | 'github_action' }
+  ): DeploymentRecord {
+    const deployment: DeploymentRecord = {
+      id: `dep-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
+      appId: app.id,
+      appName: app.name,
+      commitHash: options.commitHash,
+      commitMessage: String(options.commitMessage || 'Manual CI/CD Trigger from AegisPanel').slice(0, 500),
+      authorName: String(options.authorName || 'Developer').slice(0, 160),
+      branch: safeBranchName(options.branch || app.branch),
+      status: 'queued',
+      buildLogs: `[${new Date().toISOString()}] ⏳ Deploy na fila...\n`,
+      durationSeconds: 0,
+      triggeredBy: options.triggeredBy,
+      createdAt: new Date().toISOString(),
+    };
+    dbStorage.saveDeployment(deployment);
+    return deployment;
+  }
+
+  /** Runs one queued deploy. Called only by the queue. */
+  static async runQueuedDeploy(
+    app: AppRecord,
+    options: {
+      commitHash?: string;
+      commitMessage?: string;
+      authorName?: string;
+      branch?: string;
+      triggeredBy: 'webhook' | 'manual' | 'github_action';
+    },
+    deploymentId: string
+  ): Promise<DeploymentRecord> {
     if (activeDeployments.has(app.id)) {
       throw new Error(`Já existe um deploy em execução para a aplicação "${app.name}".`);
     }
     activeDeployments.add(app.id);
     try {
-      return await this.executeDeployUnlocked(app, options);
+      return await this.executeDeployUnlocked(app, options, deploymentId);
     } finally {
       activeDeployments.delete(app.id);
     }
@@ -334,9 +396,13 @@ export class CicdService {
       authorName?: string;
       branch?: string;
       triggeredBy: 'webhook' | 'manual' | 'github_action';
-    }
+    },
+    queuedDeploymentId?: string
   ): Promise<DeploymentRecord> {
-    const deploymentId = `dep-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+    // Reuses the row created while queued, so the id in the live stream the UI
+    // already subscribed to stays the same one that ends up in the history.
+    const deploymentId =
+      queuedDeploymentId || `dep-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
     const startTime = Date.now();
     const branch = safeBranchName(options.branch || app.branch);
 
@@ -480,46 +546,91 @@ export class CicdService {
       const ports: { [intPort: string]: number } = { [`${app.internalPort || 3000}/tcp`]: app.port };
 
       if (app.sourceType === 'git' && app.gitUrl) {
-        const buildsDir = path.join(CONFIG.DATA_DIR, 'builds', app.id);
-        fs.mkdirSync(buildsDir, { recursive: true });
+        /**
+         * Let the node's own daemon fetch the repository when it can.
+         *
+         * The panel used to clone every remote deploy into its own disk, tar
+         * the result and stream it over SSH — paying for the same bytes twice
+         * and keeping a working copy for a machine that never needed it here.
+         */
+        const daemon = await this.tryDaemonGitBuild(app, {
+          isRemote,
+          branch,
+          requestedCommitHash,
+          dockerClient,
+          buildImageTag,
+          versionedTag,
+          log,
+        });
+        logs += daemon.logs;
+        const daemonBuilt = daemon.built;
+        if (daemon.commitHash) commitHash = daemon.commitHash;
 
-        const token = AppService.getGithubToken(app);
-        const safeGitTarget = await assertSafeGitUrl(app.gitUrl);
-        const cloneUrl = this.buildCloneUrl(app.gitUrl);
-        const gitEnv = this.gitAuthEnv(app.gitUrl, token);
-        const gitNetworkArgs = this.gitNetworkArgs(safeGitTarget);
+        /**
+         * Panel-side clone: needed whenever the daemon cannot fetch the
+         * repository itself, and whenever the repository has no Dockerfile of
+         * its own — framework detection reads the files, so it can only run
+         * against a working copy.
+         */
+        if (!daemonBuilt) {
+          const buildsDir = path.join(CONFIG.DATA_DIR, 'builds', app.id);
+          fs.mkdirSync(buildsDir, { recursive: true });
 
-        log(
-          token
-            ? `[${new Date().toISOString()}] 🔑 [Step 1/5] Autenticando com GitHub Personal Access Token (PAT)...\n`
-            : `[${new Date().toISOString()}] 📦 [Step 1/5] Conectando ao repositório: ${app.gitUrl}\n`,
-          { step: 1, stepName: token ? 'Autenticação GitHub' : 'Conectando Repositório', percentage: 20 }
-        );
+          const token = AppService.getGithubToken(app);
+          const safeGitTarget = await assertSafeGitUrl(app.gitUrl);
+          const cloneUrl = this.buildCloneUrl(app.gitUrl);
+          const gitEnv = this.gitAuthEnv(app.gitUrl, token);
+          const gitNetworkArgs = this.gitNetworkArgs(safeGitTarget);
 
-        // Step 2: clone or update
-        if (fs.existsSync(path.join(buildsDir, '.git'))) {
-          log(`[${new Date().toISOString()}] 🌿 [Step 2/5] Atualizando código existente (branch ${branch})...\n`, {
-            step: 2,
-            stepName: 'Git Fetch',
-            percentage: 35,
-          });
+          log(
+            token
+              ? `[${new Date().toISOString()}] 🔑 [Step 1/5] Autenticando com GitHub Personal Access Token (PAT)...\n`
+              : `[${new Date().toISOString()}] 📦 [Step 1/5] Conectando ao repositório: ${app.gitUrl}\n`,
+            { step: 1, stepName: token ? 'Autenticação GitHub' : 'Conectando Repositório', percentage: 20 }
+          );
 
-          // fetch + hard reset rather than pull: a rebased or force-pushed
-          // branch makes a merge-based pull fail, and the previous fallback was
-          // to delete the whole working copy and clone again.
-          // Never leave a PAT in .git/config. It is used only for this fetch,
-          // then the remote is immediately restored to the public URL.
-          await run('git', ['remote', 'set-url', 'origin', cloneUrl], { cwd: buildsDir });
-          const fetched = await run('git', [...gitNetworkArgs, 'fetch', '--prune', 'origin', branch], {
-            cwd: buildsDir,
-            timeoutMs: CLONE_TIMEOUT_MS,
-            onOutput: (c) => log(this.redactSecrets(c)),
-            env: gitEnv,
-          });
+          // Step 2: clone or update
+          if (fs.existsSync(path.join(buildsDir, '.git'))) {
+            log(`[${new Date().toISOString()}] 🌿 [Step 2/5] Atualizando código existente (branch ${branch})...\n`, {
+              step: 2,
+              stepName: 'Git Fetch',
+              percentage: 35,
+            });
 
-          if (fetched.exitCode !== 0) {
-            log(`[Git] Fetch falhou, re-clonando repositório...\n`);
-            fs.rmSync(buildsDir, { recursive: true, force: true });
+            // fetch + hard reset rather than pull: a rebased or force-pushed
+            // branch makes a merge-based pull fail, and the previous fallback was
+            // to delete the whole working copy and clone again.
+            // Never leave a PAT in .git/config. It is used only for this fetch,
+            // then the remote is immediately restored to the public URL.
+            await run('git', ['remote', 'set-url', 'origin', cloneUrl], { cwd: buildsDir });
+            const fetched = await run('git', [...gitNetworkArgs, 'fetch', '--prune', 'origin', branch], {
+              cwd: buildsDir,
+              timeoutMs: CLONE_TIMEOUT_MS,
+              onOutput: (c) => log(this.redactSecrets(c)),
+              env: gitEnv,
+            });
+
+            if (fetched.exitCode !== 0) {
+              log(`[Git] Fetch falhou, re-clonando repositório...\n`);
+              fs.rmSync(buildsDir, { recursive: true, force: true });
+              const cloned = await run('git', [...gitNetworkArgs, 'clone', '-b', branch, '--single-branch', cloneUrl, buildsDir], {
+                timeoutMs: CLONE_TIMEOUT_MS,
+                env: gitEnv,
+              });
+              if (cloned.exitCode !== 0) {
+                throw new Error(`Falha ao clonar repositório: ${this.redactSecrets(cloned.stderr.trim())}`);
+              }
+            } else {
+              await run('git', ['reset', '--hard', `origin/${branch}`], { cwd: buildsDir });
+              await run('git', ['clean', '-fdx'], { cwd: buildsDir });
+            }
+            await run('git', ['remote', 'set-url', 'origin', app.gitUrl], { cwd: buildsDir });
+          } else {
+            log(`[${new Date().toISOString()}] 🌿 [Step 2/5] Clonando branch [${branch}]...\n`, {
+              step: 2,
+              stepName: 'Git Clone',
+              percentage: 35,
+            });
             const cloned = await run('git', [...gitNetworkArgs, 'clone', '-b', branch, '--single-branch', cloneUrl, buildsDir], {
               timeoutMs: CLONE_TIMEOUT_MS,
               env: gitEnv,
@@ -527,146 +638,130 @@ export class CicdService {
             if (cloned.exitCode !== 0) {
               throw new Error(`Falha ao clonar repositório: ${this.redactSecrets(cloned.stderr.trim())}`);
             }
-          } else {
-            await run('git', ['reset', '--hard', `origin/${branch}`], { cwd: buildsDir });
-            await run('git', ['clean', '-fdx'], { cwd: buildsDir });
-          }
-          await run('git', ['remote', 'set-url', 'origin', app.gitUrl], { cwd: buildsDir });
-        } else {
-          log(`[${new Date().toISOString()}] 🌿 [Step 2/5] Clonando branch [${branch}]...\n`, {
-            step: 2,
-            stepName: 'Git Clone',
-            percentage: 35,
-          });
-          const cloned = await run('git', [...gitNetworkArgs, 'clone', '-b', branch, '--single-branch', cloneUrl, buildsDir], {
-            timeoutMs: CLONE_TIMEOUT_MS,
-            env: gitEnv,
-          });
-          if (cloned.exitCode !== 0) {
-            throw new Error(`Falha ao clonar repositório: ${this.redactSecrets(cloned.stderr.trim())}`);
-          }
-          await run('git', ['remote', 'set-url', 'origin', app.gitUrl], { cwd: buildsDir });
-        }
-
-        this.ensureBuildContextIgnore(buildsDir);
-
-        if (requestedCommitHash) {
-          const target = await run('git', ['cat-file', '-e', `${requestedCommitHash}^{commit}`], { cwd: buildsDir });
-          if (target.exitCode !== 0) {
-            throw new Error(`O commit solicitado para rollback não está disponível localmente: ${requestedCommitHash}`);
-          }
-          const checkedOut = await run('git', ['reset', '--hard', requestedCommitHash], { cwd: buildsDir });
-          if (checkedOut.exitCode !== 0) {
-            throw new Error(`Não foi possível selecionar o commit ${requestedCommitHash} para o deploy.`);
-          }
-        }
-
-        // Real commit metadata
-        const logResult = await run('git', ['log', '-1', '--format=%H|%h|%s|%an|%cI'], { cwd: buildsDir });
-        if (logResult.exitCode === 0 && logResult.stdout.includes('|')) {
-          const [fullHash, shortHash, subject, authName, commitIso] = logResult.stdout.trim().split('|');
-          commitHash = shortHash || fullHash?.substring(0, 7) || commitHash;
-          commitMsg = subject || commitMsg;
-          author = authName || author;
-          commitDate = commitIso || commitDate;
-          log(`[${new Date().toISOString()}] 🏷️ [Git Commit] ${commitHash} - "${commitMsg}" por ${author}\n`, {
-            step: 2,
-            stepName: 'Commit Extraído',
-            percentage: 40,
-          });
-        }
-
-        // Step 3: Dockerfile resolution
-        const dockerfilePath = path.join(buildsDir, 'Dockerfile');
-        const internalPort = app.internalPort || 3000;
-
-        let hasGitCommittedDockerfile = false;
-        if (fs.existsSync(dockerfilePath)) {
-          const tracked = await run('git', ['ls-files', '--error-unmatch', 'Dockerfile'], { cwd: buildsDir });
-          hasGitCommittedDockerfile = tracked.exitCode === 0;
-        }
-
-        if (!hasGitCommittedDockerfile) {
-          if (fs.existsSync(dockerfilePath)) {
-            fs.rmSync(dockerfilePath, { force: true });
+            await run('git', ['remote', 'set-url', 'origin', app.gitUrl], { cwd: buildsDir });
           }
 
-          const detection = ProjectDetector.inspect(buildsDir, internalPort);
-          log(
-            `[${new Date().toISOString()}] ${detection.log}\n` +
-              `[${new Date().toISOString()}] 📦 [Step 3/5] Framework: ${detection.frameworkName} | Gerenciador: ${detection.packageManager.toUpperCase()} | Porta Interna: :${internalPort}\n`,
-            { step: 3, stepName: `Detectado: ${detection.frameworkName}`, percentage: 50 }
-          );
+          this.ensureBuildContextIgnore(buildsDir);
 
-          if (detection.type === 'static-html') {
-            delete ports[`${internalPort}/tcp`];
-            ports['80/tcp'] = app.port;
-          } else if (detection.recommendedInternalPort && detection.recommendedInternalPort !== internalPort && (!app.internalPort || app.internalPort === 3000)) {
-            delete ports[`${internalPort}/tcp`];
-            ports[`${detection.recommendedInternalPort}/tcp`] = app.port;
-            app.internalPort = detection.recommendedInternalPort;
-            dbStorage.saveApp(app);
-          }
-
-          fs.writeFileSync(dockerfilePath, injectPublicBuildArgs(detection.dockerfile, app.env || {}), 'utf-8');
-        } else {
-          try {
-            const dockerContent = fs.readFileSync(dockerfilePath, 'utf8');
-            const portMatch = dockerContent.match(/EXPOSE\s+(\d+)/i);
-            if (portMatch && portMatch[1]) {
-              const exposedPort = parseInt(portMatch[1], 10);
-              if (exposedPort && exposedPort !== internalPort && (!app.internalPort || app.internalPort === 3000)) {
-                delete ports[`${internalPort}/tcp`];
-                ports[`${exposedPort}/tcp`] = app.port;
-                app.internalPort = exposedPort;
-                dbStorage.saveApp(app);
-              }
+          if (requestedCommitHash) {
+            const target = await run('git', ['cat-file', '-e', `${requestedCommitHash}^{commit}`], { cwd: buildsDir });
+            if (target.exitCode !== 0) {
+              throw new Error(`O commit solicitado para rollback não está disponível localmente: ${requestedCommitHash}`);
             }
-          } catch (e) {
-            // ignore
+            const checkedOut = await run('git', ['reset', '--hard', requestedCommitHash], { cwd: buildsDir });
+            if (checkedOut.exitCode !== 0) {
+              throw new Error(`Não foi possível selecionar o commit ${requestedCommitHash} para o deploy.`);
+            }
           }
 
-          log(
-            `[${new Date().toISOString()}] 🔍 [Step 3/5] Dockerfile nativo do repositório encontrado. Compilando com o Dockerfile do desenvolvedor...\n`,
-            { step: 3, stepName: 'Dockerfile Nativo Git', percentage: 50 }
-          );
-        }
+          // Real commit metadata
+          const logResult = await run('git', ['log', '-1', '--format=%H|%h|%s|%an|%cI'], { cwd: buildsDir });
+          if (logResult.exitCode === 0 && logResult.stdout.includes('|')) {
+            const [fullHash, shortHash, subject, authName, commitIso] = logResult.stdout.trim().split('|');
+            commitHash = shortHash || fullHash?.substring(0, 7) || commitHash;
+            commitMsg = subject || commitMsg;
+            author = authName || author;
+            commitDate = commitIso || commitDate;
+            log(`[${new Date().toISOString()}] 🏷️ [Git Commit] ${commitHash} - "${commitMsg}" por ${author}\n`, {
+              step: 2,
+              stepName: 'Commit Extraído',
+              percentage: 40,
+            });
+          }
 
-        // Step 4: build, streaming output line by line
-        log(`[${new Date().toISOString()}] 🐳 [Step 4/5] Executando docker build -t ${buildImageTag}...\n`, {
-          step: 4,
-          stepName: 'Compilando Imagem Docker',
-          percentage: 65,
-        });
+          // Step 3: Dockerfile resolution
+          const dockerfilePath = path.join(buildsDir, 'Dockerfile');
+          const internalPort = app.internalPort || 3000;
 
-        // Only intentionally public variables may enter the image build. All
-        // other application variables are injected into the runtime container
-        // below and never become Docker build arguments or build-context files.
-        if (isRemote) {
-          log(
-            `[${new Date().toISOString()}] 📤 Contexto enviado ao Docker do nó (o socket do painel não recebe o build nem o start).\n`
-          );
-          await dockerService.buildImage({
-            contextDir: buildsDir,
-            tags: [buildImageTag, versionedTag],
-            buildArgs: publicBuildArgMap(app.env || {}),
-            client: dockerClient,
-            timeoutMs: BUILD_TIMEOUT_MS,
-            onOutput: (chunk) => log(this.redactSecrets(chunk)),
-          });
-        } else {
-          const buildArgs = publicBuildArgs(app.env || {});
-          const build = await run('docker', ['build', ...buildArgs, '-t', buildImageTag, '-t', versionedTag, '.'], {
-            cwd: buildsDir,
-            timeoutMs: BUILD_TIMEOUT_MS,
-            onOutput: (chunk) => log(this.redactSecrets(chunk)),
-          });
+          let hasGitCommittedDockerfile = false;
+          if (fs.existsSync(dockerfilePath)) {
+            const tracked = await run('git', ['ls-files', '--error-unmatch', 'Dockerfile'], { cwd: buildsDir });
+            hasGitCommittedDockerfile = tracked.exitCode === 0;
+          }
 
-          if (build.exitCode !== 0) {
-            throw new Error(
-              `Erro ao compilar imagem Docker (código ${build.exitCode}). Verifique os logs de build acima.`
+          if (!hasGitCommittedDockerfile) {
+            if (fs.existsSync(dockerfilePath)) {
+              fs.rmSync(dockerfilePath, { force: true });
+            }
+
+            const detection = ProjectDetector.inspect(buildsDir, internalPort);
+            log(
+              `[${new Date().toISOString()}] ${detection.log}\n` +
+                `[${new Date().toISOString()}] 📦 [Step 3/5] Framework: ${detection.frameworkName} | Gerenciador: ${detection.packageManager.toUpperCase()} | Porta Interna: :${internalPort}\n`,
+              { step: 3, stepName: `Detectado: ${detection.frameworkName}`, percentage: 50 }
+            );
+
+            if (detection.type === 'static-html') {
+              delete ports[`${internalPort}/tcp`];
+              ports['80/tcp'] = app.port;
+            } else if (detection.recommendedInternalPort && detection.recommendedInternalPort !== internalPort && (!app.internalPort || app.internalPort === 3000)) {
+              delete ports[`${internalPort}/tcp`];
+              ports[`${detection.recommendedInternalPort}/tcp`] = app.port;
+              app.internalPort = detection.recommendedInternalPort;
+              dbStorage.saveApp(app);
+            }
+
+            fs.writeFileSync(dockerfilePath, injectPublicBuildArgs(detection.dockerfile, app.env || {}), 'utf-8');
+          } else {
+            try {
+              const dockerContent = fs.readFileSync(dockerfilePath, 'utf8');
+              const portMatch = dockerContent.match(/EXPOSE\s+(\d+)/i);
+              if (portMatch && portMatch[1]) {
+                const exposedPort = parseInt(portMatch[1], 10);
+                if (exposedPort && exposedPort !== internalPort && (!app.internalPort || app.internalPort === 3000)) {
+                  delete ports[`${internalPort}/tcp`];
+                  ports[`${exposedPort}/tcp`] = app.port;
+                  app.internalPort = exposedPort;
+                  dbStorage.saveApp(app);
+                }
+              }
+            } catch (e) {
+              // ignore
+            }
+
+            log(
+              `[${new Date().toISOString()}] 🔍 [Step 3/5] Dockerfile nativo do repositório encontrado. Compilando com o Dockerfile do desenvolvedor...\n`,
+              { step: 3, stepName: 'Dockerfile Nativo Git', percentage: 50 }
             );
           }
+
+          // Step 4: build, streaming output line by line
+          log(`[${new Date().toISOString()}] 🐳 [Step 4/5] Executando docker build -t ${buildImageTag}...\n`, {
+            step: 4,
+            stepName: 'Compilando Imagem Docker',
+            percentage: 65,
+          });
+
+          // Only intentionally public variables may enter the image build. All
+          // other application variables are injected into the runtime container
+          // below and never become Docker build arguments or build-context files.
+          if (isRemote) {
+            log(
+              `[${new Date().toISOString()}] 📤 Contexto enviado ao Docker do nó (o socket do painel não recebe o build nem o start).\n`
+            );
+            await dockerService.buildImage({
+              contextDir: buildsDir,
+              tags: [buildImageTag, versionedTag],
+              buildArgs: publicBuildArgMap(app.env || {}),
+              client: dockerClient,
+              timeoutMs: BUILD_TIMEOUT_MS,
+              onOutput: (chunk) => log(this.redactSecrets(chunk)),
+            });
+          } else {
+            const buildArgs = publicBuildArgs(app.env || {});
+            const build = await run('docker', ['build', ...buildArgs, '-t', buildImageTag, '-t', versionedTag, '.'], {
+              cwd: buildsDir,
+              timeoutMs: BUILD_TIMEOUT_MS,
+              onOutput: (chunk) => log(this.redactSecrets(chunk)),
+            });
+
+            if (build.exitCode !== 0) {
+              throw new Error(
+                `Erro ao compilar imagem Docker (código ${build.exitCode}). Verifique os logs de build acima.`
+              );
+            }
+          }
+
         }
 
         // Step 5: start the container
@@ -684,6 +779,8 @@ export class CicdService {
           ports,
           bindIp: placement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
           client: placement.useRemoteDocker ? dockerClient : undefined,
+          limits: AppService.resolveLimits(app),
+          healthcheck: AppService.dockerHealthcheck(app),
           joinPanelNetwork: placement.joinPanelNetwork,
           labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
         });
@@ -736,6 +833,8 @@ export class CicdService {
           ports,
           bindIp: dockerfilePlacement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
           client: dockerfilePlacement.useRemoteDocker ? dockerClient : undefined,
+          limits: AppService.resolveLimits(app),
+          healthcheck: AppService.dockerHealthcheck(app),
           joinPanelNetwork: dockerfilePlacement.joinPanelNetwork,
           labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
         });
@@ -758,11 +857,26 @@ export class CicdService {
           ports,
           bindIp: placement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
           client: placement.useRemoteDocker ? dockerClient : undefined,
+          limits: AppService.resolveLimits(app),
+          healthcheck: AppService.dockerHealthcheck(app),
           joinPanelNetwork: placement.joinPanelNetwork,
           labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
         });
         logs += `[${new Date().toISOString()}] 🚀 Container criado com ID: ${app.containerId.substring(0, 12)}\n`;
       }
+
+      /**
+       * The container exists; that is not the same as the application working.
+       *
+       * A deploy that reports success while the process crash-loops is worse
+       * than one that fails, because nobody goes looking: the panel says green,
+       * the site is down, and the previous working image was already replaced.
+       * So the pipeline waits for the app to answer before claiming success and
+       * puts the previous image back when it never does.
+       */
+      logs += await this.awaitReadinessOrRollback(app, (line) =>
+        log(line, { step: 5, stepName: 'Verificando saúde', percentage: 92 })
+      );
 
       const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
       logs += `[${new Date().toISOString()}] ✅ [Step 5/5] Deploy concluído! Servidor ativo na porta :${app.port}\n`;
@@ -790,6 +904,16 @@ export class CicdService {
         await CaddyService.syncCaddyfile();
       } catch (err: any) {
         console.warn('Caddy sync notice após deploy:', err.message);
+      }
+
+      // Right after a deploy, because that is when the tree just grew and when
+      // this app's own working copy is the one we must not touch. Never fatal:
+      // the deploy already succeeded, and failing it over housekeeping would
+      // report a working release as broken.
+      try {
+        BuildsCleanupService.enforceCap(app.id);
+      } catch (err: any) {
+        console.warn('Limpeza de builds falhou:', err?.message);
       }
 
       dbStorage.addActivity({
@@ -859,6 +983,224 @@ export class CicdService {
   }
 
   /** Restores a previous deployment by re-running its tagged image. */
+  /**
+   * Builds on the target node from a Git URL the node's daemon fetches itself.
+   *
+   * Returns `built: false` whenever the panel has to do the clone instead, so
+   * the caller falls through to the existing path. That happens for a local
+   * deploy, a private repository, and — the case only discovered by trying —
+   * a repository that ships no Dockerfile, since framework detection reads the
+   * files and can only run against a working copy.
+   */
+  private static async tryDaemonGitBuild(
+    app: AppRecord,
+    ctx: {
+      isRemote: boolean;
+      branch: string;
+      requestedCommitHash?: string;
+      dockerClient: Docker;
+      buildImageTag: string;
+      versionedTag: string;
+      log: (line: string, progress?: { step: number; stepName: string; percentage: number }) => void;
+    }
+  ): Promise<{ built: boolean; logs: string; commitHash?: string }> {
+    let logs = '';
+    const emitLine = (line: string, progress?: { step: number; stepName: string; percentage: number }) => {
+      logs += line;
+      ctx.log(line, progress);
+    };
+
+    const token = AppService.getGithubToken(app);
+    const plan = planBuildContext({
+      isRemote: ctx.isRemote,
+      sourceType: app.sourceType,
+      gitUrl: app.gitUrl,
+      hasToken: Boolean(token),
+      remoteCloneDisabled: app.remoteClone === false,
+    });
+
+    if (plan.mode !== 'daemon-git') {
+      // Only worth saying when the node could have done it and did not.
+      if (ctx.isRemote) emitLine(`[${new Date().toISOString()}] ℹ️ ${plan.reason}\n`);
+      return { built: false, logs };
+    }
+
+    const safeGitTarget = await assertSafeGitUrl(app.gitUrl!);
+
+    // Resolves the branch to an exact commit without cloning, so the build is
+    // pinned and the deploy history records a real hash instead of a branch
+    // name that moves.
+    let ref = ctx.requestedCommitHash || ctx.branch;
+    let resolvedHash = ctx.requestedCommitHash;
+    if (!resolvedHash) {
+      const lsRemote = await run(
+        'git',
+        [...this.gitNetworkArgs(safeGitTarget), 'ls-remote', app.gitUrl!, ctx.branch],
+        { timeoutMs: 60_000 }
+      );
+      const sha = lsRemote.stdout.trim().split(/\s+/)[0];
+      if (lsRemote.exitCode === 0 && /^[a-f0-9]{40}$/i.test(sha)) {
+        ref = sha;
+        resolvedHash = sha.substring(0, 7);
+      }
+    }
+
+    let gitContext: string;
+    try {
+      gitContext = gitBuildContext(app.gitUrl!, ref);
+    } catch (err: any) {
+      emitLine(`[${new Date().toISOString()}] ℹ️ Contexto remoto indisponível: ${err.message}\n`);
+      return { built: false, logs };
+    }
+
+    emitLine(
+      `[${new Date().toISOString()}] 🛰️ [Step 2/5] O nó vai buscar o repositório sozinho (${ref.substring(0, 12)}); ` +
+        'o painel não clona nem envia contexto.\n',
+      { step: 2, stepName: 'Clone no nó', percentage: 35 }
+    );
+
+    try {
+      await dockerService.buildImageFromGitContext({
+        gitContext,
+        tags: [ctx.buildImageTag, ctx.versionedTag],
+        buildArgs: publicBuildArgMap(app.env || {}),
+        client: ctx.dockerClient,
+        timeoutMs: BUILD_TIMEOUT_MS,
+        onOutput: (chunk) => emitLine(this.redactSecrets(chunk)),
+      });
+    } catch (err: any) {
+      const message = this.redactSecrets(err?.message || String(err));
+      if (!shouldFallBackToPanelClone(message)) {
+        // A broken Dockerfile fails identically after a local clone; retrying
+        // would double the duration of every failed deploy and print the same
+        // error twice.
+        throw err;
+      }
+      emitLine(
+        `[${new Date().toISOString()}] ↩️ O nó não conseguiu usar o repositório como contexto (${message}). ` +
+          'Voltando ao clone no painel.\n'
+      );
+      return { built: false, logs };
+    }
+
+    emitLine(`[${new Date().toISOString()}] ✅ Imagem compilada no próprio nó.\n`, {
+      step: 4,
+      stepName: 'Compilado no nó',
+      percentage: 80,
+    });
+    return { built: true, logs, commitHash: resolvedHash };
+  }
+
+  /** Deploy is only successful once the app answers. */
+  private static readonly READINESS_TIMEOUT_MS = 120_000;
+
+  /**
+   * Blocks until the new container answers, and restores the previous image
+   * when it never does.
+   *
+   * Throws on failure so the caller's existing error path owns the rest: it
+   * already marks the deployment failed, records the activity, alerts and
+   * streams the outcome. Duplicating that here would let the two paths drift.
+   */
+  private static async awaitReadinessOrRollback(
+    app: AppRecord,
+    log: (line: string) => void
+  ): Promise<string> {
+    let logs = '';
+    const emitLine = (line: string) => {
+      logs += line;
+      log(line);
+    };
+
+    emitLine(
+      `[${new Date().toISOString()}] 🩺 Verificando se a aplicação responde ` +
+        `(até ${Math.round(this.READINESS_TIMEOUT_MS / 1000)}s)...\n`
+    );
+
+    const readiness = await HealthService.waitUntilReady(app, {
+      timeoutMs: this.READINESS_TIMEOUT_MS,
+      onAttempt: (attempt, result) => {
+        if (result.reachable) {
+          emitLine(
+            `[${new Date().toISOString()}] ✅ Respondeu na tentativa ${attempt} ` +
+              `(HTTP ${result.statusCode}, ${result.durationMs}ms).\n`
+          );
+        } else if (attempt % 5 === 0) {
+          // Every attempt would drown the build log; the outcome is what matters.
+          emitLine(`[${new Date().toISOString()}] ⏳ Tentativa ${attempt}: ${result.error}\n`);
+        }
+      },
+    });
+
+    if (readiness.ready) {
+      app.health = {
+        status: 'healthy',
+        checkedAt: new Date().toISOString(),
+        consecutiveFailures: 0,
+      };
+      dbStorage.saveApp(app);
+      return logs;
+    }
+
+    app.health = {
+      status: 'unhealthy',
+      checkedAt: new Date().toISOString(),
+      consecutiveFailures: readiness.attempts,
+      lastError: readiness.lastError,
+    };
+    dbStorage.saveApp(app);
+
+    emitLine(
+      `[${new Date().toISOString()}] ❌ A aplicação não respondeu em ` +
+        `${Math.round(this.READINESS_TIMEOUT_MS / 1000)}s (${readiness.lastError}).\n`
+    );
+
+    const restored = await this.rollbackToLastHealthy(app, emitLine);
+    throw new Error(
+      restored
+        ? `A aplicação não respondeu após o deploy e foi restaurada para a versão anterior (${restored}). ` +
+          'Veja os logs do contêiner para descobrir por que a nova versão não subiu.'
+        : 'A aplicação não respondeu após o deploy e não há versão anterior para restaurar. ' +
+          'O contêiner continua de pé para inspeção; veja os logs da aplicação.'
+    );
+  }
+
+  /**
+   * Restarts the most recent previously successful deployment.
+   *
+   * Skips the deployment being rolled back and anything already failed: rolling
+   * back onto another broken release would just move the outage.
+   */
+  private static async rollbackToLastHealthy(
+    app: AppRecord,
+    log: (line: string) => void
+  ): Promise<string | null> {
+    const candidates = dbStorage
+      .getDeployments(app.id)
+      .filter((d) => d.status === 'success')
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+    for (const candidate of candidates) {
+      log(`[${new Date().toISOString()}] ↩️ Restaurando o deploy anterior #${candidate.commitHash || candidate.id}...\n`);
+      try {
+        const result = await this.rollback(app.id, candidate.id);
+        if (result.success) {
+          log(`[${new Date().toISOString()}] ✅ Versão anterior restaurada.\n`);
+          return candidate.commitHash || candidate.id;
+        }
+        log(`[${new Date().toISOString()}] ⚠️ Rollback recusado: ${result.message}\n`);
+      } catch (err: any) {
+        log(`[${new Date().toISOString()}] ⚠️ Rollback falhou: ${this.redactSecrets(err?.message || String(err))}\n`);
+      }
+      // Only the newest successful deployment is attempted. Walking further
+      // back would silently put a much older release into production without
+      // the operator asking for it.
+      break;
+    }
+
+    return null;
+  }
+
   static async rollback(appId: string, deploymentId: string): Promise<{ success: boolean; message: string }> {
     const app = dbStorage.getAppById(appId);
     if (!app) throw new Error('Aplicação não encontrada');
@@ -907,6 +1249,8 @@ export class CicdService {
       ports,
       bindIp: rollbackPlacement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
       client: rollbackPlacement.useRemoteDocker ? dockerClient : undefined,
+      limits: AppService.resolveLimits(app),
+      healthcheck: AppService.dockerHealthcheck(app),
       joinPanelNetwork: rollbackPlacement.joinPanelNetwork,
       labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
     });
@@ -978,3 +1322,11 @@ jobs:
 `;
   }
 }
+
+/**
+ * Wired here rather than imported by the queue: CicdService already imports the
+ * queue to enqueue, so the queue importing it back would be a module cycle.
+ */
+DeployQueueService.setRunner((app, request, deploymentId) =>
+  CicdService.runQueuedDeploy(app, request, deploymentId)
+);

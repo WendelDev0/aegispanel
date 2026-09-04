@@ -1,18 +1,25 @@
 import express from 'express';
 import http from 'http';
+import path from 'path';
 import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
 import { CONFIG } from './config.js';
 import { setIo, connectedClients } from './realtime.js';
-import { SystemService } from './services/system.service.js';
+import { SystemService, primaryDiskUsage } from './services/system.service.js';
 import { TerminalService } from './services/terminal.service.js';
 import { AlertService } from './services/alert.service.js';
 import { CaddyService } from './services/caddy.service.js';
 import { CronService } from './services/cron.service.js';
 import { AnalyticsService } from './services/analytics.service.js';
 import { CicdService } from './services/cicd.service.js';
+import { WatchdogService } from './services/watchdog.service.js';
+import { BuildsCleanupService } from './services/builds-cleanup.service.js';
+import { DeployQueueService } from './services/deploy-queue.service.js';
+import { NodeService } from './services/node.service.js';
 import { authenticateToken, AuthUser } from './middleware/auth.js';
 import { dbStorage } from './db/storage.js';
+import { AuditStore } from './utils/audit.store.js';
+import { releasePanelLock } from './utils/panel-lock.js';
 
 // Routers
 import { authRouter } from './routes/auth.routes.js';
@@ -36,14 +43,28 @@ const server = http.createServer(app);
 
 // An empty allowlist means same-origin only, which is the deployed topology:
 // the browser talks to Caddy/nginx, which proxies /api to this process.
-const corsOptions: cors.CorsOptions = CONFIG.CORS_ORIGINS.length
-  ? { origin: CONFIG.CORS_ORIGINS, credentials: true }
-  : { origin: false };
+function allowedBrowserOrigin(origin: string | undefined): boolean {
+  if (!origin) return false;
+  if (CONFIG.CORS_ORIGINS.includes(origin)) return true;
+  if (CONFIG.CORS_ORIGINS.length) return false;
+  const domain = dbStorage.getSettings().panelDomain?.toLowerCase().trim();
+  if (!domain) return false;
+  if (origin === `https://${domain}`) return true;
+  return CONFIG.LOCAL_MODE && origin === `http://${domain}`;
+}
+
+const corsOrigin: cors.CorsOptions['origin'] = (origin, cb) => {
+  if (!origin) {
+    cb(null, true);
+    return;
+  }
+  cb(null, allowedBrowserOrigin(origin));
+};
+
+const corsOptions: cors.CorsOptions = { origin: corsOrigin, credentials: true };
 
 export const io = new SocketIOServer(server, {
-  cors: CONFIG.CORS_ORIGINS.length
-    ? { origin: CONFIG.CORS_ORIGINS, methods: ['GET', 'POST'], credentials: true }
-    : { origin: false },
+  cors: { origin: corsOrigin, methods: ['GET', 'POST'], credentials: true },
 });
 setIo(io);
 
@@ -138,6 +159,27 @@ io.on('connection', (socket) => {
 });
 
 /**
+ * Re-check the session on every connected socket. A revoke in the UI must
+ * drop the terminal within one interval, not at the next JWT expiry.
+ */
+const SESSION_WATCH_MS = 30_000;
+const sessionWatchTimer = setInterval(() => {
+  for (const socket of io.sockets.sockets.values()) {
+    const token = socket.data.authToken as string | undefined;
+    if (!token) {
+      socket.disconnect(true);
+      continue;
+    }
+    try {
+      socket.data.user = authenticateToken(token);
+    } catch {
+      socket.emit('session:revoked');
+      socket.disconnect(true);
+    }
+  }
+}, SESSION_WATCH_MS);
+
+/**
  * Broadcast realtime system metrics.
  *
  * Skips the sample entirely when nobody is listening, and never lets two
@@ -181,8 +223,11 @@ const STORAGE_PRUNE_THRESHOLD_MB = 10;
 const STORAGE_ALERT_THRESHOLD_MB = 20;
 let lastStorageAlertAt = 0;
 
-const storageTimer = setInterval(() => {
+const storageTimer = setInterval(async () => {
   try {
+    dbStorage.pruneSessions();
+    AuditStore.archiveAndPrune(12, path.join(CONFIG.DATA_DIR, 'backups', 'audit-archive'));
+
     const health = dbStorage.getStorageHealth();
 
     // Auto-prune old deployment logs when the file gets large.
@@ -222,10 +267,74 @@ const storageTimer = setInterval(() => {
         metadata: { fileSizeMB: health.fileSizeMB, ...health.recordCounts },
       });
     }
+
+    await checkHostDisk(now);
+    await pruneImagesWeekly(now);
   } catch (err: any) {
     console.warn('Falha ao verificar saúde do storage:', err?.message);
   }
 }, STORAGE_CHECK_INTERVAL_MS);
+
+/**
+ * Warns before the disk is full rather than after.
+ *
+ * A full disk does not degrade this panel, it stops it: every state mutation
+ * writes a temp file and renames it, so once there is no room the panel cannot
+ * even record that it ran out. The threshold is free space, not the panel's own
+ * footprint — an application writing logs into a volume fills the same disk.
+ */
+const HOST_DISK_FREE_ALERT_PERCENT = 10;
+let lastDiskAlertAt = 0;
+
+async function checkHostDisk(now: number): Promise<void> {
+  const disk = await primaryDiskUsage();
+  if (!disk || disk.freePercent > HOST_DISK_FREE_ALERT_PERCENT) return;
+  if (now - lastDiskAlertAt < 60 * 60 * 1000) return;
+  lastDiskAlertAt = now;
+
+  const freeGb = Math.round((disk.availableBytes / 1024 / 1024 / 1024) * 10) / 10;
+  const detail =
+    `O disco em ${disk.mount} está com apenas ${disk.freePercent}% livre (${freeGb} GB). ` +
+    'Sem espaço, o painel não consegue nem gravar o próprio estado. ' +
+    'Reduza o teto de builds em Configurações, remova backups antigos ou aumente o volume.';
+  console.warn(`⚠️ ${detail}`);
+
+  await AlertService.broadcastNotification(
+    '⚠️ Alerta: disco do servidor quase cheio',
+    detail,
+    'alert',
+    true
+  ).catch(() => {
+    // A failed notification must not abort the rest of the health sweep.
+  });
+  dbStorage.addActivity({
+    type: 'system',
+    title: 'Disco do servidor quase cheio',
+    description: detail,
+    status: 'warning',
+    metadata: { mount: disk.mount, freePercent: disk.freePercent, availableBytes: disk.availableBytes },
+  });
+}
+
+/**
+ * Weekly prune of app images no rollback can reach.
+ *
+ * Driven from this timer instead of a cron job because it must not be
+ * disableable by accident: a `shell` cron is admin-gated and off by default,
+ * and an operator who never enables it gets an image per deploy forever.
+ */
+const IMAGE_PRUNE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+let lastImagePruneAt = Date.now();
+
+async function pruneImagesWeekly(now: number): Promise<void> {
+  if (now - lastImagePruneAt < IMAGE_PRUNE_INTERVAL_MS) return;
+  lastImagePruneAt = now;
+  try {
+    await BuildsCleanupService.pruneOrphanImages();
+  } catch (err: any) {
+    console.warn('Prune de imagens falhou:', err?.message);
+  }
+}
 
 server.listen(CONFIG.PORT, () => {
   console.log(`========================================================`);
@@ -243,6 +352,12 @@ server.listen(CONFIG.PORT, () => {
 
   CronService.start();
   AnalyticsService.start();
+  // Independent of the metrics loop, which skips when no client is connected —
+  // precisely when an unattended app is being OOM-killed unnoticed.
+  WatchdogService.start();
+  // Remote nodes: a node that goes down must take its apps out of the proxy,
+  // otherwise Caddy keeps waiting on a machine that is gone.
+  NodeService.startProbing();
 
   const abandoned = CicdService.abandonInFlightDeploys();
   if (abandoned > 0) {
@@ -264,10 +379,16 @@ server.listen(CONFIG.PORT, () => {
 
 function shutdown(signal: string) {
   console.log(`\n${signal} recebido, encerrando...`);
+  // Released first: a self-update recreates this container, and the replacement
+  // starts before the heartbeat of a hard-killed owner would look abandoned.
+  // Without this the new backend refuses to boot for up to 30s.
+  releasePanelLock();
   clearInterval(metricsTimer);
   clearInterval(storageTimer);
+  clearInterval(sessionWatchTimer);
   CronService.stop();
   AnalyticsService.stop();
+  WatchdogService.stop();
   io.close();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5000).unref();

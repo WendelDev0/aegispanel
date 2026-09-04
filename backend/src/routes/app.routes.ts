@@ -4,6 +4,7 @@ import path from 'path';
 import { AppService } from '../services/app.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { CicdService } from '../services/cicd.service.js';
+import { DeployQueueService } from '../services/deploy-queue.service.js';
 import { CaddyService } from '../services/caddy.service.js';
 import { dbStorage } from '../db/storage.js';
 import { CONFIG } from '../config.js';
@@ -116,12 +117,19 @@ appRouter.post('/', requireWrite, validateBody(createAppBodySchema), async (req:
       autoDeploy,
       deployBranch,
       nodeId,
+      limits: req.body.limits,
     });
 
     // Returned immediately so the client can open the live deploy stream; the
     // pipeline reports its own outcome over the socket and in the deployment
     // history, so a failure here is never silent.
-    res.status(201).json(AppService.toPublic(created));
+    res.status(201).json({
+      ...AppService.toPublic(created),
+      // A warning, never a block: overcommit is normal and usually fine, since
+      // workloads rarely peak together. What is not fine is discovering during
+      // an incident that nobody ever did the arithmetic.
+      overcommit: AppService.overcommitStatus(),
+    });
 
     CicdService.executeDeploy(created, {
       commitMessage: 'Initial Deployment Setup',
@@ -143,9 +151,11 @@ appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (re
       return;
     }
 
-    const { name, port, internalPort, imageName, gitUrl, branch, domain, githubToken, autoDeploy, deployBranch, nodeId } = req.body;
+    const { name, port, internalPort, imageName, gitUrl, branch, domain, githubToken, autoDeploy, deployBranch, nodeId, limits } = req.body;
 
     const previousName = app.name;
+    const previousLimits = JSON.stringify(AppService.resolveLimits(app));
+    const previousHealthcheck = JSON.stringify(app.healthcheck ?? null);
     const previousPort = app.port;
     const previousInternalPort = app.internalPort;
     const previousImage = app.imageName;
@@ -199,6 +209,14 @@ appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (re
     if (nodeId !== undefined) {
       app.nodeId = nodeId || undefined;
     }
+    // null clears the per-app ceiling and hands the app back to the global
+    // default, mirroring how an empty port field restores automatic allocation.
+    if (limits !== undefined) {
+      app.limits = limits === null ? undefined : limits;
+    }
+    if (req.body.healthcheck !== undefined) {
+      app.healthcheck = req.body.healthcheck === null ? undefined : req.body.healthcheck;
+    }
 
     app.updatedAt = new Date().toISOString();
     dbStorage.saveApp(app);
@@ -234,7 +252,12 @@ appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (re
       app.internalPort !== previousInternalPort ||
       app.imageName !== previousImage ||
       app.gitUrl !== previousGitUrl ||
-      app.branch !== previousBranch;
+      app.branch !== previousBranch ||
+      // Memory, NanoCpus and PidsLimit are fixed at create time; the container
+      // has to be recreated for a new ceiling to take effect at all. The same
+      // is true of Docker's healthcheck.
+      JSON.stringify(AppService.resolveLimits(app)) !== previousLimits ||
+      JSON.stringify(app.healthcheck ?? null) !== previousHealthcheck;
 
     if (needsRedeploy) {
       try {
@@ -394,6 +417,24 @@ appRouter.post('/:id/deploy', requireWrite, validateBody(deployAppBodySchema), a
 });
 
 // 1-click rollback
+appRouter.delete('/:id/deployments/:deploymentId/queue', requireWrite, (req: Request, res: Response): void => {
+  // Only a queued deploy. A running one may be mid-swap — previous container
+  // renamed aside, new one starting — and killing it there leaves the app with
+  // neither.
+  const cancelled = DeployQueueService.cancel(req.params.deploymentId);
+  if (!cancelled) {
+    res.status(409).json({
+      error: 'Este deploy já começou ou não está mais na fila; não é possível cancelar.',
+    });
+    return;
+  }
+  res.json({ success: true });
+});
+
+appRouter.get('/queue', requireWrite, (req: Request, res: Response): void => {
+  res.json(DeployQueueService.status());
+});
+
 appRouter.post('/:id/rollback/:deploymentId', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
     res.json(await CicdService.rollback(req.params.id, req.params.deploymentId));

@@ -80,6 +80,25 @@ export interface DeploymentRecord {
   finishedAt?: string;
 }
 
+/**
+ * Docker's in-container probe. Opt-in: it needs wget or curl inside the image,
+ * which a distroless build does not have. The panel probes from outside either
+ * way, so leaving this unset does not mean the app goes unchecked.
+ */
+export interface HealthcheckConfig {
+  path: string;
+  intervalSec: number;
+  timeoutSec: number;
+  retries: number;
+}
+
+/** Container ceiling. Absent on a record means the global default applies. */
+export interface ResourceLimits {
+  memoryMb: number;
+  cpus: number;
+  pidsLimit: number;
+}
+
 export interface AppRecord {
   id: string;
   name: string;
@@ -103,6 +122,17 @@ export interface AppRecord {
   deployBranch?: string;
   /** Target node id. Absent = local panel machine. */
   nodeId?: string;
+  /** Per-app ceiling. Absent = follows settings.defaultAppLimits. */
+  limits?: ResourceLimits;
+  /** Set only when the app opted into Docker's in-container probe. */
+  healthcheck?: HealthcheckConfig;
+  /** Last observed health. Written by the panel's watchdog, read-only here. */
+  health?: {
+    status: 'healthy' | 'unhealthy' | 'starting' | 'unknown';
+    checkedAt: string;
+    consecutiveFailures: number;
+    lastError?: string;
+  };
   status: 'running' | 'stopped' | 'building' | 'error';
   lastDeployAt?: string;
   lastCommitHash?: string;
@@ -117,7 +147,7 @@ export interface CronJobRecord {
   id: string;
   name: string;
   schedule: string;
-  type: 'shell' | 'backup' | 'webhook';
+  type: 'shell' | 'backup' | 'webhook' | 'restore-drill';
   command?: string;
   webhookUrl?: string;
   enabled: boolean;
@@ -144,8 +174,32 @@ export interface BackupRecord {
   targetName: string;
   filename: string;
   sizeBytes: number;
-  status: 'completed' | 'in_progress' | 'failed';
+  status: 'completed' | 'in_progress' | 'failed' | 'completed_local_only';
   createdAt: string;
+  sha256?: string;
+  offsiteKey?: string;
+  offsiteUploadedAt?: string;
+  drill?: { at: string; ok: boolean; durationMs: number; error?: string };
+}
+
+export interface BackupTargetPublic {
+  provider: 's3';
+  endpoint: string;
+  region: string;
+  bucket: string;
+  prefix: string;
+  accessKeyId: string;
+  hasSecret?: boolean;
+  secretAccessKey?: string;
+  lastUploadAt?: string;
+  lastError?: string;
+}
+
+export interface RemoteBackupObject {
+  key: string;
+  sizeBytes: number;
+  lastModified: string;
+  sha256?: string;
 }
 
 export interface FirewallRule {
@@ -229,6 +283,7 @@ export interface PanelSettings {
   notificationEmail?: string;
   autoBackup: boolean;
   backupIntervalHours: number;
+  backupTarget?: BackupTargetPublic;
   alertConfig: AlertConfig;
 }
 
@@ -255,6 +310,7 @@ export interface User {
   username: string;
   email?: string;
   role: 'admin' | 'developer' | 'viewer';
+  totpEnabled?: boolean;
   createdAt?: string;
 }
 
@@ -272,4 +328,11 @@ export interface OverviewData {
     runningDatabases: number;
   };
   settings: PanelSettings;
+  restoreDrill?: {
+    at: string;
+    ok: boolean;
+    durationMs: number;
+    error?: string;
+    stale: boolean;
+  } | null;
 }

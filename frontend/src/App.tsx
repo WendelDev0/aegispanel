@@ -2,7 +2,7 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { Sidebar } from './components/Sidebar.js';
 import { Navbar } from './components/Navbar.js';
 import { AuthPage } from './pages/AuthPage.js';
-import { api } from './services/api.js';
+import { api, persistSession, clearSession } from './services/api.js';
 import { socket, connectSocket, disconnectSocket } from './services/socket.js';
 import { useRoute } from './hooks/useRoute.js';
 import { OverviewData, SystemStats, User } from './types/index.js';
@@ -92,17 +92,61 @@ export function App() {
     return () => clearInterval(interval);
   }, [token]);
 
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    api
+      .get('/auth/me')
+      .then((res) => {
+        if (cancelled || !res.data?.user) return;
+        setUser(res.data.user);
+        persistSession(token, res.data.user);
+      })
+      .catch(() => {
+        /* 401 interceptor handles expiry */
+      });
+
+    const refreshMs = 20 * 60 * 1000;
+    const refreshTimer = setInterval(async () => {
+      try {
+        const res = await api.post('/auth/refresh', {});
+        persistSession(res.data.token, res.data.user);
+        setToken(res.data.token);
+        if (res.data.user) setUser(res.data.user);
+        disconnectSocket();
+        connectSocket();
+      } catch {
+        /* interceptor logs out on hard failure */
+      }
+    }, refreshMs);
+
+    return () => {
+      cancelled = true;
+      clearInterval(refreshTimer);
+    };
+  }, [token]);
+
   const handleLoginSuccess = (newUser: any, newToken: string) => {
+    persistSession(newToken, newUser);
     setToken(newToken);
     setUser(newUser);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('aegis_token');
-    localStorage.removeItem('aegis_user');
+  const handleLogout = async () => {
+    try {
+      await api.post('/auth/logout', {});
+    } catch {
+      /* still clear locally */
+    }
+    clearSession();
     disconnectSocket();
     setToken(null);
     setUser(null);
+  };
+
+  const handleUserUpdate = (next: User) => {
+    setUser(next);
+    persistSession(localStorage.getItem('aegis_token') || token || '', next);
   };
 
   useEffect(() => {
@@ -124,7 +168,7 @@ export function App() {
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <DashboardPage overview={overview} realtimeStats={realtimeStats} setActiveTab={setActiveTab} />;
+        return <DashboardPage overview={overview} realtimeStats={realtimeStats} setActiveTab={setActiveTab} currentUser={user} />;
       case 'templates':
         return <TemplatesPage setActiveTab={setActiveTab} />;
       case 'apps':
@@ -138,7 +182,7 @@ export function App() {
       case 'querystudio':
         return <QueryStudioPage />;
       case 'filemanager':
-        return user?.role === 'admin' ? <FileManagerPage /> : <DashboardPage overview={overview} realtimeStats={realtimeStats} setActiveTab={setActiveTab} />;
+        return user?.role === 'admin' ? <FileManagerPage /> : <DashboardPage overview={overview} realtimeStats={realtimeStats} setActiveTab={setActiveTab} currentUser={user} />;
       case 'cron':
         return <CronPage />;
       case 'containers':
@@ -154,11 +198,11 @@ export function App() {
       case 'monitor':
         return <SystemMonitorPage realtimeStats={realtimeStats} />;
       case 'settings':
-        return <SettingsPage currentUser={user} />;
+        return <SettingsPage currentUser={user} onUserUpdate={handleUserUpdate} />;
       case 'help':
         return <HelpPage />;
       default:
-        return <DashboardPage overview={overview} realtimeStats={realtimeStats} setActiveTab={setActiveTab} />;
+        return <DashboardPage overview={overview} realtimeStats={realtimeStats} setActiveTab={setActiveTab} currentUser={user} />;
     }
   };
 

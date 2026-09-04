@@ -2,6 +2,9 @@ import Docker from 'dockerode';
 import { dbStorage, ServerNode } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
 import { EncryptionService } from '../utils/crypto.js';
+import { AlertService } from './alert.service.js';
+import { CaddyService } from './caddy.service.js';
+import { AuditStore } from '../utils/audit.store.js';
 
 export interface NodeHealth {
   reachable: boolean;
@@ -182,6 +185,178 @@ export class NodeService {
 
       return { reachable: false, message, checkedAt };
     }
+  }
+
+  /**
+   * Failed probes tolerated before a node is declared `error`.
+   *
+   * One failure is a dropped SSH connection or a moment of packet loss, which
+   * happens on any link. Flipping a node to `error` on that would pull every
+   * app it hosts out of Caddy, so the outage would be the panel's, not the
+   * node's.
+   */
+  static readonly FAILURES_BEFORE_ERROR = 3;
+  private static probeTimer: NodeJS.Timeout | null = null;
+
+  /**
+   * Reads what the Docker API actually reports about a node.
+   *
+   * Free RAM and free disk of the host are not in that list. Getting them means
+   * running a container on the node to read /proc — a read-only health probe
+   * that schedules a workload is not a health probe. The numbers Docker does
+   * give are reported; nothing is invented to fill the gap.
+   */
+  static async probe(nodeId: string): Promise<ServerNode['health'] | null> {
+    const node = this.getById(nodeId);
+    if (!node || node.isLocal || nodeId === LOCAL_NODE_ID) return null;
+
+    const startedAt = Date.now();
+    const at = new Date().toISOString();
+    const previousFailures = node.health?.consecutiveFailures ?? 0;
+    const wasReachable = node.status === 'online';
+
+    try {
+      this.invalidate(nodeId);
+      const client = await this.getClient(nodeId);
+
+      const info: any = await this.withTimeout(client.info(), CONNECT_TIMEOUT_MS, 'docker info');
+      const sshMs = Date.now() - startedAt;
+
+      const containers = await this.withTimeout(
+        client.listContainers({ all: false }),
+        CONNECT_TIMEOUT_MS,
+        'listagem de contêineres'
+      );
+      const aegisRunning = containers.filter(
+        (c: any) => c.Labels?.['aegis.managed'] === 'true'
+      ).length;
+
+      let dockerDiskBytes: number | undefined;
+      try {
+        const df: any = await this.withTimeout(client.df(), CONNECT_TIMEOUT_MS, 'docker df');
+        dockerDiskBytes =
+          (df?.LayersSize || 0) +
+          (df?.Volumes || []).reduce((sum: number, v: any) => sum + (v?.UsageData?.Size || 0), 0);
+      } catch {
+        // Older daemons do not implement /system/df; the rest of the probe is
+        // still valid and must not be discarded over one optional number.
+      }
+
+      node.health = {
+        at,
+        sshMs,
+        dockerOk: true,
+        containersRunning: containers.length,
+        aegisRunning,
+        memTotalBytes: info?.MemTotal,
+        cpuCount: info?.NCPU,
+        dockerDiskBytes,
+        consecutiveFailures: 0,
+      };
+      node.status = 'online';
+      node.lastCheckedAt = at;
+      node.lastError = undefined;
+      node.dockerVersion = info?.ServerVersion || node.dockerVersion;
+      node.containerCount = containers.length;
+      dbStorage.saveServerNode(node);
+
+      if (!wasReachable && previousFailures >= this.FAILURES_BEFORE_ERROR) {
+        await AlertService.broadcastNotification(
+          `✅ Nó "${node.name}" voltou`,
+          `O nó "${node.name}" (${node.hostIp}) respondeu novamente. Latência SSH: ${sshMs}ms.`,
+          'alert',
+          false
+        ).catch(() => {});
+        AuditStore.append({
+          action: 'node.recovered',
+          outcome: 'success',
+          target: { type: 'node', id: node.id, name: node.name },
+        });
+        // Its apps go back into the proxy.
+        await CaddyService.syncCaddyfile().catch(() => {});
+      }
+
+      return node.health;
+    } catch (err: any) {
+      const message = this.explain(err);
+      const consecutiveFailures = previousFailures + 1;
+
+      node.health = {
+        at,
+        sshMs: Date.now() - startedAt,
+        dockerOk: false,
+        containersRunning: 0,
+        aegisRunning: 0,
+        consecutiveFailures,
+        lastError: message,
+      };
+      node.lastCheckedAt = at;
+      node.lastError = message;
+      this.invalidate(nodeId);
+
+      // Only after the third: a single dropped SSH connection must not take a
+      // node's applications offline.
+      if (consecutiveFailures >= this.FAILURES_BEFORE_ERROR) {
+        const justFailed = node.status !== 'error';
+        node.status = 'error';
+        dbStorage.saveServerNode(node);
+
+        if (justFailed) {
+          await AlertService.broadcastNotification(
+            `🚨 Nó "${node.name}" inacessível`,
+            `O nó "${node.name}" (${node.hostIp}) falhou ${consecutiveFailures} sondagens seguidas: ${message}. ` +
+              'As aplicações hospedadas nele saíram do proxy e mostram a página de manutenção.',
+            'alert',
+            true
+          ).catch(() => {});
+          AuditStore.append({
+            action: 'node.unreachable',
+            outcome: 'failure',
+            target: { type: 'node', id: node.id, name: node.name },
+            meta: { consecutiveFailures, error: message },
+          });
+          await CaddyService.syncCaddyfile().catch(() => {});
+        }
+      } else {
+        dbStorage.saveServerNode(node);
+      }
+
+      return node.health;
+    }
+  }
+
+  /** Probes every registered remote node. */
+  static async probeAll(): Promise<void> {
+    for (const node of this.getAll()) {
+      if (node.isLocal || node.id === LOCAL_NODE_ID) continue;
+      await this.probe(node.id).catch((err: any) =>
+        console.warn(`Sondagem do nó "${node.name}" falhou:`, err?.message)
+      );
+    }
+  }
+
+  static startProbing(intervalMs = 60_000): void {
+    if (this.probeTimer) return;
+    this.probeTimer = setInterval(() => {
+      this.probeAll().catch(() => {});
+    }, intervalMs);
+    this.probeTimer.unref();
+  }
+
+  static stopProbing(): void {
+    if (!this.probeTimer) return;
+    clearInterval(this.probeTimer);
+    this.probeTimer = null;
+  }
+
+  /** True when a node's applications should still receive traffic. */
+  static isRoutable(nodeId: string | undefined): boolean {
+    if (!nodeId || nodeId === LOCAL_NODE_ID) return true;
+    const node = this.getById(nodeId);
+    if (!node || node.isLocal) return true;
+    // `unknown` routes: it is the state before the first probe, and taking
+    // every remote app offline on a panel restart would be self-inflicted.
+    return node.status !== 'error';
   }
 
   /**

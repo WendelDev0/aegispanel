@@ -14,3 +14,7 @@ test('local mode is on by default outside production', () => {
 test('outbound alerts stay off unless explicitly allowed', () => {
   assert.equal(CONFIG.ALLOW_OUTBOUND_ALERTS, false);
 });
+
+test('offsite backup uploads stay off unless explicitly allowed', () => {
+  assert.equal(CONFIG.ALLOW_OFFSITE_BACKUP, false);
+});

@@ -4,6 +4,20 @@ import { CONFIG } from '../config.js';
 import type { UserRole } from '../middleware/auth.js';
 import { DeployLogStore } from '../utils/deploy-log.store.js';
 import { AppLogStore } from '../utils/app-log.store.js';
+import { acquirePanelLock } from '../utils/panel-lock.js';
+import {
+  DEFAULT_APP_LIMITS,
+  DEFAULT_DATABASE_LIMITS,
+  normalizeLimits,
+  type ResourceLimits,
+} from '../utils/resource-limits.js';
+import type { AppHealth, HealthcheckConfig } from '../utils/health-probe.js';
+import {
+  StateHistory,
+  collectionDelta,
+  type SnapshotFile,
+  type SnapshotReason,
+} from '../utils/state-history.js';
 
 export interface User {
   id: string;
@@ -13,7 +27,23 @@ export interface User {
   role: UserRole;
   /** Incremented whenever the user's credentials or permissions change. */
   tokenVersion?: number;
+  /** Encrypted TOTP secret (`aegis.v1:`). Never returned by the API. */
+  totpSecret?: string;
+  totpEnabled?: boolean;
+  /** bcrypt hashes of one-time recovery codes. */
+  totpRecoveryHashes?: string[];
   createdAt: string;
+}
+
+export interface SessionRecord {
+  id: string;
+  userId: string;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  ip?: string;
+  userAgent?: string;
+  revokedAt?: string;
 }
 
 export interface DatabaseRecord {
@@ -28,6 +58,8 @@ export interface DatabaseRecord {
   dbName: string;
   status: 'running' | 'stopped' | 'creating' | 'error';
   connectionString: string;
+  /** Absent means settings.defaultDatabaseLimits applies. */
+  limits?: ResourceLimits;
   withGui?: boolean;
   guiContainerId?: string;
   guiPort?: number;
@@ -70,6 +102,20 @@ export interface AppRecord {
    * explicitly is never moved without telling them.
    */
   autoPort?: boolean;
+  /**
+   * Per-app resource ceiling. Absent means settings.defaultAppLimits applies,
+   * which is also what every app created before limits existed gets on its
+   * next deploy.
+   */
+  limits?: ResourceLimits;
+  /**
+   * Probe settings. Absent means the panel's own defaults are used; setting
+   * this also enables Docker's in-container healthcheck, which is opt-in
+   * because a distroless image has no wget or curl to run it with.
+   */
+  healthcheck?: HealthcheckConfig;
+  /** Last observed health. Written by the watchdog, never by the user. */
+  health?: AppHealth;
   env: Record<string, string>;
   domain?: string;
   webhookSecret?: string;
@@ -78,6 +124,11 @@ export interface AppRecord {
   deployBranch?: string;
   /** Optional remote node target. Absent / local node = this machine. */
   nodeId?: string;
+  /**
+   * Opt out of letting a remote node fetch the repository itself. Absent means
+   * the node does it whenever it can; false forces the panel-clone path.
+   */
+  remoteClone?: boolean;
   status: 'running' | 'stopped' | 'building' | 'error';
   lastDeployAt?: string;
   lastCommitHash?: string;
@@ -92,7 +143,7 @@ export interface CronJobRecord {
   id: string;
   name: string;
   schedule: string; // e.g. "0 3 * * *"
-  type: 'shell' | 'backup' | 'webhook';
+  type: 'shell' | 'backup' | 'webhook' | 'restore-drill';
   command?: string;
   webhookUrl?: string;
   enabled: boolean;
@@ -119,8 +170,25 @@ export interface BackupRecord {
   targetName: string;
   filename: string;
   sizeBytes: number;
-  status: 'completed' | 'in_progress' | 'failed';
+  status: 'completed' | 'in_progress' | 'failed' | 'completed_local_only';
   createdAt: string;
+  sha256?: string;
+  offsiteKey?: string;
+  offsiteUploadedAt?: string;
+  drill?: { at: string; ok: boolean; durationMs: number; error?: string };
+}
+
+export interface BackupTarget {
+  provider: 's3';
+  endpoint?: string;
+  region: string;
+  bucket: string;
+  prefix?: string;
+  accessKeyId: string;
+  /** Encrypted at rest. Never returned by the API. */
+  secretAccessKey?: string;
+  lastUploadAt?: string;
+  lastError?: string;
 }
 
 export interface FirewallRule {
@@ -206,6 +274,31 @@ export interface ServerNode {
   /** SHA256 fingerprint of the SSH host key, required to prevent MITM. */
   sshHostFingerprint?: string;
 
+  /**
+   * Last probe result.
+   *
+   * Free host RAM and disk are deliberately absent: the Docker API does not
+   * expose them, and the only way to get them is to run a container on the node
+   * to read /proc — which turns a read-only health probe into a workload the
+   * panel schedules without being asked. What Docker does report is here, and
+   * nothing is invented to fill the gap.
+   */
+  health?: {
+    at: string;
+    sshMs: number;
+    dockerOk: boolean;
+    containersRunning: number;
+    /** Containers on that node carrying the `aegis.managed` label. */
+    aegisRunning: number;
+    memTotalBytes?: number;
+    cpuCount?: number;
+    /** Bytes Docker itself holds there (images, containers, volumes). */
+    dockerDiskBytes?: number;
+    /** Consecutive failed probes. The node is `error` from three onwards. */
+    consecutiveFailures: number;
+    lastError?: string;
+  };
+
   // --- last health check --------------------------------------------------
   lastCheckedAt?: string;
   lastError?: string;
@@ -221,6 +314,16 @@ export interface PanelSettings {
   notificationEmail?: string;
   autoBackup: boolean;
   backupIntervalHours: number;
+  backupTarget?: BackupTarget;
+  /**
+   * Ceiling for `DATA_DIR/builds`. Reclaimable artifacts of the least recently
+   * built apps are deleted after a deploy until the tree fits.
+   */
+  buildsDiskCapMb: number;
+  /** Applied to any app whose record carries no explicit `limits`. */
+  defaultAppLimits: ResourceLimits;
+  /** Same, for provisioned database engines. */
+  defaultDatabaseLimits: ResourceLimits;
   alertConfig: AlertConfig;
 }
 
@@ -236,6 +339,7 @@ export interface DatabaseSchema {
   serverNodes: ServerNode[];
   activities: ActivityRecord[];
   alertHistory: AlertHistoryRecord[];
+  sessions: SessionRecord[];
   settings: PanelSettings;
 }
 
@@ -246,6 +350,7 @@ const DEFAULT_DATA: DatabaseSchema = {
   deployments: [],
   activities: [],
   alertHistory: [],
+  sessions: [],
   cronJobs: [
     {
       id: 'cron-daily-backup',
@@ -256,6 +361,14 @@ const DEFAULT_DATA: DatabaseSchema = {
       createdAt: new Date().toISOString(),
       lastStatus: 'success',
       lastOutput: 'Rotina de backup automático agendada para as 03:00'
+    },
+    {
+      id: 'cron-restore-drill',
+      name: 'Ensaio mensal de restore',
+      schedule: '0 4 1 * *',
+      type: 'restore-drill',
+      enabled: false,
+      createdAt: new Date().toISOString(),
     },
     {
       id: 'cron-docker-prune',
@@ -284,6 +397,9 @@ const DEFAULT_DATA: DatabaseSchema = {
     caddyEnabled: true,
     autoBackup: true,
     backupIntervalHours: 24,
+    buildsDiskCapMb: 5120,
+    defaultAppLimits: { ...DEFAULT_APP_LIMITS },
+    defaultDatabaseLimits: { ...DEFAULT_DATABASE_LIMITS },
     alertConfig: {
       enabled: false,
       cpuThresholdPercent: 90,
@@ -293,7 +409,7 @@ const DEFAULT_DATA: DatabaseSchema = {
   }
 };
 
-class JsonStorage {
+export class JsonStorage {
   private filePath: string;
   private data: DatabaseSchema;
 
@@ -304,6 +420,13 @@ class JsonStorage {
     } else if (!CONFIG.IS_WINDOWS) {
       try { fs.chmodSync(dataDir, 0o700); } catch { /* best effort */ }
     }
+
+    // Claimed before the document is read. A second writer over the same
+    // DATA_DIR does not corrupt the file — every save is atomic — it keeps its
+    // own copy in memory and rewrites the whole document from it, so whichever
+    // process saves last silently discards the other's records.
+    acquirePanelLock(dataDir);
+
     this.filePath = path.join(dataDir, 'panel_db.json');
     this.data = this.load();
   }
@@ -343,12 +466,19 @@ class JsonStorage {
       );
     }
 
+    // Taken before the merge below, not after: a new panel version adds
+    // collections and normalises settings, and the first save rewrites the file
+    // in the new shape. Without a copy of the pre-migration document, a
+    // downgrade or a bad migration has nothing to go back to.
+    StateHistory.capture(this.filePath, this.historyDir(), 'boot');
+
     // Merge one level into the defaults so a file written by an older version
     // gains newly added collections, and nested settings gain new fields
     // instead of being replaced wholesale by the stored object.
     return {
       ...DEFAULT_DATA,
       ...parsed,
+      cronJobs: this.withDefaultCronJobs(parsed.cronJobs),
       settings: {
         ...DEFAULT_DATA.settings,
         ...(parsed.settings || {}),
@@ -356,8 +486,27 @@ class JsonStorage {
           ...DEFAULT_DATA.settings.alertConfig,
           ...(parsed.settings?.alertConfig || {}),
         },
+        // Same reason as alertConfig: a stored object carrying only memoryMb
+        // would replace the whole default and leave cpus/pidsLimit undefined,
+        // which reaches Docker as "unlimited".
+        defaultAppLimits: normalizeLimits(
+          parsed.settings?.defaultAppLimits,
+          DEFAULT_APP_LIMITS
+        ),
+        defaultDatabaseLimits: normalizeLimits(
+          parsed.settings?.defaultDatabaseLimits,
+          DEFAULT_DATABASE_LIMITS
+        ),
       },
     };
+  }
+
+  private withDefaultCronJobs(stored: CronJobRecord[] | undefined): CronJobRecord[] {
+    const list = stored ? [...stored] : [...DEFAULT_DATA.cronJobs];
+    for (const job of DEFAULT_DATA.cronJobs) {
+      if (!list.some((j) => j.id === job.id)) list.push({ ...job });
+    }
+    return list;
   }
 
   /**
@@ -369,7 +518,85 @@ class JsonStorage {
    * simple in-process guard, since deploys and the metrics loop both mutate
    * state from different async paths.
    */
+  /** Directory holding point-in-time copies of panel_db.json. */
+  historyDir(): string {
+    return path.join(CONFIG.DATA_DIR, 'state-history');
+  }
+
+  /**
+   * Copies the current state file aside before a destructive change.
+   *
+   * The atomic write already stops a half-written file, and a corrupt one is
+   * quarantined. Neither helps against the failure that actually happens: a
+   * *valid* save that is wrong — an import from the wrong server, a delete of
+   * the wrong app. The document is rewritten whole on every mutation, so
+   * without this the previous contents are gone from disk in seconds.
+   *
+   * Never throws. Refusing a mutation because its safety net could not be
+   * written would be a worse outcome than doing it without one.
+   */
+  snapshot(reason: SnapshotReason): SnapshotFile | null {
+    const taken = StateHistory.capture(this.filePath, this.historyDir(), reason);
+    if (taken) StateHistory.prune(this.historyDir());
+    return taken;
+  }
+
+  listSnapshots(): SnapshotFile[] {
+    return StateHistory.list(this.historyDir());
+  }
+
+  /**
+   * What a snapshot would change if restored, counted per collection.
+   *
+   * Counts rather than a field-level diff: the question in front of a rollback
+   * button is "does this still have my 12 apps".
+   */
+  snapshotDelta(name: string): Record<string, { before: number; after: number; delta: number }> {
+    const stored = StateHistory.read(this.historyDir(), name) as Record<string, unknown>;
+    return collectionDelta(this.data as unknown as Record<string, unknown>, stored);
+  }
+
+  /**
+   * Restores a snapshot through importState, so it goes through the same
+   * validation and the same in-memory instance as any other write — and takes
+   * its own snapshot first, because rolling back to the wrong one has to be
+   * undoable too.
+   */
+  restoreSnapshot(name: string): DatabaseSchema {
+    const stored = StateHistory.read(this.historyDir(), name) as Partial<DatabaseSchema>;
+    const problems = this.validateState(stored);
+    if (problems.length) {
+      throw new Error(`Snapshot inválido, restauração recusada: ${problems.join(' ')}`);
+    }
+    return this.importState(stored);
+  }
+
+  /**
+   * Recent save durations, for the SQLite migration trigger.
+   *
+   * The decision to keep panel state in one JSON document is right for one
+   * process, and wrong past some size — the whole document is serialised and
+   * fsynced on every mutation, so cost grows with total state, not with the
+   * change. Measuring it means the migration is triggered by evidence rather
+   * than by someone's impression that the panel "feels slow".
+   */
+  private saveDurations: number[] = [];
+
+  private recordSaveDuration(ms: number): void {
+    this.saveDurations.push(ms);
+    if (this.saveDurations.length > 200) this.saveDurations.shift();
+  }
+
+  /** p95 of the recent saves, in ms. Zero until enough samples exist. */
+  saveP95Ms(): number {
+    if (this.saveDurations.length < 5) return 0;
+    const sorted = [...this.saveDurations].sort((a, b) => a - b);
+    const index = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95));
+    return Math.round(sorted[index] * 100) / 100;
+  }
+
   private save(data?: DatabaseSchema) {
+    const startedAt = Date.now();
     const toWrite = data || this.data;
     const payload = JSON.stringify(toWrite, null, 2);
     const tmpPath = path.join(
@@ -389,6 +616,7 @@ class JsonStorage {
       if (!CONFIG.IS_WINDOWS) {
         try { fs.chmodSync(this.filePath, 0o600); } catch { /* best effort */ }
       }
+      this.recordSaveDuration(Date.now() - startedAt);
     } catch (err) {
       try {
         if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
@@ -426,6 +654,95 @@ class JsonStorage {
     return user;
   }
 
+  private ensureSessions(): SessionRecord[] {
+    if (!this.data.sessions) this.data.sessions = [];
+    return this.data.sessions;
+  }
+
+  createSession(entry: Omit<SessionRecord, 'id' | 'createdAt' | 'lastSeenAt'> & { id?: string }): SessionRecord {
+    const now = new Date().toISOString();
+    const session: SessionRecord = {
+      id: entry.id || `ses-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 8)}`,
+      userId: entry.userId,
+      createdAt: now,
+      lastSeenAt: now,
+      expiresAt: entry.expiresAt,
+      ip: entry.ip,
+      userAgent: entry.userAgent,
+    };
+    const list = this.ensureSessions();
+    list.push(session);
+    const mine = list.filter((s) => s.userId === entry.userId && !s.revokedAt);
+    if (mine.length > 20) {
+      const oldest = mine.sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+      oldest.revokedAt = now;
+    }
+    this.save();
+    return session;
+  }
+
+  getSession(id: string): SessionRecord | undefined {
+    return this.ensureSessions().find((s) => s.id === id);
+  }
+
+  listSessions(userId?: string): SessionRecord[] {
+    const list = this.ensureSessions();
+    return userId ? list.filter((s) => s.userId === userId) : [...list];
+  }
+
+  touchSession(id: string): void {
+    const session = this.getSession(id);
+    if (!session || session.revokedAt) return;
+    const now = Date.now();
+    if (now - Date.parse(session.lastSeenAt) < 60_000) return;
+    session.lastSeenAt = new Date(now).toISOString();
+    this.save();
+  }
+
+  revokeSession(id: string): SessionRecord | undefined {
+    const session = this.getSession(id);
+    if (!session || session.revokedAt) return session;
+    session.revokedAt = new Date().toISOString();
+    this.save();
+    return session;
+  }
+
+  revokeUserSessions(userId: string, exceptId?: string): number {
+    const now = new Date().toISOString();
+    let n = 0;
+    for (const session of this.ensureSessions()) {
+      if (session.userId !== userId || session.revokedAt) continue;
+      if (exceptId && session.id === exceptId) continue;
+      session.revokedAt = now;
+      n++;
+    }
+    if (n) this.save();
+    return n;
+  }
+
+  pruneSessions(): number {
+    const now = Date.now();
+    const cutoff = now - 7 * 24 * 60 * 60 * 1000;
+    const before = this.ensureSessions().length;
+    this.data.sessions = this.ensureSessions().filter((s) => {
+      if (s.revokedAt && Date.parse(s.revokedAt) < cutoff) return false;
+      if (!s.revokedAt && Date.parse(s.expiresAt) < now) return false;
+      return true;
+    });
+    const removed = before - this.data.sessions.length;
+    if (removed) this.save();
+    return removed;
+  }
+
+  extendSession(id: string, expiresAt: string): SessionRecord | undefined {
+    const session = this.getSession(id);
+    if (!session || session.revokedAt) return undefined;
+    session.expiresAt = expiresAt;
+    session.lastSeenAt = new Date().toISOString();
+    this.save();
+    return session;
+  }
+
   /** Snapshot of the in-memory document, for the migration export. */
   exportState(): DatabaseSchema {
     return structuredClone(this.data);
@@ -454,6 +771,8 @@ class JsonStorage {
       'firewallRules',
       'serverNodes',
       'activities',
+      'alertHistory',
+      'sessions',
     ];
 
     for (const key of arrayKeys) {
@@ -491,6 +810,7 @@ class JsonStorage {
    * state until the next restart.
    */
   importState(candidate: Partial<DatabaseSchema>): DatabaseSchema {
+    this.snapshot('import-state');
     this.data = {
       ...DEFAULT_DATA,
       ...candidate,
@@ -501,6 +821,14 @@ class JsonStorage {
           ...DEFAULT_DATA.settings.alertConfig,
           ...(candidate.settings?.alertConfig || {}),
         },
+        defaultAppLimits: normalizeLimits(
+          candidate.settings?.defaultAppLimits,
+          DEFAULT_APP_LIMITS
+        ),
+        defaultDatabaseLimits: normalizeLimits(
+          candidate.settings?.defaultDatabaseLimits,
+          DEFAULT_DATABASE_LIMITS
+        ),
       },
     };
     // Imported state may contain users from a previous installation. Bump the
@@ -509,6 +837,10 @@ class JsonStorage {
       ...user,
       tokenVersion: (user.tokenVersion ?? 0) + 1,
     }));
+    const now = new Date().toISOString();
+    this.data.sessions = (this.data.sessions || []).map((s) =>
+      s.revokedAt ? s : { ...s, revokedAt: now }
+    );
     this.save();
     return this.data;
   }
@@ -534,6 +866,7 @@ class JsonStorage {
   }
 
   removeDatabase(id: string): boolean {
+    this.snapshot('remove-database');
     const initialLen = this.data.databases.length;
     this.data.databases = this.data.databases.filter(d => d.id !== id);
     if (this.data.databases.length !== initialLen) {
@@ -564,6 +897,7 @@ class JsonStorage {
   }
 
   removeApp(id: string): boolean {
+    this.snapshot('remove-app');
     const initialLen = this.data.apps.length;
     this.data.apps = this.data.apps.filter(a => a.id !== id);
     if (this.data.apps.length !== initialLen) {
@@ -778,6 +1112,7 @@ class JsonStorage {
     const initialLen = this.data.users.length;
     this.data.users = this.data.users.filter(u => u.id !== id);
     if (this.data.users.length !== initialLen) {
+      this.revokeUserSessions(id);
       this.save();
       return true;
     }
@@ -861,6 +1196,7 @@ class JsonStorage {
         serverNodes: this.data.serverNodes?.length ?? 0,
         activities: this.data.activities?.length ?? 0,
         alertHistory: this.data.alertHistory?.length ?? 0,
+        sessions: this.data.sessions?.length ?? 0,
       },
     };
   }
@@ -873,6 +1209,7 @@ class JsonStorage {
    * older entries to a short summary.
    */
   pruneDeployments(maxPerApp: number = 30, _logTruncateLength: number = 500): number {
+    this.pruneSessions();
     if (!this.data.deployments?.length) return 0;
 
     const byApp = new Map<string, DeploymentRecord[]>();
@@ -910,7 +1247,17 @@ class JsonStorage {
   }
 
   updateSettings(settings: Partial<PanelSettings>): PanelSettings {
-    this.data.settings = { ...this.data.settings, ...settings };
+    const merged = { ...this.data.settings, ...settings };
+    // The settings route accepts an open patch, so a client sending only
+    // `{ defaultAppLimits: { memoryMb: 256 } }` would drop cpus and pidsLimit.
+    // Undefined there reaches Docker as "unlimited", which is the one value the
+    // whole feature exists to avoid.
+    merged.defaultAppLimits = normalizeLimits(merged.defaultAppLimits, DEFAULT_APP_LIMITS);
+    merged.defaultDatabaseLimits = normalizeLimits(
+      merged.defaultDatabaseLimits,
+      DEFAULT_DATABASE_LIMITS
+    );
+    this.data.settings = merged;
     this.save();
     return this.data.settings;
   }

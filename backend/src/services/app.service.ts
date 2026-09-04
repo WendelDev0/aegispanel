@@ -1,3 +1,4 @@
+import os from 'os';
 import type Docker from 'dockerode';
 import { dbStorage, AppRecord, DomainRecord } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
@@ -9,6 +10,16 @@ import { isRemoteTarget } from '../utils/app-upstream.js';
 import { containerNameForApp, normalizeDomain } from '../utils/naming.js';
 import { CONFIG } from '../config.js';
 import { AppLogStore } from '../utils/app-log.store.js';
+import { normalizeHealthcheck, type HealthcheckConfig } from '../utils/health-probe.js';
+import {
+  DEFAULT_APP_LIMITS,
+  DEFAULT_DATABASE_LIMITS,
+  committedMemoryMb,
+  normalizeLimits,
+  overcommitWarning,
+  type OvercommitWarning,
+  type ResourceLimits,
+} from '../utils/resource-limits.js';
 
 export { containerNameForApp, normalizeDomain };
 
@@ -28,6 +39,10 @@ export interface CreateAppDTO {
   deployBranch?: string;
   /** Target node for deploy. Absent = local panel machine. */
   nodeId?: string;
+  /** Omit to inherit settings.defaultAppLimits. */
+  limits?: ResourceLimits;
+  /** Opting in also enables Docker's in-container probe. */
+  healthcheck?: HealthcheckConfig;
 }
 
 export interface AppMetricsSnapshot {
@@ -43,6 +58,61 @@ export interface AppMetricsSnapshot {
 }
 
 export class AppService {
+  /**
+   * The ceiling this app runs under.
+   *
+   * Resolved at container-creation time, never stored resolved: an operator who
+   * raises the global default expects apps that never set their own limit to
+   * follow it on the next deploy, not to stay pinned to whatever the default
+   * happened to be the day they were created.
+   */
+  static resolveLimits(app: Pick<AppRecord, 'limits'>): ResourceLimits {
+    const fallback = normalizeLimits(dbStorage.getSettings().defaultAppLimits, DEFAULT_APP_LIMITS);
+    return app.limits ? normalizeLimits(app.limits, fallback) : fallback;
+  }
+
+  /**
+   * Memory promised across every managed workload versus the host's RAM.
+   *
+   * Databases count too: they are the largest ceilings on most installations,
+   * so a total that ignored them would reassure the operator wrongly.
+   */
+  static overcommitStatus(): OvercommitWarning | null {
+    const appLimits = dbStorage.getApps().map((app) => this.resolveLimits(app));
+    const dbLimits = dbStorage.getDatabases().map((db) => {
+      const fallback = normalizeLimits(
+        dbStorage.getSettings().defaultDatabaseLimits,
+        DEFAULT_DATABASE_LIMITS
+      );
+      return db.limits ? normalizeLimits(db.limits, fallback) : fallback;
+    });
+
+    return overcommitWarning(
+      committedMemoryMb([...appLimits, ...dbLimits]),
+      os.totalmem() / 1024 / 1024
+    );
+  }
+
+  /**
+   * Docker's in-container healthcheck for an app, when it opted in.
+   *
+   * Returns undefined by default. The probe runs inside the container and needs
+   * wget or curl there; a distroless, scratch or slim image has neither, so a
+   * default healthcheck would mark those apps unhealthy — and with automatic
+   * rollback reading that signal, it would roll back deploys that worked. The
+   * panel probes from outside instead (HealthService), which works for any
+   * image; this is the extra signal for operators who want it in `docker ps`.
+   */
+  static dockerHealthcheck(
+    app: Pick<AppRecord, 'healthcheck' | 'internalPort'>
+  ): { config: HealthcheckConfig; internalPort: number } | undefined {
+    if (!app.healthcheck) return undefined;
+    return {
+      config: normalizeHealthcheck(app.healthcheck),
+      internalPort: app.internalPort || 3000,
+    };
+  }
+
   static validateEnv(env: unknown): Record<string, string> {
     if (!env || typeof env !== 'object' || Array.isArray(env)) {
       throw new Error('O campo env deve ser um objeto chave-valor.');
@@ -219,6 +289,8 @@ export class AppService {
         env: envList,
         ports,
         bindIp: isRemote ? '0.0.0.0' : CONFIG.APP_BIND_IP,
+        limits: this.resolveLimits({ limits: dto.limits }),
+        healthcheck: this.dockerHealthcheck({ healthcheck: dto.healthcheck, internalPort }),
         client: dockerClient,
         joinPanelNetwork: !isRemote,
         labels: {
@@ -244,6 +316,10 @@ export class AppService {
       port: hostPort,
       internalPort,
       autoPort,
+      // Stored only when the user set one. Left absent, the app follows the
+      // global default as it changes.
+      limits: dto.limits ? normalizeLimits(dto.limits) : undefined,
+      healthcheck: dto.healthcheck ? normalizeHealthcheck(dto.healthcheck) : undefined,
       env: envRecord,
       domain: cleanDomain,
       // Every app gets a high-entropy webhook secret at creation. Without one

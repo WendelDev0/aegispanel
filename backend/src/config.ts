@@ -96,6 +96,14 @@ export const CONFIG = {
   ALLOW_OUTBOUND_ALERTS: process.env.AEGIS_ALLOW_OUTBOUND_ALERTS === 'true',
 
   /**
+   * Offsite backup uploads are blocked in local mode for the same reason as
+   * alerts: a copied production database would push dumps to the real bucket.
+   */
+  get ALLOW_OFFSITE_BACKUP() {
+    return process.env.AEGIS_ALLOW_OFFSITE_BACKUP === 'true';
+  },
+
+  /**
    * Interface database containers publish their port on.
    *
    * Loopback by default: Docker's iptables rules run before ufw, so a database
@@ -141,4 +149,22 @@ export const CONFIG = {
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean),
+
+  /**
+   * Admins must enroll TOTP before opening a host shell. Default on in
+   * production: the host shell is root via the Docker socket.
+   *
+   * Read at access time so tests can flip the env without reloading the module.
+   */
+  get REQUIRE_2FA_ADMIN() {
+    return isRequire2faAdmin();
+  },
 };
+
+/** Whether admins must enroll TOTP before privileged host actions. */
+export function isRequire2faAdmin(): boolean {
+  return (
+    process.env.AEGIS_REQUIRE_2FA_ADMIN === 'true' ||
+    (process.env.AEGIS_REQUIRE_2FA_ADMIN !== 'false' && process.env.NODE_ENV === 'production')
+  );
+}

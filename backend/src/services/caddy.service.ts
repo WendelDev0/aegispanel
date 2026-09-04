@@ -1,10 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import { CONFIG } from '../config.js';
-import { dbStorage } from '../db/storage.js';
+import { dbStorage, type AppRecord } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
 import { NodeService } from './node.service.js';
 import { isValidDomain } from '../utils/naming.js';
+import { shouldRouteTraffic } from '../utils/health-probe.js';
 import { resolveAppUpstream } from '../utils/app-upstream.js';
 
 const CADDY_CONTAINER = CONFIG.CADDY_CONTAINER;
@@ -56,6 +57,31 @@ export class CaddyService {
   }
 
   /**
+   * Maintenance page for an app the watchdog has declared unhealthy.
+   *
+   * Served instead of proxying to a port nothing is listening on. Caddy's own
+   * answer for a dead upstream is a bare 502 with no explanation — indexable,
+   * and indistinguishable from the site being permanently broken. A 503 with
+   * Retry-After is the honest status code for "this is down right now", and
+   * search engines treat it as temporary.
+   */
+  private static renderMaintenanceSite(domain: string, useInternalTls: boolean): string {
+    const lines = [`${domain} {`];
+    if (useInternalTls) lines.push('  tls internal');
+    lines.push('  handle {');
+    lines.push('    header Retry-After 60');
+    lines.push('    header Cache-Control "no-store"');
+    lines.push('    respond "Servico temporariamente indisponivel. O painel esta tentando restabelecer a aplicacao." 503');
+    lines.push('  }');
+    lines.push('  log {');
+    lines.push(`    output file ${ACCESS_LOG_PATH}`);
+    lines.push('    format json');
+    lines.push('  }');
+    lines.push('}\n\n');
+    return lines.join('\n');
+  }
+
+  /**
    * Renders one site block.
    *
    * A single upstream is used on purpose. The previous version listed four
@@ -65,10 +91,29 @@ export class CaddyService {
    * inside the Caddy container resolves to Caddy itself, so a share of the
    * requests were proxied back into the proxy.
    */
-  private static renderSite(domain: string, upstream: string, useInternalTls: boolean): string {
+  private static renderSite(
+    domain: string,
+    upstream: string,
+    useInternalTls: boolean,
+    extras?: { securityHeaders?: boolean }
+  ): string {
     const lines = [`${domain} {`];
     if (useInternalTls) {
       lines.push('  tls internal');
+    }
+    if (extras?.securityHeaders) {
+      // The panel is a control plane. Apps keep their own headers; locking
+      // these down on every site would break embeds and third-party fonts.
+      lines.push('  header {');
+      lines.push('    Strict-Transport-Security "max-age=31536000; includeSubDomains"');
+      lines.push('    X-Frame-Options DENY');
+      lines.push('    X-Content-Type-Options nosniff');
+      lines.push('    Referrer-Policy no-referrer');
+      lines.push(
+        '    Content-Security-Policy "default-src \'self\'; img-src \'self\' data:; style-src \'self\' \'unsafe-inline\'; script-src \'self\'; connect-src \'self\' wss: ws:; frame-ancestors \'none\'"'
+      );
+      lines.push('    -Server');
+      lines.push('  }');
     }
     lines.push(`  reverse_proxy ${upstream} {`);
     lines.push('    header_up Host {host}');
@@ -148,7 +193,7 @@ export class CaddyService {
 
     const addSite = (
       rawDomain: string,
-      app: { name: string; nodeId?: string; port: number; internalPort?: number } | undefined,
+      app: AppRecord | undefined,
       hostPort: number,
       internalPort: number
     ) => {
@@ -159,6 +204,21 @@ export class CaddyService {
         return;
       }
       rendered.add(domain);
+      const internalTls = CONFIG.LOCAL_MODE || isLocalDomain(domain);
+
+      // Only an app the watchdog has actually declared unhealthy is pulled out.
+      // `unknown` — every app right after a panel restart, before the first
+      // probe — keeps routing: taking every site offline on each restart would
+      // be far worse than briefly proxying to something that turns out to be
+      // down, which Caddy's passive health checks already handle.
+      // Two reasons to stop routing, both of which end in a timeout for the
+      // visitor if ignored: the app itself stopped answering, or the node
+      // hosting it is unreachable — in which case the upstream address still
+      // resolves and Caddy waits for a machine that is gone.
+      if (app && (!shouldRouteTraffic(app.health?.status) || !NodeService.isRoutable(app.nodeId))) {
+        content += this.renderMaintenanceSite(domain, internalTls);
+        return;
+      }
 
       // Prefer container DNS on the panel network; remote apps use hostIp:port
       // because Caddy cannot resolve names on another Docker daemon.
@@ -169,7 +229,7 @@ export class CaddyService {
           )
         : `host.docker.internal:${hostPort}`;
 
-      content += this.renderSite(domain, upstream, CONFIG.LOCAL_MODE || isLocalDomain(domain));
+      content += this.renderSite(domain, upstream, internalTls);
     };
 
     // The panel's own domain is rendered first, so an application that happens
@@ -182,7 +242,8 @@ export class CaddyService {
         content += this.renderSite(
           panelDomain,
           CONFIG.PANEL_UPSTREAM,
-          CONFIG.LOCAL_MODE || isLocalDomain(panelDomain)
+          CONFIG.LOCAL_MODE || isLocalDomain(panelDomain),
+          { securityHeaders: true }
         );
       } else {
         console.warn(`⚠️ Caddy: domínio do painel ignorado por formato inválido: "${panelDomain}"`);

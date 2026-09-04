@@ -1,12 +1,15 @@
 import { Router, Request, Response } from 'express';
-import { SystemService } from '../services/system.service.js';
+import { SystemService, primaryDiskUsage } from '../services/system.service.js';
+import { BuildsCleanupService } from '../services/builds-cleanup.service.js';
 import { CaddyService } from '../services/caddy.service.js';
 import { AlertService } from '../services/alert.service.js';
+import { BackupService } from '../services/backup.service.js';
 import { dockerService } from '../services/docker.service.js';
 import { dbStorage, PanelSettings, AlertConfig } from '../db/storage.js';
-import { authMiddleware, requireAdmin, AuthRequest } from '../middleware/auth.js';
+import { authMiddleware, requireAdmin, requireAdmin2fa, AuthRequest, clientIp } from '../middleware/auth.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { PanelService } from '../services/panel.service.js';
+import { AuditStore } from '../utils/audit.store.js';
 import { validateBody } from '../middleware/validate.js';
 import {
   updateSettingsBodySchema,
@@ -31,8 +34,15 @@ const MASK = '••••••••';
  */
 function redactSettings(settings: PanelSettings): PanelSettings {
   const alert = settings.alertConfig || ({} as AlertConfig);
+  const target = settings.backupTarget;
   return {
     ...settings,
+    backupTarget: target
+      ? {
+          ...target,
+          secretAccessKey: target.secretAccessKey ? MASK : undefined,
+        }
+      : undefined,
     alertConfig: {
       ...alert,
       discordWebhookUrl: alert.discordWebhookUrl ? MASK : undefined,
@@ -48,14 +58,36 @@ function redactSettings(settings: PanelSettings): PanelSettings {
  * every token the user cannot see.
  */
 function mergeSettings(current: PanelSettings, patch: Partial<PanelSettings>): Partial<PanelSettings> {
-  if (!patch.alertConfig) return patch;
+  let next: Partial<PanelSettings> = { ...patch };
+  if (patch.backupTarget) {
+    const incoming = patch.backupTarget;
+    const stored = current.backupTarget;
+    next = {
+      ...next,
+      backupTarget: {
+        provider: 's3',
+        endpoint: incoming.endpoint ?? stored?.endpoint,
+        region: incoming.region || stored?.region || '',
+        bucket: incoming.bucket || stored?.bucket || '',
+        prefix: incoming.prefix ?? stored?.prefix,
+        accessKeyId: incoming.accessKeyId || stored?.accessKeyId || '',
+        secretAccessKey:
+          incoming.secretAccessKey === MASK || incoming.secretAccessKey === undefined
+            ? stored?.secretAccessKey
+            : incoming.secretAccessKey,
+        lastUploadAt: stored?.lastUploadAt,
+        lastError: stored?.lastError,
+      },
+    };
+  }
+  if (!patch.alertConfig) return next;
 
   const incoming = patch.alertConfig as Partial<AlertConfig>;
   const keepIfMasked = <K extends keyof AlertConfig>(key: K): AlertConfig[K] =>
     incoming[key] === MASK || incoming[key] === undefined ? current.alertConfig?.[key] : (incoming[key] as AlertConfig[K]);
 
   return {
-    ...patch,
+    ...next,
     alertConfig: {
       ...current.alertConfig,
       ...incoming,
@@ -67,15 +99,54 @@ function mergeSettings(current: PanelSettings, patch: Partial<PanelSettings>): P
 }
 
 function encryptAlertSecrets(patch: Partial<PanelSettings>): Partial<PanelSettings> {
-  if (!patch.alertConfig) return patch;
-  const alert = { ...patch.alertConfig } as AlertConfig;
+  let next = patch;
+  if (
+    next.backupTarget?.secretAccessKey &&
+    next.backupTarget.secretAccessKey !== MASK &&
+    !EncryptionService.isEncrypted(next.backupTarget.secretAccessKey)
+  ) {
+    next = {
+      ...next,
+      backupTarget: {
+        ...next.backupTarget,
+        secretAccessKey: EncryptionService.encrypt(next.backupTarget.secretAccessKey),
+      },
+    };
+  }
+  if (!next.alertConfig) return next;
+  const alert = { ...next.alertConfig } as AlertConfig;
   for (const key of ['discordWebhookUrl', 'telegramBotToken', 'whatsappApiKey'] as const) {
     const value = alert[key];
     if (value && value !== MASK && !EncryptionService.isEncrypted(value)) {
       alert[key] = EncryptionService.encrypt(value) as never;
     }
   }
-  return { ...patch, alertConfig: alert };
+  return { ...next, alertConfig: alert };
+}
+
+/**
+ * Distance to the thresholds that would justify moving panel state to SQLite.
+ *
+ * Recorded in docs/ADR-0001-panel-state-json.md. Reported as numbers so the
+ * decision is made on evidence instead of on someone's impression that the
+ * panel feels slow — and so that "we are at 40% of the trigger" is a visible
+ * fact rather than a thing nobody measured until it hurt.
+ */
+function migrationTriggerStatus() {
+  const health = dbStorage.getStorageHealth();
+  const records = health.recordCounts;
+  const workloads = (records.apps || 0) + (records.databases || 0);
+  const saveP95Ms = dbStorage.saveP95Ms();
+
+  const limits = { fileSizeMB: 8, workloads: 150, saveP95Ms: 200 };
+  return {
+    limits,
+    current: { fileSizeMB: health.fileSizeMB, workloads, saveP95Ms },
+    reached:
+      health.fileSizeMB >= limits.fileSizeMB ||
+      workloads >= limits.workloads ||
+      (saveP95Ms > 0 && saveP95Ms >= limits.saveP95Ms),
+  };
 }
 
 systemRouter.get('/stats', async (req: Request, res: Response) => {
@@ -86,9 +157,113 @@ systemRouter.get('/stats', async (req: Request, res: Response) => {
   }
 });
 
-systemRouter.get('/storage-health', requireAdmin, (req: Request, res: Response) => {
-  res.json(dbStorage.getStorageHealth());
+systemRouter.get('/storage-health', requireAdmin, async (req: Request, res: Response) => {
+  // Composed here rather than inside getStorageHealth: storage.ts is the state
+  // singleton and must not import a service. Reporting only panel_db.json told
+  // the operator the panel was healthy while `builds/` was eating the disk.
+  res.json({
+    ...dbStorage.getStorageHealth(),
+    directories: BuildsCleanupService.directoryUsage(),
+    buildsCapMb: dbStorage.getSettings().buildsDiskCapMb,
+    hostDisk: await primaryDiskUsage(),
+    // The migration trigger from ADR-0001, reported rather than guessed at.
+    migrationTrigger: migrationTriggerStatus(),
+  });
 });
+
+/**
+ * Point-in-time copies of panel_db.json taken before destructive changes.
+ *
+ * Admin-only like every other view of panel state: the delta exposes how many
+ * users, apps and databases exist.
+ */
+systemRouter.get('/state/snapshots', requireAdmin, (req: Request, res: Response) => {
+  res.json(
+    dbStorage.listSnapshots().map((snapshot) => ({
+      name: snapshot.name,
+      reason: snapshot.reason,
+      takenAt: new Date(snapshot.takenAtMs).toISOString(),
+      sizeBytes: snapshot.sizeBytes,
+    }))
+  );
+});
+
+/** What restoring a snapshot would change, per collection. */
+systemRouter.get('/state/snapshots/:name/delta', requireAdmin, (req: Request, res: Response): void => {
+  try {
+    res.json(dbStorage.snapshotDelta(req.params.name));
+  } catch (err: any) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+/**
+ * Restores a snapshot. Behind 2FA, not just the admin role.
+ *
+ * This replaces every user, application and database record in one call, which
+ * is the same blast radius as the host terminal. A stolen session that only had
+ * to be an admin token could roll the panel back to a state containing an
+ * account the attacker controls.
+ */
+systemRouter.post(
+  '/state/rollback/:name',
+  requireAdmin,
+  requireAdmin2fa,
+  validateBody(emptyBodySchema),
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const restored = dbStorage.restoreSnapshot(req.params.name);
+
+      AuditStore.append({
+        actor: req.user
+          ? { id: req.user.id, username: req.user.username, role: req.user.role }
+          : undefined,
+        sid: req.user?.sid,
+        ip: clientIp(req),
+        action: 'system.state.rollback',
+        outcome: 'success',
+        target: { type: 'snapshot', name: req.params.name },
+      });
+
+      dbStorage.addActivity({
+        type: 'system',
+        title: 'Estado do painel restaurado',
+        description: `Snapshot ${req.params.name} restaurado por ${req.user?.username || 'admin'}.`,
+        status: 'warning',
+        metadata: { snapshot: req.params.name },
+      });
+
+      // Domains and applications may differ from what Caddy is serving; a
+      // rollback that left the proxy pointing at the previous set would route
+      // traffic to containers the restored state does not know about.
+      await CaddyService.syncCaddyfile().catch((err: any) =>
+        console.warn('Caddy sync após rollback de estado:', err?.message)
+      );
+
+      res.json({
+        success: true,
+        message: 'Estado restaurado. Todas as sessões foram revogadas; faça login novamente.',
+        counts: {
+          users: restored.users.length,
+          apps: restored.apps.length,
+          databases: restored.databases.length,
+        },
+      });
+    } catch (err: any) {
+      AuditStore.append({
+        actor: req.user
+          ? { id: req.user.id, username: req.user.username, role: req.user.role }
+          : undefined,
+        ip: clientIp(req),
+        action: 'system.state.rollback',
+        outcome: 'failure',
+        target: { type: 'snapshot', name: req.params.name },
+        meta: { error: err.message },
+      });
+      res.status(400).json({ error: err.message });
+    }
+  }
+);
 
 systemRouter.get('/history', (req: Request, res: Response) => {
   const range = (req.query.range as string) || 'realtime';
@@ -136,6 +311,7 @@ systemRouter.get('/overview', async (req: Request, res: Response) => {
         runningDatabases: databases.filter((d) => d.status === 'running').length,
       },
       settings: redactSettings(dbStorage.getSettings()),
+      restoreDrill: BackupService.latestDrillStatus(),
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -206,6 +382,14 @@ systemRouter.post('/import-state', requireAdmin, validateBody(importStateBodySch
 
     dbStorage.importState(stateData);
 
+    AuditStore.append({
+      actor: { id: req.user!.id, username: req.user!.username, role: req.user!.role },
+      sid: req.user!.sid,
+      ip: clientIp(req),
+      action: 'system.import',
+      outcome: 'success',
+    });
+
     res.json({
       success: true,
       warning: importedUsers.some((u) => u.id === req.user!.id)
@@ -245,6 +429,42 @@ systemRouter.get('/activities', (req: Request, res: Response): void => {
 systemRouter.get('/alert-history', (req: Request, res: Response): void => {
   const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
   res.json(dbStorage.getAlertHistory(undefined, limit));
+});
+
+systemRouter.get('/audit', requireAdmin, (req: Request, res: Response): void => {
+  const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 200;
+  const from = typeof req.query.from === 'string' ? new Date(req.query.from) : undefined;
+  const to = typeof req.query.to === 'string' ? new Date(req.query.to) : undefined;
+  const actor = typeof req.query.actor === 'string' ? req.query.actor : undefined;
+  const action = typeof req.query.action === 'string' ? req.query.action : undefined;
+  const events = AuditStore.query({
+    from: from && !Number.isNaN(from.getTime()) ? from : undefined,
+    to: to && !Number.isNaN(to.getTime()) ? to : undefined,
+    actor,
+    action,
+    limit,
+  });
+  if (req.query.format === 'csv') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=aegis-audit.csv');
+    const csvCell = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const header = 'ts,actor,role,ip,action,outcome\n';
+    const rows = events
+      .map((e) =>
+        [
+          csvCell(e.ts),
+          csvCell(e.actor?.username || ''),
+          csvCell(e.actor?.role || ''),
+          csvCell(e.ip || ''),
+          csvCell(e.action),
+          csvCell(e.outcome),
+        ].join(',')
+      )
+      .join('\n');
+    res.send(header + rows);
+    return;
+  }
+  res.json(events);
 });
 
 // Test a notification channel
@@ -304,15 +524,30 @@ systemRouter.get('/panel/logs/:target', requireAdmin, async (req: Request, res: 
   }
 });
 
-systemRouter.post('/panel/self-update', requireAdmin, validateBody(emptyBodySchema), async (_req: Request, res: Response): Promise<void> => {
+systemRouter.post('/panel/self-update', requireAdmin, validateBody(emptyBodySchema), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const result = await PanelService.selfUpdate();
+    AuditStore.append({
+      actor: req.user ? { id: req.user.id, username: req.user.username, role: req.user.role } : undefined,
+      sid: req.user?.sid,
+      ip: clientIp(req),
+      action: 'panel.self-update',
+      outcome: 'success',
+    });
     res.json({
       success: true,
       message: 'Self-update da stack iniciado/concluído.',
       output: result.output,
     });
   } catch (err: any) {
+    AuditStore.append({
+      actor: req.user ? { id: req.user.id, username: req.user.username, role: req.user.role } : undefined,
+      sid: req.user?.sid,
+      ip: clientIp(req),
+      action: 'panel.self-update',
+      outcome: 'failure',
+      meta: { error: err.message },
+    });
     res.status(400).json({ error: err.message });
   }
 });

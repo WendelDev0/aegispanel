@@ -1,8 +1,9 @@
 import { Socket } from 'socket.io';
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
 import { CONFIG } from '../config.js';
-import { AuthUser, authenticateToken } from '../middleware/auth.js';
+import { AuthUser, authenticateToken, adminHas2fa } from '../middleware/auth.js';
 import { dockerService } from './docker.service.js';
+import { AuditStore } from '../utils/audit.store.js';
 
 /** Docker accepts a container id (hex) or a name; both are constrained here. */
 const CONTAINER_REF = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
@@ -57,7 +58,25 @@ export class TerminalService {
       const wantsHostShell = !options?.containerId;
 
       if (wantsHostShell && sessionUser.role !== 'admin') {
+        AuditStore.append({
+          actor: { id: sessionUser.id, username: sessionUser.username, role: sessionUser.role },
+          sid: sessionUser.sid,
+          action: 'terminal.host.open',
+          outcome: 'forbidden',
+        });
         deny('Permissão negada: o terminal do host é restrito ao perfil admin.');
+        return;
+      }
+
+      if (wantsHostShell && CONFIG.REQUIRE_2FA_ADMIN && !adminHas2fa(sessionUser.id)) {
+        AuditStore.append({
+          actor: { id: sessionUser.id, username: sessionUser.username, role: sessionUser.role },
+          sid: sessionUser.sid,
+          action: 'terminal.host.open',
+          outcome: 'forbidden',
+          meta: { reason: '2fa_required' },
+        });
+        deny('Ative a autenticação em dois fatores para abrir o terminal do host.');
         return;
       }
 
@@ -118,6 +137,15 @@ export class TerminalService {
         });
 
         socket.emit('terminal:ready', { success: true });
+        AuditStore.append({
+          actor: { id: sessionUser.id, username: sessionUser.username, role: sessionUser.role },
+          sid: sessionUser.sid,
+          action: wantsHostShell ? 'terminal.host.open' : 'terminal.container.open',
+          outcome: 'success',
+          target: options.containerId
+            ? { type: 'container', id: options.containerId }
+            : { type: 'host', name: 'host' },
+        });
       } catch (err: any) {
         socket.emit('terminal:data', `\r\n\x1b[31m[Failed to start shell: ${err.message}]\x1b[0m\r\n`);
       }

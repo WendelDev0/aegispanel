@@ -6,6 +6,35 @@ const username = z
 
 const password = z.string().min(12).max(512);
 
+/**
+ * Probe settings for an app.
+ *
+ * The path is interpolated into a CMD-SHELL healthcheck, so a value carrying a
+ * quote or a command substitution would be evaluated by the container's shell
+ * on every interval. Only a plain path is accepted; it is rejected rather than
+ * escaped.
+ */
+const healthcheckConfig = z.object({
+  path: z.string().regex(/^\/[A-Za-z0-9\-._~/?=&%]{0,255}$/, 'caminho inválido'),
+  intervalSec: z.number().int().min(5).max(3600),
+  timeoutSec: z.number().int().min(1).max(120),
+  retries: z.number().int().min(1).max(10),
+});
+
+/**
+ * Resource ceiling for a container.
+ *
+ * Bounds are stated here as well as in normalizeLimits so a typo comes back as
+ * a 400 naming the field, instead of being silently clamped to something the
+ * user did not ask for. normalizeLimits stays the last line of defence for
+ * records written by older versions.
+ */
+const resourceLimits = z.object({
+  memoryMb: z.number().int().min(64).max(1024 * 1024),
+  cpus: z.number().min(0.1).max(256),
+  pidsLimit: z.number().int().min(16).max(32_768),
+});
+
 export const loginBodySchema = z
   .object({
     username: z.string().min(1),
@@ -26,6 +55,19 @@ export const changePasswordBodySchema = z
   .object({
     currentPassword: z.string().min(1).max(512),
     newPassword: password,
+  })
+  .strict();
+
+export const totpConfirmBodySchema = z
+  .object({
+    code: z.string().min(4).max(16),
+  })
+  .strict();
+
+export const totpDisableBodySchema = z
+  .object({
+    password: z.string().min(1).max(512),
+    code: z.string().min(4).max(16),
   })
   .strict();
 
@@ -50,6 +92,8 @@ export const createAppBodySchema = z.object({
   autoDeploy: z.boolean().optional(),
   deployBranch: z.string().optional(),
   nodeId: z.string().optional(),
+  limits: resourceLimits.optional(),
+  healthcheck: healthcheckConfig.optional(),
 });
 
 export const updateAppBodySchema = z.object({
@@ -64,6 +108,10 @@ export const updateAppBodySchema = z.object({
   autoDeploy: z.boolean().optional(),
   deployBranch: z.string().optional(),
   nodeId: z.string().optional().nullable(),
+  /** null clears the per-app ceiling and restores the global default. */
+  limits: resourceLimits.optional().nullable(),
+  /** null disables the in-container probe; the panel keeps probing from outside. */
+  healthcheck: healthcheckConfig.optional().nullable(),
 });
 
 export const inspectRepoBodySchema = z.object({
@@ -97,12 +145,13 @@ export const createDatabaseBodySchema = z.object({
   dbPassword: z.string().optional(),
   dbName: z.string().optional(),
   withGui: z.boolean().optional(),
+  limits: resourceLimits.optional(),
 });
 
 export const createCronBodySchema = z.object({
   name: z.string().min(1).max(120),
   schedule: z.string().min(1).max(120),
-  type: z.enum(['shell', 'backup', 'webhook']),
+  type: z.enum(['shell', 'backup', 'webhook', 'restore-drill']),
   command: z.string().optional(),
   webhookUrl: z.string().optional(),
 });
@@ -209,3 +258,17 @@ export const emptyBodySchema = z.preprocess(
   (val) => (val === undefined || val === null ? {} : val),
   z.object({}).strict()
 );
+
+export const backupTargetBodySchema = z.object({
+  provider: z.literal('s3').optional(),
+  endpoint: z.string().max(500).optional(),
+  region: z.string().min(1).max(80),
+  bucket: z.string().min(1).max(255),
+  prefix: z.string().max(200).optional(),
+  accessKeyId: z.string().min(1).max(200),
+  secretAccessKey: z.string().max(500).optional(),
+});
+
+export const remoteRestoreBodySchema = z.object({
+  key: z.string().min(1).max(1024).refine((k) => !k.includes('..'), 'Chave inválida'),
+});

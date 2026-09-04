@@ -20,7 +20,7 @@ export interface CronJobRecord {
   id: string;
   name: string;
   schedule: string;
-  type: 'shell' | 'backup' | 'webhook';
+  type: 'shell' | 'backup' | 'webhook' | 'restore-drill';
   command?: string;
   webhookUrl?: string;
   enabled: boolean;
@@ -39,7 +39,7 @@ export const CronPage: React.FC = () => {
   // Form state
   const [name, setName] = useState('');
   const [schedule, setSchedule] = useState('0 3 * * *');
-  const [type, setType] = useState<'backup' | 'shell' | 'webhook'>('backup');
+  const [type, setType] = useState<'backup' | 'shell' | 'webhook' | 'restore-drill'>('backup');
   const [command, setCommand] = useState('docker system prune -f');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -195,6 +195,10 @@ export const CronPage: React.FC = () => {
                     <span className="text-ok flex items-center gap-1">
                       <Database className="w-3.5 h-3.5" /> Backup Automático dos Bancos
                     </span>
+                  ) : job.type === 'restore-drill' ? (
+                    <span className="text-ok flex items-center gap-1">
+                      <Database className="w-3.5 h-3.5" /> Ensaio mensal de restore
+                    </span>
                   ) : job.type === 'shell' ? (
                     <span className="text-primary flex items-center gap-1 truncate max-w-md">
                       <Terminal className="w-3.5 h-3.5" /> {job.command}
@@ -298,6 +302,7 @@ export const CronPage: React.FC = () => {
                   className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary"
                 >
                   <option value="backup">Dump de Backup Automático de Todos os Bancos</option>
+                  <option value="restore-drill">Ensaio mensal de restore (sem sobrescrever produção)</option>
                   <option value="shell">Comando Shell Linux / Docker</option>
                   <option value="webhook">Disparo de Webhook HTTP POST</option>
                 </select>
