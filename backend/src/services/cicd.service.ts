@@ -17,6 +17,7 @@ import { assertSafeGitUrl, SafeGitTarget } from '../utils/url-security.js';
 import { injectPublicBuildArgs, publicBuildArgMap, publicBuildArgs } from '../utils/build-env.js';
 import { remoteWorkloadPlacement } from '../utils/app-upstream.js';
 import { redactSecrets as redactSecretText } from '../utils/redact.js';
+import { BuildsCleanupService } from './builds-cleanup.service.js';
 
 const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 const BUILD_TIMEOUT_MS = 30 * 60 * 1000;
@@ -791,6 +792,16 @@ export class CicdService {
         await CaddyService.syncCaddyfile();
       } catch (err: any) {
         console.warn('Caddy sync notice após deploy:', err.message);
+      }
+
+      // Right after a deploy, because that is when the tree just grew and when
+      // this app's own working copy is the one we must not touch. Never fatal:
+      // the deploy already succeeded, and failing it over housekeeping would
+      // report a working release as broken.
+      try {
+        BuildsCleanupService.enforceCap(app.id);
+      } catch (err: any) {
+        console.warn('Limpeza de builds falhou:', err?.message);
       }
 
       dbStorage.addActivity({

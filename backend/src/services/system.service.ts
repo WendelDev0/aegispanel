@@ -8,6 +8,48 @@ import { CONFIG } from '../config.js';
 
 let lastDiskSaveTime = 0;
 
+export interface PrimaryDiskUsage {
+  mount: string;
+  sizeBytes: number;
+  availableBytes: number;
+  usePercent: number;
+  freePercent: number;
+}
+
+/**
+ * Usage of the filesystem the panel writes to.
+ *
+ * Read on its own rather than from the realtime metrics loop, which skips
+ * every sample while no client is connected — the disk fills on an unattended
+ * server just as fast, and the panel needs the number to warn about it.
+ */
+export async function primaryDiskUsage(): Promise<PrimaryDiskUsage | null> {
+  try {
+    const sizes = await si.fsSize();
+    if (!sizes.length) return null;
+
+    // The mount that actually holds DATA_DIR, not simply the first entry: on a
+    // VPS with a separate data volume those are different disks, and warning
+    // about the wrong one is worse than not warning.
+    const target = path.resolve(CONFIG.DATA_DIR);
+    const candidates = sizes
+      .filter((disk) => disk.mount && target.startsWith(disk.mount))
+      .sort((a, b) => b.mount.length - a.mount.length);
+    const disk = candidates[0] || sizes[0];
+
+    const usePercent = Math.round((disk.use ?? 0) * 10) / 10;
+    return {
+      mount: disk.mount,
+      sizeBytes: disk.size,
+      availableBytes: disk.available,
+      usePercent,
+      freePercent: Math.round((100 - usePercent) * 10) / 10,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export interface SystemStats {
   cpu: {
     usagePercent: number;

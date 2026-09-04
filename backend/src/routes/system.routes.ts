@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { SystemService } from '../services/system.service.js';
+import { SystemService, primaryDiskUsage } from '../services/system.service.js';
+import { BuildsCleanupService } from '../services/builds-cleanup.service.js';
 import { CaddyService } from '../services/caddy.service.js';
 import { AlertService } from '../services/alert.service.js';
 import { BackupService } from '../services/backup.service.js';
@@ -131,8 +132,16 @@ systemRouter.get('/stats', async (req: Request, res: Response) => {
   }
 });
 
-systemRouter.get('/storage-health', requireAdmin, (req: Request, res: Response) => {
-  res.json(dbStorage.getStorageHealth());
+systemRouter.get('/storage-health', requireAdmin, async (req: Request, res: Response) => {
+  // Composed here rather than inside getStorageHealth: storage.ts is the state
+  // singleton and must not import a service. Reporting only panel_db.json told
+  // the operator the panel was healthy while `builds/` was eating the disk.
+  res.json({
+    ...dbStorage.getStorageHealth(),
+    directories: BuildsCleanupService.directoryUsage(),
+    buildsCapMb: dbStorage.getSettings().buildsDiskCapMb,
+    hostDisk: await primaryDiskUsage(),
+  });
 });
 
 systemRouter.get('/history', (req: Request, res: Response) => {

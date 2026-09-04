@@ -270,6 +270,11 @@ export interface PanelSettings {
   autoBackup: boolean;
   backupIntervalHours: number;
   backupTarget?: BackupTarget;
+  /**
+   * Ceiling for `DATA_DIR/builds`. Reclaimable artifacts of the least recently
+   * built apps are deleted after a deploy until the tree fits.
+   */
+  buildsDiskCapMb: number;
   /** Applied to any app whose record carries no explicit `limits`. */
   defaultAppLimits: ResourceLimits;
   /** Same, for provisioned database engines. */
@@ -347,6 +352,7 @@ const DEFAULT_DATA: DatabaseSchema = {
     caddyEnabled: true,
     autoBackup: true,
     backupIntervalHours: 24,
+    buildsDiskCapMb: 5120,
     defaultAppLimits: { ...DEFAULT_APP_LIMITS },
     defaultDatabaseLimits: { ...DEFAULT_DATABASE_LIMITS },
     alertConfig: {

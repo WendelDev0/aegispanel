@@ -231,6 +231,21 @@ class DockerManager {
     }
   }
 
+  /**
+   * Removes one image tag.
+   *
+   * Untagging rather than force-removing: an image a container still runs from
+   * must stay, and the daemon already refuses that. Forcing would kill the
+   * rollback target of an app the operator is about to need.
+   */
+  async removeImage(tag: string, client?: Docker): Promise<void> {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_.\/-]{0,199}:[A-Za-z0-9_.-]{1,127}$/.test(tag)) {
+      throw new Error(`Tag de imagem inválida: ${tag}`);
+    }
+    const docker = client || this.docker;
+    await docker.getImage(tag).remove({ force: false });
+  }
+
   async listContainers(all: boolean = true): Promise<ContainerInfo[]> {
     return this.listContainersFiltered(all, false);
   }

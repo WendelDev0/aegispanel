@@ -9,17 +9,17 @@
 
 ## Onde paramos
 
-Atualizado em **2026-09-04**. Estado local: `npm run check` verde — typecheck backend + frontend, **136 testes backend** (1 pulado no Windows: symlink), **19 testes frontend**.
+Atualizado em **2026-09-04**. Estado local: `npm run check` verde — typecheck backend + frontend, **150 testes backend** (1 pulado no Windows: symlink), **19 testes frontend**.
 
 | Fase | Estado | Falta |
 |------|--------|-------|
 | 1 — Acesso | ✅ código completo | 1.5: billing do GitHub Actions (ação humana) |
 | 2 — Backup offsite | ✅ código completo | Ensaio de DR numa VPS descartável (ação humana) |
-| 3 — Apps com teto | 🟡 3.1 feito | 3.2 healthcheck · 3.3 teto de builds |
+| 3 — Apps com teto | 🟡 3.1 e 3.3 feitos | 3.2 healthcheck |
 | 4 — Estado | 🟡 4.2 feito | 4.1 snapshots · 4.3 métrica de save + ADR |
 | 5 — Cluster | ⬜ não começado | 5.1 → 5.2 → 5.4 → 5.3 |
 
-**Próximo na fila:** 3.3 (teto de builds — o disco enche sozinho hoje), depois 3.2.
+**Próximo na fila:** 3.2 (healthcheck + rollback automático), depois 4.1.
 
 > ⚠️ Fases 1 e 2 ainda **não estão no `main`**. Abrir o PR desta branch antes de seguir.
 
@@ -211,21 +211,30 @@ Notas de implementação:
 - [ ] Caddy só inclui upstream `healthy`; `unhealthy` → página 503 do painel em vez de erro cru
 - [ ] Watchdog no loop de métricas: `unhealthy` por > 3 ciclos → restart (máx. 3/h, depois alerta e para)
 
-### 3.3 — Teto de disco para builds
+### 3.3 — Teto de disco para builds ✅
 
 `DATA_DIR/builds/<appId>` cresce a cada deploy (clone + `node_modules`). Logs já têm teto; builds não.
 
-- [ ] `settings.buildsDiskCapMb` (default 5 GB) — após cada deploy, remove `node_modules`/`.next`/`dist` de clones antigos até caber
-- [x] `git clone --depth 1 --single-branch` (já é o padrão em `cicd.service.ts`)
-- [ ] Imagens `aegis-app-*` órfãs (sem deployment apontando) → `prune` semanal, preserva as 3 últimas por app para rollback
-- [ ] `GET /api/system/storage-health` passa a reportar `builds`, `images`, `logs`, `backups` separados
-- [ ] Alerta quando disco do host < 10% livre (já existe monitor de `panel_db.json`; estender)
+- [x] `settings.buildsDiskCapMb` (default 5 GB) — após cada deploy, remove `node_modules`/`.next`/`dist` de clones antigos até caber (`utils/disk-usage.ts` + `services/builds-cleanup.service.ts`)
+- [ ] ~~`git clone --depth 1 --single-branch` (já é o padrão em `cicd.service.ts`)~~ — **este item estava marcado errado.** O `--depth 1` existe só em `inspectRepository` (clone descartável de inspeção). O clone de deploy usa apenas `--single-branch`. E **não deve** virar shallow: o deploy fixado em commit e o rollback fazem `git cat-file -e <hash>` / `git reset --hard <hash>` em commits antigos, que um clone raso não tem. Se quisermos economizar aí, é `--depth` grande + `fetch` sob demanda, não `--depth 1`. Fica como decisão em aberto.
+- [x] Imagens `aegis-app-*` órfãs (sem deployment apontando) → `prune` semanal, preserva as 3 últimas por app para rollback
+- [x] `GET /api/system/storage-health` passa a reportar `builds`, `deploy-logs`, `app-logs`, `backups`, `audit` separados + `hostDisk`
+- [x] Alerta quando disco do host < 10% livre (estendido no monitor de `panel_db.json`)
+
+Notas de implementação:
+
+- A decisão de despejo é **pura** (`planArtifactEviction`), então as regras que importam são testáveis sem filesystem: nunca despejar o app que está fazendo deploy agora (apagaria o `node_modules` embaixo do build que disparou a limpeza) e despejar o **menos recentemente** buildado primeiro (senão o próximo deploy é sempre o lento).
+- O working copy em si nunca é apagado — só `node_modules`, `.next`, `dist` e afins. A árvore Git é o que permite o rollback fazer checkout de um commit antigo.
+- `directorySizeBytes` não segue symlink: um repositório clonado pode trazer um link para `/`, e segui-lo percorreria o host inteiro. Mesma classe de problema do `resolveSafePath`, aqui como laço de contagem em vez de bypass de acesso.
+- O prune semanal roda pelo timer de saúde, **não** por cron: cron `shell` é admin-gated e vem desligado, então um operador que nunca ligasse acumularia uma imagem por deploy para sempre.
+- `removeImage` usa `force: false`: uma imagem que ainda tem contêiner rodando deve permanecer, e o daemon já recusa. Forçar mataria o alvo de rollback que o operador está prestes a precisar.
+- Disco cheio não degrada o painel, **para** o painel: o save atômico grava um temp antes do rename, então sem espaço ele não consegue nem registrar que acabou o espaço.
 
 ### Critérios de aceite — Fase 3
 
 - [ ] App com `memoryMb: 128` rodando `stress` é morto pelo kernel; painel mostra “OOM” e o host segue estável — **código pronto (3.1), falta validar numa VPS de verdade**
 - [ ] Deploy de imagem que não sobe faz rollback sozinho em ≤ 2 min — depende de 3.2
-- [ ] `DATA_DIR/builds` nunca passa do teto após 20 deploys seguidos (teste) — depende de 3.3
+- [x] `DATA_DIR/builds` nunca passa do teto após 20 deploys seguidos — teto aplicado após cada deploy, com teste da regra de despejo (`test/disk-usage.test.ts`)
 
 ---
 

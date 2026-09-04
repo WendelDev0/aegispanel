@@ -5,7 +5,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
 import { CONFIG } from './config.js';
 import { setIo, connectedClients } from './realtime.js';
-import { SystemService } from './services/system.service.js';
+import { SystemService, primaryDiskUsage } from './services/system.service.js';
 import { TerminalService } from './services/terminal.service.js';
 import { AlertService } from './services/alert.service.js';
 import { CaddyService } from './services/caddy.service.js';
@@ -13,6 +13,7 @@ import { CronService } from './services/cron.service.js';
 import { AnalyticsService } from './services/analytics.service.js';
 import { CicdService } from './services/cicd.service.js';
 import { WatchdogService } from './services/watchdog.service.js';
+import { BuildsCleanupService } from './services/builds-cleanup.service.js';
 import { authenticateToken, AuthUser } from './middleware/auth.js';
 import { dbStorage } from './db/storage.js';
 import { AuditStore } from './utils/audit.store.js';
@@ -220,7 +221,7 @@ const STORAGE_PRUNE_THRESHOLD_MB = 10;
 const STORAGE_ALERT_THRESHOLD_MB = 20;
 let lastStorageAlertAt = 0;
 
-const storageTimer = setInterval(() => {
+const storageTimer = setInterval(async () => {
   try {
     dbStorage.pruneSessions();
     AuditStore.archiveAndPrune(12, path.join(CONFIG.DATA_DIR, 'backups', 'audit-archive'));
@@ -264,10 +265,74 @@ const storageTimer = setInterval(() => {
         metadata: { fileSizeMB: health.fileSizeMB, ...health.recordCounts },
       });
     }
+
+    await checkHostDisk(now);
+    await pruneImagesWeekly(now);
   } catch (err: any) {
     console.warn('Falha ao verificar saúde do storage:', err?.message);
   }
 }, STORAGE_CHECK_INTERVAL_MS);
+
+/**
+ * Warns before the disk is full rather than after.
+ *
+ * A full disk does not degrade this panel, it stops it: every state mutation
+ * writes a temp file and renames it, so once there is no room the panel cannot
+ * even record that it ran out. The threshold is free space, not the panel's own
+ * footprint — an application writing logs into a volume fills the same disk.
+ */
+const HOST_DISK_FREE_ALERT_PERCENT = 10;
+let lastDiskAlertAt = 0;
+
+async function checkHostDisk(now: number): Promise<void> {
+  const disk = await primaryDiskUsage();
+  if (!disk || disk.freePercent > HOST_DISK_FREE_ALERT_PERCENT) return;
+  if (now - lastDiskAlertAt < 60 * 60 * 1000) return;
+  lastDiskAlertAt = now;
+
+  const freeGb = Math.round((disk.availableBytes / 1024 / 1024 / 1024) * 10) / 10;
+  const detail =
+    `O disco em ${disk.mount} está com apenas ${disk.freePercent}% livre (${freeGb} GB). ` +
+    'Sem espaço, o painel não consegue nem gravar o próprio estado. ' +
+    'Reduza o teto de builds em Configurações, remova backups antigos ou aumente o volume.';
+  console.warn(`⚠️ ${detail}`);
+
+  await AlertService.broadcastNotification(
+    '⚠️ Alerta: disco do servidor quase cheio',
+    detail,
+    'alert',
+    true
+  ).catch(() => {
+    // A failed notification must not abort the rest of the health sweep.
+  });
+  dbStorage.addActivity({
+    type: 'system',
+    title: 'Disco do servidor quase cheio',
+    description: detail,
+    status: 'warning',
+    metadata: { mount: disk.mount, freePercent: disk.freePercent, availableBytes: disk.availableBytes },
+  });
+}
+
+/**
+ * Weekly prune of app images no rollback can reach.
+ *
+ * Driven from this timer instead of a cron job because it must not be
+ * disableable by accident: a `shell` cron is admin-gated and off by default,
+ * and an operator who never enables it gets an image per deploy forever.
+ */
+const IMAGE_PRUNE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+let lastImagePruneAt = Date.now();
+
+async function pruneImagesWeekly(now: number): Promise<void> {
+  if (now - lastImagePruneAt < IMAGE_PRUNE_INTERVAL_MS) return;
+  lastImagePruneAt = now;
+  try {
+    await BuildsCleanupService.pruneOrphanImages();
+  } catch (err: any) {
+    console.warn('Prune de imagens falhou:', err?.message);
+  }
+}
 
 server.listen(CONFIG.PORT, () => {
   console.log(`========================================================`);
