@@ -49,6 +49,62 @@ function formatRam(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * The badge an app card shows.
+ *
+ * A container can be `running` and serving nothing — that is exactly what a
+ * crash loop looks like — so a card that reported only the container state told
+ * the operator the app was fine while the site returned errors. Health takes
+ * precedence when the panel has probed it; `unknown` (every app right after a
+ * panel restart) falls back to the container state rather than claiming a
+ * problem nobody has observed.
+ */
+function appStatusBadge(app: AppRecord): {
+  label: string;
+  title: string;
+  className: string;
+  dotClassName: string;
+} {
+  if (app.status !== 'running') {
+    return {
+      label: app.status === 'building' ? 'Publicando' : app.status === 'error' ? 'Erro' : 'Parado',
+      title: 'O contêiner não está em execução.',
+      className: 'bg-surface-container-high text-on-surface-variant border border-outline-variant',
+      dotClassName: 'bg-outline',
+    };
+  }
+
+  const health = app.health?.status;
+  if (health === 'unhealthy') {
+    return {
+      label: 'Não responde',
+      title: app.health?.lastError
+        ? `O contêiner está de pé, mas não responde: ${app.health.lastError}`
+        : 'O contêiner está de pé, mas não responde na porta da aplicação.',
+      className: 'bg-crit/10 text-crit border border-crit/30',
+      dotClassName: 'bg-crit animate-pulse',
+    };
+  }
+  if (health === 'starting') {
+    return {
+      label: 'Subindo',
+      title: 'Ainda não respondeu; aguardando os próximos ciclos antes de agir.',
+      className: 'bg-warn/10 text-warn border border-warn/30',
+      dotClassName: 'bg-warn animate-pulse',
+    };
+  }
+
+  return {
+    label: 'Online',
+    title:
+      health === 'healthy'
+        ? 'Respondendo normalmente na última verificação.'
+        : 'Contêiner em execução; ainda sem verificação de saúde.',
+    className: 'bg-ok/10 text-ok border border-ok/30',
+    dotClassName: 'bg-emerald-400 animate-pulse',
+  };
+}
+
 interface AppsPageProps {
   /** Opens the analytics view already focused on this application. */
   onOpenAnalytics?: (appId: string) => void;
@@ -375,20 +431,21 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics }) => {
                     </div>
                   </div>
 
-                  <span
-                    className={`text-xs px-3 py-1 rounded-full font-semibold flex items-center gap-1.5 shrink-0 ${
-                      app.status === 'running'
-                        ? 'bg-ok/10 text-ok border border-ok/30'
-                        : 'bg-surface-container-high text-on-surface-variant border border-outline-variant'
-                    }`}
-                  >
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        app.status === 'running' ? 'bg-emerald-400 animate-pulse' : 'bg-outline'
-                      }`}
-                    ></span>
-                    {app.status === 'running' ? 'Online' : 'Parado'}
-                  </span>
+                  {(() => {
+                    // "running" only says the container exists. A crash-looping
+                    // app is running and serving nothing, so the badge reports
+                    // whether it actually answers when the panel knows.
+                    const badge = appStatusBadge(app);
+                    return (
+                      <span
+                        title={badge.title}
+                        className={`text-xs px-3 py-1 rounded-full font-semibold flex items-center gap-1.5 shrink-0 ${badge.className}`}
+                      >
+                        <span className={`w-2 h-2 rounded-full ${badge.dotClassName}`}></span>
+                        {badge.label}
+                      </span>
+                    );
+                  })()}
                 </div>
 
                 {/* Direct VPS IP + Port Access Banner */}

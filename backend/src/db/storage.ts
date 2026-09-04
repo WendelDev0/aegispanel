@@ -11,6 +11,7 @@ import {
   normalizeLimits,
   type ResourceLimits,
 } from '../utils/resource-limits.js';
+import type { AppHealth, HealthcheckConfig } from '../utils/health-probe.js';
 
 export interface User {
   id: string;
@@ -101,6 +102,14 @@ export interface AppRecord {
    * next deploy.
    */
   limits?: ResourceLimits;
+  /**
+   * Probe settings. Absent means the panel's own defaults are used; setting
+   * this also enables Docker's in-container healthcheck, which is opt-in
+   * because a distroless image has no wget or curl to run it with.
+   */
+  healthcheck?: HealthcheckConfig;
+  /** Last observed health. Written by the watchdog, never by the user. */
+  health?: AppHealth;
   env: Record<string, string>;
   domain?: string;
   webhookSecret?: string;

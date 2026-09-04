@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronDown, Cpu, Lock, MemoryStick, Settings2, X } from 'lucide-react';
+import { ChevronDown, Cpu, HeartPulse, Lock, MemoryStick, Settings2, X } from 'lucide-react';
 import { api } from '../../services/api.js';
-import type { AppRecord, ResourceLimits, ServerNode } from '../../types/index.js';
+import type { AppRecord, HealthcheckConfig, ResourceLimits, ServerNode } from '../../types/index.js';
 
 const LOCAL_NODE_ID = 'node-local';
 
@@ -43,6 +43,8 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({ app, onClose, onSave
   // null means "follow the global default"; the app record only stores a value
   // when the user set one, so raising the default later still reaches this app.
   const [customLimits, setCustomLimits] = useState<ResourceLimits | null>(app.limits ?? null);
+  // null means the in-container probe is off; the panel still probes from outside.
+  const [healthcheck, setHealthcheck] = useState<HealthcheckConfig | null>(app.healthcheck ?? null);
   const [defaultLimits, setDefaultLimits] = useState<ResourceLimits>(FALLBACK_LIMITS);
   const [usage, setUsage] = useState<{ memoryUsedBytes: number; cpuPercent: number } | null>(null);
   const effectiveLimits = customLimits ?? defaultLimits;
@@ -107,6 +109,7 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({ app, onClose, onSave
         // null clears the per-app ceiling on the server; undefined would read
         // as "unchanged" and leave the old value in place.
         limits: customLimits,
+        healthcheck,
       });
 
       onSaved(res.data);
@@ -378,6 +381,106 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({ app, onClose, onSave
             {customLimits !== null && (
               <p className="text-[10px] text-warn">
                 O teto só entra em vigor recriando o contêiner: salvar aqui dispara um deploy.
+              </p>
+            )}
+          </div>
+
+          <div className="border-t border-outline-variant pt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider flex items-center gap-1.5">
+                <HeartPulse className="w-3.5 h-3.5 text-primary" /> Verificação de saúde
+              </span>
+              <label className="flex items-center gap-2 text-[11px] text-on-surface-variant cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={healthcheck !== null}
+                  onChange={(e) =>
+                    setHealthcheck(
+                      e.target.checked
+                        ? { path: '/', intervalSec: 30, timeoutSec: 5, retries: 3 }
+                        : null,
+                    )
+                  }
+                  className="accent-primary"
+                />
+                Sonda dentro do contêiner
+              </label>
+            </div>
+
+            <p className="text-[10px] text-on-surface-variant/70">
+              O painel já verifica esta aplicação de fora, pela rede — isso funciona com qualquer
+              imagem e não precisa de configuração. Ligue a sonda interna só se a imagem tiver{' '}
+              <code>wget</code> ou <code>curl</code>: uma imagem distroless não tem, e a verificação
+              falharia sempre.
+            </p>
+
+            {healthcheck !== null && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <label className="block text-[10px] text-on-surface-variant mb-1">Caminho</label>
+                  <input
+                    type="text"
+                    value={healthcheck.path}
+                    onChange={(e) =>
+                      setHealthcheck((prev) => ({ ...prev!, path: e.target.value }))
+                    }
+                    placeholder="/"
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-on-surface-variant mb-1">
+                    Intervalo (s)
+                  </label>
+                  <input
+                    type="number"
+                    min={5}
+                    value={healthcheck.intervalSec}
+                    onChange={(e) =>
+                      setHealthcheck((prev) => ({
+                        ...prev!,
+                        intervalSec: Number(e.target.value) || 30,
+                      }))
+                    }
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-on-surface-variant mb-1">
+                    Tentativas
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={healthcheck.retries}
+                    onChange={(e) =>
+                      setHealthcheck((prev) => ({ ...prev!, retries: Number(e.target.value) || 3 }))
+                    }
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-primary"
+                  />
+                </div>
+              </div>
+            )}
+
+            {app.health && (
+              <p className="text-[10px] text-on-surface-variant/70">
+                Última verificação:{' '}
+                <span
+                  className={
+                    app.health.status === 'unhealthy'
+                      ? 'text-crit'
+                      : app.health.status === 'healthy'
+                        ? 'text-ok'
+                        : 'text-warn'
+                  }
+                >
+                  {app.health.status === 'healthy'
+                    ? 'respondendo'
+                    : app.health.status === 'unhealthy'
+                      ? `sem resposta (${app.health.lastError || 'sem detalhe'})`
+                      : 'aguardando'}
+                </span>
               </p>
             )}
           </div>

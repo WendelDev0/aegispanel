@@ -80,6 +80,18 @@ export interface DeploymentRecord {
   finishedAt?: string;
 }
 
+/**
+ * Docker's in-container probe. Opt-in: it needs wget or curl inside the image,
+ * which a distroless build does not have. The panel probes from outside either
+ * way, so leaving this unset does not mean the app goes unchecked.
+ */
+export interface HealthcheckConfig {
+  path: string;
+  intervalSec: number;
+  timeoutSec: number;
+  retries: number;
+}
+
 /** Container ceiling. Absent on a record means the global default applies. */
 export interface ResourceLimits {
   memoryMb: number;
@@ -112,6 +124,15 @@ export interface AppRecord {
   nodeId?: string;
   /** Per-app ceiling. Absent = follows settings.defaultAppLimits. */
   limits?: ResourceLimits;
+  /** Set only when the app opted into Docker's in-container probe. */
+  healthcheck?: HealthcheckConfig;
+  /** Last observed health. Written by the panel's watchdog, read-only here. */
+  health?: {
+    status: 'healthy' | 'unhealthy' | 'starting' | 'unknown';
+    checkedAt: string;
+    consecutiveFailures: number;
+    lastError?: string;
+  };
   status: 'running' | 'stopped' | 'building' | 'error';
   lastDeployAt?: string;
   lastCommitHash?: string;

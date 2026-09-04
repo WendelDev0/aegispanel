@@ -9,17 +9,17 @@
 
 ## Onde paramos
 
-Atualizado em **2026-09-04**. Estado local: `npm run check` verde — typecheck backend + frontend, **150 testes backend** (1 pulado no Windows: symlink), **19 testes frontend**.
+Atualizado em **2026-09-04**. Estado local: `npm run check` verde — typecheck backend + frontend, **165 testes backend** (1 pulado no Windows: symlink), **19 testes frontend**.
 
 | Fase | Estado | Falta |
 |------|--------|-------|
 | 1 — Acesso | ✅ código completo | 1.5: billing do GitHub Actions (ação humana) |
 | 2 — Backup offsite | ✅ código completo | Ensaio de DR numa VPS descartável (ação humana) |
-| 3 — Apps com teto | 🟡 3.1 e 3.3 feitos | 3.2 healthcheck |
+| 3 — Apps com teto | ✅ completa | — |
 | 4 — Estado | 🟡 4.2 feito | 4.1 snapshots · 4.3 métrica de save + ADR |
 | 5 — Cluster | ⬜ não começado | 5.1 → 5.2 → 5.4 → 5.3 |
 
-**Próximo na fila:** 3.2 (healthcheck + rollback automático), depois 4.1.
+**Próximo na fila:** 4.1 (snapshots de estado), depois 4.3 e a fase 5.
 
 > ⚠️ Fases 1 e 2 ainda **não estão no `main`**. Abrir o PR desta branch antes de seguir.
 
@@ -183,7 +183,7 @@ Backup que nunca foi restaurado é hipótese, não backup.
 - [x] CPU/RAM por app na UI, poll 8s (#6)
 - [x] Retenção de logs de runtime com teto 80 MB (#6)
 - [x] `RestartPolicy: unless-stopped`
-- [x] `Memory`, `MemorySwap`, `NanoCpus`, `PidsLimit` aplicados (3.1); healthcheck ainda falta (3.2)
+- [x] `Memory`, `MemorySwap`, `NanoCpus`, `PidsLimit` aplicados (3.1); saúde e rollback automático (3.2)
 
 ### 3.1 — Limites por app ✅
 
@@ -202,14 +202,28 @@ Notas de implementação:
 - O watchdog roda **fora** do loop de métricas de 2s, que pula quando ninguém tem o painel aberto — exatamente quando um app sem supervisão está morrendo.
 - Dedup por `RestartCount`: `State.OOMKilled` continua `true` no registro de saída de um contêiner já reiniciado, então alertar pela flag sozinha repetiria a mesma morte para sempre.
 
-### 3.2 — Healthcheck e restart inteligente
+### 3.2 — Healthcheck e restart inteligente ✅
 
-- [ ] `AppRecord.healthcheck?: { path, intervalSec, timeoutSec, retries }` — default `GET /` em `internalPort`, 30s/5s/3
-- [ ] Aplicado em `HostConfig.Healthcheck` (`CMD-SHELL wget -qO- http://127.0.0.1:${internalPort}${path}`)
-- [ ] Status do card usa `State.Health.Status` (`healthy | unhealthy | starting`), não só `running`
-- [ ] Deploy: novo container só vira “sucesso” após `healthy` (ou timeout 120s → falha + rollback automático para a imagem anterior)
-- [ ] Caddy só inclui upstream `healthy`; `unhealthy` → página 503 do painel em vez de erro cru
-- [ ] Watchdog no loop de métricas: `unhealthy` por > 3 ciclos → restart (máx. 3/h, depois alerta e para)
+- [x] `AppRecord.healthcheck?: { path, intervalSec, timeoutSec, retries }` — default `GET /` em `internalPort`, 30s/5s/3
+- [x] Aplicado em `Healthcheck` do contêiner (`CMD-SHELL wget … || curl …`) — **opt-in, não default** (ver desvio abaixo)
+- [x] Status do card usa a saúde observada (`healthy | unhealthy | starting | unknown`), não só `running`
+- [x] Deploy: novo container só vira “sucesso” após responder (timeout 120s → falha + rollback automático para a imagem anterior)
+- [x] Caddy só roteia app que não está `unhealthy`; `unhealthy` → 503 com `Retry-After` do painel em vez de 502 cru
+- [x] Watchdog: sem responder por > 3 ciclos → restart (máx. 3/h, depois alerta e para)
+
+**Desvio consciente do PRD — a sonda principal é do painel, não do contêiner.**
+
+O PRD pedia `HostConfig.Healthcheck` com `wget` como sinal padrão. Implementar assim seria ativamente perigoso: essa sonda roda **dentro** do contêiner e precisa de `wget` ou `curl` lá — uma imagem distroless, scratch ou slim não tem nenhum dos dois. Com rollback automático ligado nesse sinal, toda imagem enxuta seria marcada como doente e teria **deploys que funcionaram revertidos em loop**.
+
+A sonda principal virou `services/health.service.ts`: o painel consulta o app pela rede, exatamente no mesmo endereço que o Caddy usa (nome do contêiner na rede compartilhada localmente; `hostIp:porta` em nó remoto). Funciona com qualquer imagem. A sonda do Docker continua disponível como **opt-in por app**, para quem quer o status também no `docker ps`.
+
+Notas de implementação:
+
+- **Qualquer resposta HTTP conta como no ar — inclusive 404 e 500.** A pergunta é “o processo subiu”, não “a aplicação está correta”. Uma API cujo `/` responde 404 é saudável e isso é comuníssimo; tratar como falha reverteria deploy bom. E 500 é bug de aplicação para o painel mostrar, não para mascarar reiniciando o contêiner por baixo.
+- `unknown` **roteia normalmente**. É o estado de todo app logo após o painel reiniciar, antes da primeira sondagem — tirar todos os sites do ar a cada restart do painel seria muito pior que proxiar brevemente para algo que se revela fora.
+- O cap de reinícios importa mais que o gatilho: app que quebra no boot fica doente de novo segundos após cada restart, então watchdog sem teto transforma um deploy ruim em loop infinito que queima CPU e inunda o canal de alertas. Depois do teto ele alerta uma vez e deixa quieto — que é o estado diagnosticável.
+- O rollback automático sobe **apenas o deploy bem-sucedido mais recente**. Ir mais para trás colocaria uma versão bem antiga em produção sem ninguém pedir.
+- O `path` do healthcheck é interpolado num `CMD-SHELL`, então valor com aspas ou `$( )` seria código vivo dentro do contêiner a cada intervalo. É **recusado**, não escapado (Zod + `normalizeHealthcheck`).
 
 ### 3.3 — Teto de disco para builds ✅
 
@@ -233,7 +247,7 @@ Notas de implementação:
 ### Critérios de aceite — Fase 3
 
 - [ ] App com `memoryMb: 128` rodando `stress` é morto pelo kernel; painel mostra “OOM” e o host segue estável — **código pronto (3.1), falta validar numa VPS de verdade**
-- [ ] Deploy de imagem que não sobe faz rollback sozinho em ≤ 2 min — depende de 3.2
+- [x] Deploy de imagem que não sobe faz rollback sozinho em ≤ 2 min (janela de prontidão de 120s)
 - [x] `DATA_DIR/builds` nunca passa do teto após 20 deploys seguidos — teto aplicado após cada deploy, com teste da regra de despejo (`test/disk-usage.test.ts`)
 
 ---

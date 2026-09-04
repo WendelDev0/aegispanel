@@ -3,6 +3,7 @@ import { PassThrough, Readable } from 'stream';
 import { CONFIG } from '../config.js';
 import { collectBuildContextFiles } from '../utils/build-context.js';
 import { toHostConfigLimits, type ResourceLimits } from '../utils/resource-limits.js';
+import { toDockerHealthcheck, type HealthcheckConfig } from '../utils/health-probe.js';
 
 export interface ExecResult {
   stdout: string;
@@ -521,6 +522,11 @@ class DockerManager {
      * long-running workload passes one.
      */
     limits?: ResourceLimits;
+    /**
+     * In-container probe. Only set when the app opted in: the command needs
+     * wget or curl to exist inside the image, and a distroless one has neither.
+     */
+    healthcheck?: { config: HealthcheckConfig; internalPort: number };
   }): Docker.ContainerCreateOptions {
     const PortBindings: { [key: string]: Array<{ HostIp?: string; HostPort: string }> } = {};
     const ExposedPorts: { [key: string]: object } = {};
@@ -547,6 +553,17 @@ class DockerManager {
         'aegis.managed': 'true',
         ...(options.labels || {}),
       },
+      // Container config, not HostConfig: Docker keeps the healthcheck with the
+      // image-level settings, and putting it under HostConfig is accepted by the
+      // API and then silently ignored.
+      ...(options.healthcheck
+        ? {
+            Healthcheck: toDockerHealthcheck(
+              options.healthcheck.config,
+              options.healthcheck.internalPort
+            ),
+          }
+        : {}),
       HostConfig: {
         PortBindings,
         Binds,
@@ -713,6 +730,8 @@ class DockerManager {
     bindIp?: string;
     /** Memory / CPU / pid ceiling. See buildCreateOptions. */
     limits?: ResourceLimits;
+    /** In-container probe; opt-in per app. See buildCreateOptions. */
+    healthcheck?: { config: HealthcheckConfig; internalPort: number };
     /** Remote Docker daemon (SSH). Defaults to the local panel daemon. */
     client?: Docker;
     /**

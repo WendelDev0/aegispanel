@@ -18,6 +18,7 @@ import { injectPublicBuildArgs, publicBuildArgMap, publicBuildArgs } from '../ut
 import { remoteWorkloadPlacement } from '../utils/app-upstream.js';
 import { redactSecrets as redactSecretText } from '../utils/redact.js';
 import { BuildsCleanupService } from './builds-cleanup.service.js';
+import { HealthService } from './health.service.js';
 
 const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 const BUILD_TIMEOUT_MS = 30 * 60 * 1000;
@@ -684,6 +685,7 @@ export class CicdService {
           bindIp: placement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
           client: placement.useRemoteDocker ? dockerClient : undefined,
           limits: AppService.resolveLimits(app),
+          healthcheck: AppService.dockerHealthcheck(app),
           joinPanelNetwork: placement.joinPanelNetwork,
           labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
         });
@@ -737,6 +739,7 @@ export class CicdService {
           bindIp: dockerfilePlacement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
           client: dockerfilePlacement.useRemoteDocker ? dockerClient : undefined,
           limits: AppService.resolveLimits(app),
+          healthcheck: AppService.dockerHealthcheck(app),
           joinPanelNetwork: dockerfilePlacement.joinPanelNetwork,
           labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
         });
@@ -760,11 +763,25 @@ export class CicdService {
           bindIp: placement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
           client: placement.useRemoteDocker ? dockerClient : undefined,
           limits: AppService.resolveLimits(app),
+          healthcheck: AppService.dockerHealthcheck(app),
           joinPanelNetwork: placement.joinPanelNetwork,
           labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
         });
         logs += `[${new Date().toISOString()}] 🚀 Container criado com ID: ${app.containerId.substring(0, 12)}\n`;
       }
+
+      /**
+       * The container exists; that is not the same as the application working.
+       *
+       * A deploy that reports success while the process crash-loops is worse
+       * than one that fails, because nobody goes looking: the panel says green,
+       * the site is down, and the previous working image was already replaced.
+       * So the pipeline waits for the app to answer before claiming success and
+       * puts the previous image back when it never does.
+       */
+      logs += await this.awaitReadinessOrRollback(app, (line) =>
+        log(line, { step: 5, stepName: 'Verificando saúde', percentage: 92 })
+      );
 
       const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
       logs += `[${new Date().toISOString()}] ✅ [Step 5/5] Deploy concluído! Servidor ativo na porta :${app.port}\n`;
@@ -871,6 +888,116 @@ export class CicdService {
   }
 
   /** Restores a previous deployment by re-running its tagged image. */
+  /** Deploy is only successful once the app answers. */
+  private static readonly READINESS_TIMEOUT_MS = 120_000;
+
+  /**
+   * Blocks until the new container answers, and restores the previous image
+   * when it never does.
+   *
+   * Throws on failure so the caller's existing error path owns the rest: it
+   * already marks the deployment failed, records the activity, alerts and
+   * streams the outcome. Duplicating that here would let the two paths drift.
+   */
+  private static async awaitReadinessOrRollback(
+    app: AppRecord,
+    log: (line: string) => void
+  ): Promise<string> {
+    let logs = '';
+    const emitLine = (line: string) => {
+      logs += line;
+      log(line);
+    };
+
+    emitLine(
+      `[${new Date().toISOString()}] 🩺 Verificando se a aplicação responde ` +
+        `(até ${Math.round(this.READINESS_TIMEOUT_MS / 1000)}s)...\n`
+    );
+
+    const readiness = await HealthService.waitUntilReady(app, {
+      timeoutMs: this.READINESS_TIMEOUT_MS,
+      onAttempt: (attempt, result) => {
+        if (result.reachable) {
+          emitLine(
+            `[${new Date().toISOString()}] ✅ Respondeu na tentativa ${attempt} ` +
+              `(HTTP ${result.statusCode}, ${result.durationMs}ms).\n`
+          );
+        } else if (attempt % 5 === 0) {
+          // Every attempt would drown the build log; the outcome is what matters.
+          emitLine(`[${new Date().toISOString()}] ⏳ Tentativa ${attempt}: ${result.error}\n`);
+        }
+      },
+    });
+
+    if (readiness.ready) {
+      app.health = {
+        status: 'healthy',
+        checkedAt: new Date().toISOString(),
+        consecutiveFailures: 0,
+      };
+      dbStorage.saveApp(app);
+      return logs;
+    }
+
+    app.health = {
+      status: 'unhealthy',
+      checkedAt: new Date().toISOString(),
+      consecutiveFailures: readiness.attempts,
+      lastError: readiness.lastError,
+    };
+    dbStorage.saveApp(app);
+
+    emitLine(
+      `[${new Date().toISOString()}] ❌ A aplicação não respondeu em ` +
+        `${Math.round(this.READINESS_TIMEOUT_MS / 1000)}s (${readiness.lastError}).\n`
+    );
+
+    const restored = await this.rollbackToLastHealthy(app, emitLine);
+    throw new Error(
+      restored
+        ? `A aplicação não respondeu após o deploy e foi restaurada para a versão anterior (${restored}). ` +
+          'Veja os logs do contêiner para descobrir por que a nova versão não subiu.'
+        : 'A aplicação não respondeu após o deploy e não há versão anterior para restaurar. ' +
+          'O contêiner continua de pé para inspeção; veja os logs da aplicação.'
+    );
+  }
+
+  /**
+   * Restarts the most recent previously successful deployment.
+   *
+   * Skips the deployment being rolled back and anything already failed: rolling
+   * back onto another broken release would just move the outage.
+   */
+  private static async rollbackToLastHealthy(
+    app: AppRecord,
+    log: (line: string) => void
+  ): Promise<string | null> {
+    const candidates = dbStorage
+      .getDeployments(app.id)
+      .filter((d) => d.status === 'success')
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+    for (const candidate of candidates) {
+      log(`[${new Date().toISOString()}] ↩️ Restaurando o deploy anterior #${candidate.commitHash || candidate.id}...\n`);
+      try {
+        const result = await this.rollback(app.id, candidate.id);
+        if (result.success) {
+          log(`[${new Date().toISOString()}] ✅ Versão anterior restaurada.\n`);
+          return candidate.commitHash || candidate.id;
+        }
+        log(`[${new Date().toISOString()}] ⚠️ Rollback recusado: ${result.message}\n`);
+      } catch (err: any) {
+        log(`[${new Date().toISOString()}] ⚠️ Rollback falhou: ${this.redactSecrets(err?.message || String(err))}\n`);
+      }
+      // Only the newest successful deployment is attempted. Walking further
+      // back would silently put a much older release into production without
+      // the operator asking for it.
+      break;
+    }
+
+    return null;
+  }
+
   static async rollback(appId: string, deploymentId: string): Promise<{ success: boolean; message: string }> {
     const app = dbStorage.getAppById(appId);
     if (!app) throw new Error('Aplicação não encontrada');
@@ -920,6 +1047,7 @@ export class CicdService {
       bindIp: rollbackPlacement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
       client: rollbackPlacement.useRemoteDocker ? dockerClient : undefined,
       limits: AppService.resolveLimits(app),
+      healthcheck: AppService.dockerHealthcheck(app),
       joinPanelNetwork: rollbackPlacement.joinPanelNetwork,
       labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
     });

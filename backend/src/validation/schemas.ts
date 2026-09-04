@@ -7,6 +7,21 @@ const username = z
 const password = z.string().min(12).max(512);
 
 /**
+ * Probe settings for an app.
+ *
+ * The path is interpolated into a CMD-SHELL healthcheck, so a value carrying a
+ * quote or a command substitution would be evaluated by the container's shell
+ * on every interval. Only a plain path is accepted; it is rejected rather than
+ * escaped.
+ */
+const healthcheckConfig = z.object({
+  path: z.string().regex(/^\/[A-Za-z0-9\-._~/?=&%]{0,255}$/, 'caminho inválido'),
+  intervalSec: z.number().int().min(5).max(3600),
+  timeoutSec: z.number().int().min(1).max(120),
+  retries: z.number().int().min(1).max(10),
+});
+
+/**
  * Resource ceiling for a container.
  *
  * Bounds are stated here as well as in normalizeLimits so a typo comes back as
@@ -78,6 +93,7 @@ export const createAppBodySchema = z.object({
   deployBranch: z.string().optional(),
   nodeId: z.string().optional(),
   limits: resourceLimits.optional(),
+  healthcheck: healthcheckConfig.optional(),
 });
 
 export const updateAppBodySchema = z.object({
@@ -94,6 +110,8 @@ export const updateAppBodySchema = z.object({
   nodeId: z.string().optional().nullable(),
   /** null clears the per-app ceiling and restores the global default. */
   limits: resourceLimits.optional().nullable(),
+  /** null disables the in-container probe; the panel keeps probing from outside. */
+  healthcheck: healthcheckConfig.optional().nullable(),
 });
 
 export const inspectRepoBodySchema = z.object({

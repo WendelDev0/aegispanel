@@ -154,6 +154,7 @@ appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (re
 
     const previousName = app.name;
     const previousLimits = JSON.stringify(AppService.resolveLimits(app));
+    const previousHealthcheck = JSON.stringify(app.healthcheck ?? null);
     const previousPort = app.port;
     const previousInternalPort = app.internalPort;
     const previousImage = app.imageName;
@@ -212,6 +213,9 @@ appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (re
     if (limits !== undefined) {
       app.limits = limits === null ? undefined : limits;
     }
+    if (req.body.healthcheck !== undefined) {
+      app.healthcheck = req.body.healthcheck === null ? undefined : req.body.healthcheck;
+    }
 
     app.updatedAt = new Date().toISOString();
     dbStorage.saveApp(app);
@@ -249,8 +253,10 @@ appRouter.put('/:id', requireWrite, validateBody(updateAppBodySchema), async (re
       app.gitUrl !== previousGitUrl ||
       app.branch !== previousBranch ||
       // Memory, NanoCpus and PidsLimit are fixed at create time; the container
-      // has to be recreated for a new ceiling to take effect at all.
-      JSON.stringify(AppService.resolveLimits(app)) !== previousLimits;
+      // has to be recreated for a new ceiling to take effect at all. The same
+      // is true of Docker's healthcheck.
+      JSON.stringify(AppService.resolveLimits(app)) !== previousLimits ||
+      JSON.stringify(app.healthcheck ?? null) !== previousHealthcheck;
 
     if (needsRedeploy) {
       try {
