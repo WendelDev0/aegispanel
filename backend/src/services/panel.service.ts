@@ -4,6 +4,7 @@ import fs from 'fs';
 import { CONFIG } from '../config.js';
 import { dockerService } from './docker.service.js';
 import { emit } from '../realtime.js';
+import { updateComposeCheckout } from '../utils/panel-update.js';
 
 /** Only these container name prefixes may be tailed through PanelService. */
 const ALLOWED_LOG_TARGETS = new Set([
@@ -116,15 +117,38 @@ export class PanelService {
     this.updating = true;
     const composeDir = this.resolveComposeDir();
     this.emitUpdate({
-      line: `[aegis] Compose: ${composeDir}\n[aegis] docker compose up -d --build\n`,
+      line: `[aegis] Compose: ${composeDir}\n`,
       status: 'running',
     });
 
     try {
+      /**
+       * Fetch before rebuilding.
+       *
+       * `docker compose up --build` recompiles whatever is already on disk, so
+       * a self-update without this rebuilt the running version byte for byte
+       * and reported success — the operator clicked "atualizar", watched it
+       * finish, and got the same code back.
+       *
+       * The ref comes from AEGIS_UPDATE_REF, never from the request body: an
+       * admin session pulling an attacker-chosen ref would rebuild the control
+       * plane, as root, from their code.
+       */
+      const git = await updateComposeCheckout(composeDir, {
+        onOutput: (chunk) => this.emitUpdate({ line: chunk, status: 'running' }),
+      });
+      this.emitUpdate({
+        line:
+          git.skippedReason === 'no-git'
+            ? `[aegis] Sem .git em ${composeDir}; rebuild da cópia que já está no disco.\n`
+            : `[aegis] git: ${git.ref} atualizado.\n[aegis] docker compose up -d --build\n`,
+        status: 'running',
+      });
+
       const output = await this.runCompose(composeDir, ['up', '-d', '--build'], (chunk) => {
         this.emitUpdate({ line: chunk, status: 'running' });
       });
-      const safe = this.redactPanelSecrets(output);
+      const safe = this.redactPanelSecrets([git.output, output].filter(Boolean).join('\n'));
       this.emitUpdate({ line: `\n[aegis] Concluído.\n`, status: 'success', done: true });
       return { ok: true, output: safe };
     } catch (err: any) {
