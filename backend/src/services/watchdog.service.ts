@@ -194,6 +194,10 @@ export class WatchdogService {
       };
       dbStorage.saveApp(app);
 
+      // Answering again clears the "cannot be restarted" mark: whatever was
+      // wrong with the container reference was fixed, usually by a redeploy.
+      if (status === 'healthy') this.unrestartable.delete(app.id);
+
       // An app that just came back has to be put back into Caddy, which only
       // routes to upstreams that are not known-unhealthy.
       if (wasUnhealthy && status === 'healthy') {
@@ -231,27 +235,112 @@ export class WatchdogService {
     return results;
   }
 
-  private static async restartApp(app: AppRecord, reason: string): Promise<boolean> {
-    const history = this.restartHistory.get(app.id) || [];
-    history.push(Date.now());
-    this.restartHistory.set(app.id, history);
+  /**
+   * Apps whose container the panel cannot restart at all.
+   *
+   * Kept so a permanent failure is reported once instead of every cycle. The
+   * entry is dropped as soon as the app answers again, so a container that is
+   * later redeployed correctly is eligible once more.
+   */
+  private static unrestartable = new Set<string>();
 
-    AuditStore.append({
-      action: 'app.watchdog.restart',
-      outcome: 'success',
-      target: { type: 'app', id: app.id, name: app.name },
-      meta: { reason },
-    });
+  /**
+   * A failure that will repeat identically on the next attempt.
+   *
+   * The record's containerId can point at a container that was replaced or
+   * removed — inspect then fails and the container reads as unmanaged. Retrying
+   * that every 30s burns the hourly budget on an action that cannot succeed and
+   * fills the log with the same stack trace, which is what it did in production.
+   */
+  private static isPermanentRestartFailure(message: string): boolean {
+    const text = (message || '').toLowerCase();
+    return (
+      text.includes('não gerenciado') ||
+      text.includes('no such container') ||
+      text.includes('not found') ||
+      text.includes('404')
+    );
+  }
+
+  private static async restartApp(app: AppRecord, reason: string): Promise<boolean> {
+    if (this.unrestartable.has(app.id)) return false;
+
+    let outcome: 'success' | 'failure' = 'failure';
+    let error: string | undefined;
 
     try {
       const client = await this.clientFor(app);
       await dockerService.restartContainer(app.containerId!, client);
+      outcome = 'success';
       console.warn(`🔁 Watchdog reiniciou "${app.name}": ${reason}`);
-      return true;
     } catch (err: any) {
-      console.warn(`Watchdog não conseguiu reiniciar "${app.name}": ${err?.message}`);
-      return false;
+      error = err?.message || String(err);
     }
+
+    // Recorded after the attempt, with what actually happened. Writing
+    // `success` up front logged restarts that never occurred, which is worse
+    // than no audit trail: it says the panel acted when it did not.
+    AuditStore.append({
+      action: 'app.watchdog.restart',
+      outcome,
+      target: { type: 'app', id: app.id, name: app.name },
+      meta: error ? { reason, error } : { reason },
+    });
+
+    if (outcome === 'success') {
+      // Only a real restart counts against the hourly cap. Charging failed
+      // attempts to it would exhaust the budget without the app ever having
+      // been restarted once.
+      const history = this.restartHistory.get(app.id) || [];
+      history.push(Date.now());
+      this.restartHistory.set(app.id, history);
+      return true;
+    }
+
+    if (this.isPermanentRestartFailure(error || '')) {
+      this.unrestartable.add(app.id);
+      await this.reportUnrestartable(app, error || 'motivo desconhecido');
+    } else {
+      console.warn(`Watchdog não conseguiu reiniciar "${app.name}": ${error}`);
+    }
+    return false;
+  }
+
+  /**
+   * Says the panel cannot act, instead of retrying something impossible.
+   *
+   * The usual cause is a stale containerId on the app record: the container it
+   * names was replaced or removed, so the panel is holding a reference to
+   * something that no longer exists. A redeploy fixes it, and only a human can
+   * decide to do that.
+   */
+  private static async reportUnrestartable(app: AppRecord, error: string): Promise<void> {
+    const detail =
+      `A aplicação "${app.name}" não responde e o painel não consegue reiniciá-la: ${error}. ` +
+      'Normalmente isso significa que o contêiner registrado não existe mais — refaça o deploy da aplicação. ' +
+      'O watchdog parou de tentar até ela voltar a responder.';
+
+    AuditStore.append({
+      action: 'app.watchdog.unrestartable',
+      outcome: 'failure',
+      target: { type: 'app', id: app.id, name: app.name },
+      meta: { error },
+    });
+    dbStorage.addActivity({
+      type: 'deploy',
+      title: `Watchdog não consegue reiniciar: ${app.name}`,
+      description: detail,
+      status: 'error',
+      metadata: { appId: app.id },
+    });
+    await AlertService.broadcastNotification(
+      `🚨 "${app.name}" não responde e não pode ser reiniciada`,
+      detail,
+      'alert',
+      true,
+      { appId: app.id }
+    ).catch(() => {});
+    console.warn(`⛔ ${detail}`);
   }
 
   /**
