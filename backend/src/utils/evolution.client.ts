@@ -231,3 +231,72 @@ export function parseEvolutionUpsert(body: unknown): InboundWaMessage | null {
     fromMe: false,
   };
 }
+
+export interface EvolutionInstanceInfo {
+  name: string;
+  connectionStatus: 'open' | 'close' | 'connecting' | 'unknown';
+  profileName?: string;
+  profilePicUrl?: string;
+}
+
+export async function evolutionFetchInstances(creds: {
+  apiUrl: string;
+  apiKey: string;
+}): Promise<{ ok: boolean; instances: EvolutionInstanceInfo[]; error?: string }> {
+  if (evolutionOutboundBlocked()) {
+    return {
+      ok: true,
+      instances: [
+        { name: 'local-mock', connectionStatus: 'open', profileName: 'Mock Local' },
+      ],
+    };
+  }
+
+  const apiKey = revealEvolutionKey(creds.apiKey);
+  if (!creds.apiUrl || !apiKey) {
+    return { ok: false, instances: [], error: 'URL ou chave da Evolution não configurada.' };
+  }
+
+  try {
+    const res = await requestJson(creds.apiUrl, apiKey, 'GET', '/instance/fetchInstances');
+    if (res.status < 200 || res.status >= 300) {
+      return { ok: false, instances: [], error: `Evolution HTTP ${res.status}: ${res.text.slice(0, 200)}` };
+    }
+
+    const parsed = JSON.parse(res.text);
+    const rawList: any[] = Array.isArray(parsed) ? parsed : parsed?.instances || [];
+
+    const instances: EvolutionInstanceInfo[] = rawList
+      .map((item) => {
+        const name = String(item.name || item.instanceName || item.instance?.instanceName || '').trim();
+        const statusRaw = String(item.connectionStatus || item.status || item.instance?.status || '').toLowerCase();
+        let connectionStatus: EvolutionInstanceInfo['connectionStatus'] = 'unknown';
+        if (statusRaw.includes('open') || statusRaw.includes('connected')) connectionStatus = 'open';
+        else if (statusRaw.includes('close') || statusRaw.includes('disconnected')) connectionStatus = 'close';
+        else if (statusRaw.includes('connect')) connectionStatus = 'connecting';
+
+        return {
+          name,
+          connectionStatus,
+          profileName: item.profileName || item.instance?.profileName,
+          profilePicUrl: item.profilePicUrl || item.instance?.profilePicUrl,
+        };
+      })
+      .filter((i) => Boolean(i.name));
+
+    return { ok: true, instances };
+  } catch (err: any) {
+    return { ok: false, instances: [], error: err.message || String(err) };
+  }
+}
+
+export async function evolutionTestConnection(creds: {
+  apiUrl: string;
+  apiKey: string;
+}): Promise<{ ok: boolean; count: number; error?: string }> {
+  const result = await evolutionFetchInstances(creds);
+  if (!result.ok) {
+    return { ok: false, count: 0, error: result.error };
+  }
+  return { ok: true, count: result.instances.length };
+}

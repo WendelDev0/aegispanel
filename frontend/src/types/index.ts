@@ -239,24 +239,63 @@ export type WaFlowNodeType =
   | 'send_text'
   | 'menu'
   | 'wait_reply'
+  | 'capture'
   | 'condition'
+  | 'agent'
+  | 'http'
+  | 'sql'
+  | 'handoff'
+  | 'delay'
   | 'end';
 
 export type WaPanelEvent = 'deploy_fail' | 'deploy_ok' | 'app_down' | 'backup';
+
+export interface WaFlowNodeData {
+  match?: 'any' | 'contains' | 'regex';
+  keyword?: string;
+  event?: WaPanelEvent;
+  instance?: string;
+  recipient?: string;
+  text?: string;
+  buttons?: Array<{ id: string; label: string }>;
+  operator?: 'contains' | 'equals' | 'regex' | 'gt' | 'lt' | 'exists';
+  source?: 'lastText' | 'var';
+  varName?: string;
+  value?: string;
+  // capture
+  captureType?: 'text' | 'number' | 'phone' | 'email';
+  saveLead?: boolean;
+  // agent
+  provider?: 'openai' | 'openrouter';
+  model?: string;
+  systemPrompt?: string;
+  maxTokens?: number;
+  memoryTurns?: number;
+  fallbackText?: string;
+  // http
+  httpMethod?: 'GET' | 'POST';
+  httpUrl?: string;
+  httpHeaders?: Record<string, string>;
+  httpBody?: string;
+  saveAs?: string;
+  // sql
+  sqlQuery?: string;
+  sqlParams?: string[];
+  sqlMode?: 'read' | 'write';
+  sqlDatabaseId?: string;
+  // handoff
+  notifyNumber?: string;
+  notifyMessage?: string;
+  resumeMinutes?: number;
+  // delay
+  delaySeconds?: number;
+}
 
 export interface WaFlowNode {
   id: string;
   type: WaFlowNodeType;
   position: { x: number; y: number };
-  data: {
-    match?: 'any' | 'contains' | 'regex';
-    keyword?: string;
-    event?: WaPanelEvent;
-    text?: string;
-    buttons?: Array<{ id: string; label: string }>;
-    operator?: 'contains' | 'equals';
-    value?: string;
-  };
+  data: WaFlowNodeData;
 }
 
 export interface WaFlowEdge {
@@ -266,15 +305,48 @@ export interface WaFlowEdge {
   sourceHandle?: string;
 }
 
+export interface WaFlowStats {
+  runsToday: number;
+  aiTokensToday: number;
+  errorsToday: number;
+  unmatchedToday?: number;
+  day: string;
+}
+
 export interface WaFlowRecord {
   id: string;
   name: string;
   published: boolean;
   nodes: WaFlowNode[];
   edges: WaFlowEdge[];
+  instanceNames: string[];
+  priority: number;
+  sessionTtlMinutes: number;
+  aiBudgetTokensPerDay: number;
+  dataBinding?: {
+    postgresDatabaseId?: string;
+    redisDatabaseId?: string;
+  };
+  stats?: WaFlowStats;
   lastRunAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface EvolutionInstanceInfo {
+  name: string;
+  connectionStatus: 'open' | 'close' | 'connecting' | 'unknown';
+  profileName?: string;
+  profilePicUrl?: string;
+}
+
+export interface WaFlowTemplate {
+  id: string;
+  name: string;
+  description: string;
+  category: 'atendimento' | 'alerta' | 'vendas';
+  nodes: WaFlowNode[];
+  edges: WaFlowEdge[];
 }
 
 export interface AlertHistoryRecord {
@@ -329,6 +401,21 @@ export interface PanelSettings {
   backupIntervalHours: number;
   backupTarget?: BackupTargetPublic;
   alertConfig: AlertConfig;
+  waFlowWebhookSecret?: string;
+  evolution?: {
+    apiUrl: string;
+    apiKey: string;
+  };
+  aiProviders?: {
+    openaiKey?: string;
+    openrouterKey?: string;
+    allowedModels: string[];
+  };
+  flowHttpAllowlist?: string[];
+  flowDataUrls?: {
+    redisUrl?: string;
+    postgresUrl?: string;
+  };
 }
 
 export interface FileItem {

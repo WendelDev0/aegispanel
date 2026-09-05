@@ -21,6 +21,9 @@ import {
   CheckCircle2,
   AlertTriangle,
   Database,
+  Bot,
+  RefreshCw,
+  Radio,
 } from 'lucide-react';
 import { api, persistSession } from '../services/api.js';
 import { socket } from '../services/socket.js';
@@ -94,6 +97,27 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
   const [whatsappInstance, setWhatsappInstance] = useState('');
   const [whatsappRecipientNumber, setWhatsappRecipientNumber] = useState('');
 
+  // Evolution API live status & testing
+  const [testingEvolution, setTestingEvolution] = useState(false);
+  const [evolutionTestResult, setEvolutionTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [evolutionInstances, setEvolutionInstances] = useState<
+    Array<{ name: string; connectionStatus?: string; profileName?: string; number?: string }>
+  >([]);
+  const [loadingInstances, setLoadingInstances] = useState(false);
+
+  // AI Providers (OpenAI & OpenRouter)
+  const [openaiKey, setOpenaiKey] = useState('');
+  const [openrouterKey, setOpenrouterKey] = useState('');
+  const [allowedModels, setAllowedModels] = useState('gpt-4o-mini, gpt-4o, claude-3-5-sonnet');
+  const [testingAi, setTestingAi] = useState(false);
+  const [aiTestProvider, setAiTestProvider] = useState<'openai' | 'openrouter'>('openai');
+  const [aiTestModel, setAiTestModel] = useState('gpt-4o-mini');
+  const [aiTestResult, setAiTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Flow Data URLs (Redis & Postgres)
+  const [flowRedisUrl, setFlowRedisUrl] = useState('');
+  const [flowPostgresUrl, setFlowPostgresUrl] = useState('');
+
   // Notification Trigger Preferences
   const [notifyOnDeploySuccess, setNotifyOnDeploySuccess] = useState(true);
   const [notifyOnDeployFail, setNotifyOnDeployFail] = useState(true);
@@ -161,23 +185,50 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
       setPanelDomain(data.panelDomain || '');
 
       const alertConf = data.alertConfig || {};
+      const evoConf = data.evolution || {};
+      const aiConf = data.aiProviders || {};
+      const dataUrls = data.flowDataUrls || {};
+
       setAlertsEnabled(alertConf.enabled ?? false);
       setTelegramChatId(alertConf.telegramChatId || '');
 
       setWhatsappEnabled(alertConf.whatsappEnabled ?? false);
-      setWhatsappApiUrl(alertConf.whatsappApiUrl || '');
+      const evoUrl = alertConf.whatsappApiUrl || evoConf.apiUrl || '';
+      setWhatsappApiUrl(evoUrl);
       setWhatsappInstance(alertConf.whatsappInstance || '');
       setWhatsappRecipientNumber(alertConf.whatsappRecipientNumber || '');
+
+      const isWhatsappConfigured = alertConf.whatsappApiKey === SECRET_MASK || evoConf.apiKey === SECRET_MASK;
+      const isOpenaiConfigured = aiConf.openaiKey === SECRET_MASK;
+      const isOpenrouterConfigured = aiConf.openrouterKey === SECRET_MASK;
+      const isRedisConfigured = !!dataUrls.redisUrl && dataUrls.redisUrl.includes(SECRET_MASK);
+      const isPostgresConfigured = !!dataUrls.postgresUrl && dataUrls.postgresUrl.includes(SECRET_MASK);
 
       // Masked fields are recorded as "configured" and left blank in the form.
       setConfiguredSecrets({
         discordWebhookUrl: alertConf.discordWebhookUrl === SECRET_MASK,
         telegramBotToken: alertConf.telegramBotToken === SECRET_MASK,
-        whatsappApiKey: alertConf.whatsappApiKey === SECRET_MASK,
+        whatsappApiKey: isWhatsappConfigured,
+        openaiKey: isOpenaiConfigured,
+        openrouterKey: isOpenrouterConfigured,
+        flowRedisUrl: isRedisConfigured,
+        flowPostgresUrl: isPostgresConfigured,
       });
+
       setDiscordWebhookUrl(alertConf.discordWebhookUrl === SECRET_MASK ? '' : alertConf.discordWebhookUrl || '');
       setTelegramBotToken(alertConf.telegramBotToken === SECRET_MASK ? '' : alertConf.telegramBotToken || '');
-      setWhatsappApiKey(alertConf.whatsappApiKey === SECRET_MASK ? '' : alertConf.whatsappApiKey || '');
+      setWhatsappApiKey(isWhatsappConfigured ? '' : alertConf.whatsappApiKey || evoConf.apiKey || '');
+      setOpenaiKey(isOpenaiConfigured ? '' : aiConf.openaiKey || '');
+      setOpenrouterKey(isOpenrouterConfigured ? '' : aiConf.openrouterKey || '');
+      if (aiConf.allowedModels && Array.isArray(aiConf.allowedModels) && aiConf.allowedModels.length > 0) {
+        setAllowedModels(aiConf.allowedModels.join(', '));
+      }
+      setFlowRedisUrl(isRedisConfigured ? '' : dataUrls.redisUrl || '');
+      setFlowPostgresUrl(isPostgresConfigured ? '' : dataUrls.postgresUrl || '');
+
+      if (evoUrl) {
+        void fetchEvolutionInstances();
+      }
 
       setNotifyOnDeploySuccess(alertConf.notifyOnDeploySuccess ?? true);
       setNotifyOnDeployFail(alertConf.notifyOnDeployFail ?? true);
@@ -201,6 +252,67 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
           ? 'Somente administradores podem ver e gerenciar a equipe.'
           : 'Não foi possível carregar a equipe.'
       );
+    }
+  };
+
+  const fetchEvolutionInstances = async () => {
+    try {
+      setLoadingInstances(true);
+      const res = await api.get('/system/evolution/instances');
+      setEvolutionInstances(Array.isArray(res.data?.instances) ? res.data.instances : []);
+    } catch (err: any) {
+      console.warn('Não foi possível carregar instâncias da Evolution:', err);
+    } finally {
+      setLoadingInstances(false);
+    }
+  };
+
+  const handleTestEvolution = async () => {
+    try {
+      setTestingEvolution(true);
+      setEvolutionTestResult(null);
+      const res = await api.post('/system/evolution/test', {
+        apiUrl: whatsappApiUrl,
+        apiKey: secretToSend('whatsappApiKey', whatsappApiKey),
+      });
+      setEvolutionTestResult({
+        success: res.data.ok,
+        message: res.data.message || (res.data.ok ? 'Conexão estabelecida com sucesso!' : 'Falha na conexão com a Evolution.'),
+      });
+      if (res.data.instances && Array.isArray(res.data.instances)) {
+        setEvolutionInstances(res.data.instances);
+      }
+    } catch (err: any) {
+      setEvolutionTestResult({
+        success: false,
+        message: err.response?.data?.error || err.message,
+      });
+    } finally {
+      setTestingEvolution(false);
+    }
+  };
+
+  const handleTestAi = async () => {
+    try {
+      setTestingAi(true);
+      setAiTestResult(null);
+      const key = aiTestProvider === 'openai' ? secretToSend('openaiKey', openaiKey) : secretToSend('openrouterKey', openrouterKey);
+      const res = await api.post('/system/ai/test', {
+        provider: aiTestProvider,
+        apiKey: key,
+        model: aiTestModel,
+      });
+      setAiTestResult({
+        success: res.data.ok,
+        message: res.data.reply ? `Resposta da IA: "${res.data.reply}"` : res.data.message || 'IA respondeu com sucesso!',
+      });
+    } catch (err: any) {
+      setAiTestResult({
+        success: false,
+        message: err.response?.data?.error || err.message,
+      });
+    } finally {
+      setTestingAi(false);
     }
   };
 
@@ -240,14 +352,25 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
     return configuredSecrets[field] ? SECRET_MASK : '';
   };
 
-  const clearSecret = async (field: 'discordWebhookUrl' | 'telegramBotToken' | 'whatsappApiKey') => {
+  const clearSecret = async (field: string) => {
     if (!confirm('Remover este segredo do painel? A integração para de funcionar até você cadastrar outro.')) return;
     try {
-      await api.put('/system/settings', { alertConfig: { [field]: '' } });
+      if (field === 'openaiKey' || field === 'openrouterKey') {
+        await api.put('/system/settings', { aiProviders: { [field]: '' } });
+        if (field === 'openaiKey') setOpenaiKey('');
+        if (field === 'openrouterKey') setOpenrouterKey('');
+      } else if (field === 'flowRedisUrl' || field === 'flowPostgresUrl') {
+        const key = field === 'flowRedisUrl' ? 'redisUrl' : 'postgresUrl';
+        await api.put('/system/settings', { flowDataUrls: { [key]: '' } });
+        if (field === 'flowRedisUrl') setFlowRedisUrl('');
+        if (field === 'flowPostgresUrl') setFlowPostgresUrl('');
+      } else {
+        await api.put('/system/settings', { alertConfig: { [field]: '' } });
+        if (field === 'discordWebhookUrl') setDiscordWebhookUrl('');
+        if (field === 'telegramBotToken') setTelegramBotToken('');
+        if (field === 'whatsappApiKey') setWhatsappApiKey('');
+      }
       setConfiguredSecrets((prev) => ({ ...prev, [field]: false }));
-      if (field === 'discordWebhookUrl') setDiscordWebhookUrl('');
-      if (field === 'telegramBotToken') setTelegramBotToken('');
-      if (field === 'whatsappApiKey') setWhatsappApiKey('');
     } catch (err: any) {
       alert('Erro ao remover: ' + (err.response?.data?.error || err.message));
     }
@@ -301,7 +424,20 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
           cpuThresholdPercent: cpuThreshold,
           memThresholdPercent: memThreshold,
           diskThresholdPercent: diskThreshold,
-        }
+        },
+        evolution: {
+          apiUrl: whatsappApiUrl,
+          apiKey: secretToSend('whatsappApiKey', whatsappApiKey),
+        },
+        aiProviders: {
+          openaiKey: secretToSend('openaiKey', openaiKey),
+          openrouterKey: secretToSend('openrouterKey', openrouterKey),
+          allowedModels: allowedModels.split(',').map((s) => s.trim()).filter(Boolean),
+        },
+        flowDataUrls: {
+          redisUrl: secretToSend('flowRedisUrl', flowRedisUrl),
+          postgresUrl: secretToSend('flowPostgresUrl', flowPostgresUrl),
+        },
       });
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 2500);
@@ -611,19 +747,315 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
                 </div>
               </div>
 
-              <div className="flex justify-end pt-1">
-                <button
-                  type="button"
-                  onClick={() => handleTestAlert('whatsapp')}
-                  disabled={testingChannel === 'whatsapp' || !whatsappApiUrl || !whatsappRecipientNumber}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-ok border border-ok/30 rounded text-xs font-semibold transition-all disabled:opacity-40"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>{testingChannel === 'whatsapp' ? 'Enviando...' : 'Enviar Teste (WhatsApp)'}</span>
-                </button>
+              {/* Evolution Actions & Test Result */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleTestEvolution()}
+                    disabled={testingEvolution || !whatsappApiUrl}
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-surface-container-high hover:bg-surface-container-highest text-white border border-outline-variant rounded text-xs font-semibold transition-all disabled:opacity-40"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${testingEvolution ? 'animate-spin' : ''}`} />
+                    <span>{testingEvolution ? 'Testando conexão…' : 'Testar Conexão Evolution'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleTestAlert('whatsapp')}
+                    disabled={testingChannel === 'whatsapp' || !whatsappApiUrl || !whatsappRecipientNumber}
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-ok border border-ok/30 rounded text-xs font-semibold transition-all disabled:opacity-40"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{testingChannel === 'whatsapp' ? 'Enviando...' : 'Enviar Alerta de Teste'}</span>
+                  </button>
+                </div>
+
+                {evolutionTestResult && (
+                  <div
+                    className={`text-xs px-3 py-1.5 rounded border flex items-center gap-2 ${
+                      evolutionTestResult.success
+                        ? 'bg-ok/10 border-ok/30 text-ok'
+                        : 'bg-crit/10 border-crit/30 text-crit'
+                    }`}
+                  >
+                    {evolutionTestResult.success ? (
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                    )}
+                    <span>{evolutionTestResult.message}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Live Instances Cards */}
+              <div className="pt-4 border-t border-outline-variant space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Radio className="w-4 h-4 text-ok" />
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                      Instâncias Conectadas na Evolution
+                    </h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void fetchEvolutionInstances()}
+                    disabled={loadingInstances || !whatsappApiUrl}
+                    className="text-xs text-primary hover:underline flex items-center gap-1"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${loadingInstances ? 'animate-spin' : ''}`} />
+                    <span>Atualizar lista</span>
+                  </button>
+                </div>
+
+                {loadingInstances ? (
+                  <p className="text-xs text-on-surface-variant font-mono">Consultando instâncias…</p>
+                ) : evolutionInstances.length === 0 ? (
+                  <div className="p-3.5 rounded bg-surface-container-low border border-outline-variant text-xs text-on-surface-variant">
+                    Nenhuma instância detectada ou a API ainda não foi testada. Salve as credenciais e clique em
+                    "Testar Conexão Evolution".
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                    {evolutionInstances.map((inst) => {
+                      const isOpen = inst.connectionStatus === 'open';
+                      const isConnecting = inst.connectionStatus === 'connecting';
+                      return (
+                        <div
+                          key={inst.name}
+                          className="bg-surface-container-low border border-outline-variant rounded-lg p-3 flex flex-col justify-between space-y-2"
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="text-xs font-mono font-bold text-white truncate">
+                              {inst.name}
+                            </span>
+                            <span
+                              className={`text-[9px] uppercase px-2 py-0.5 rounded font-mono border ${
+                                isOpen
+                                  ? 'bg-ok/10 text-ok border-ok/30'
+                                  : isConnecting
+                                  ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                                  : 'bg-crit/10 text-crit border-crit/30'
+                              }`}
+                            >
+                              {isOpen ? 'Conectado' : isConnecting ? 'Conectando' : 'Desconectado'}
+                            </span>
+                          </div>
+                          {inst.number && (
+                            <p className="text-[11px] text-on-surface-variant/80 font-mono">{inst.number}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <p className="text-[10px] text-on-surface-variant/70">
+                  💡 No editor de fluxos, você pode vincular fluxos específicos a cada uma dessas instâncias.
+                </p>
+              </div>
+
+              {/* Webhook Configuration Helper */}
+              <div className="p-3.5 bg-surface-container-low border border-outline-variant rounded-lg space-y-1.5 text-xs">
+                <span className="font-semibold text-white">URL de Webhook para Fluxos:</span>
+                <div className="flex items-center justify-between gap-2 bg-surface-container px-3 py-2 rounded font-mono text-[11px] text-on-surface-variant overflow-x-auto">
+                  <span className="truncate">
+                    {`${window.location.origin}/api/wa-flows/webhook`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${window.location.origin}/api/wa-flows/webhook`);
+                      alert('URL de Webhook copiada com sucesso!');
+                    }}
+                    className="text-primary hover:underline font-sans text-xs shrink-0"
+                  >
+                    Copiar
+                  </button>
+                </div>
+                <p className="text-[10px] text-on-surface-variant/70">
+                  Cadastre esta URL nas configurações de Webhook das instâncias da Evolution API com o evento{' '}
+                  <span className="font-mono text-white">MESSAGES_UPSERT</span>.
+                </p>
               </div>
             </div>
           )}
+        </div>
+
+        {/* AI Providers Section */}
+        <div className="bg-surface-container rounded-lg p-6 border border-primary/30 space-y-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded bg-primary/10 text-primary">
+                <Bot className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base flex items-center gap-2">
+                  <span>Provedores de Inteligência Artificial</span>
+                  <span className="text-[10px] bg-primary/15 text-primary px-2 py-0.5 rounded-full font-mono">
+                    Fluxos Pro
+                  </span>
+                </h3>
+                <p className="text-xs text-on-surface-variant">
+                  Chaves de API para alimentar o bloco Agente IA e respostas inteligentes no WhatsApp.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4 pt-2 border-t border-outline-variant">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                  OpenAI API Key
+                </label>
+                <input
+                  type="password"
+                  placeholder={configuredSecrets.openaiKey ? 'Manter a chave atual' : 'sk-...'}
+                  value={openaiKey}
+                  onChange={(e) => setOpenaiKey(e.target.value)}
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
+                />
+                <SecretStatus
+                  configured={!!configuredSecrets.openaiKey}
+                  onClear={() => clearSecret('openaiKey')}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                  OpenRouter API Key
+                </label>
+                <input
+                  type="password"
+                  placeholder={configuredSecrets.openrouterKey ? 'Manter a chave atual' : 'sk-or-...'}
+                  value={openrouterKey}
+                  onChange={(e) => setOpenrouterKey(e.target.value)}
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
+                />
+                <SecretStatus
+                  configured={!!configuredSecrets.openrouterKey}
+                  onClear={() => clearSecret('openrouterKey')}
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                  Modelos Permitidos (separados por vírgula)
+                </label>
+                <input
+                  type="text"
+                  placeholder="gpt-4o-mini, gpt-4o, claude-3-5-sonnet, deepseek/deepseek-chat"
+                  value={allowedModels}
+                  onChange={(e) => setAllowedModels(e.target.value)}
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
+                />
+                <p className="text-[10px] text-on-surface-variant/70 mt-1">
+                  Modelos disponíveis para seleção no bloco Agente IA.
+                </p>
+              </div>
+            </div>
+
+            {/* Test AI Provider */}
+            <div className="pt-3 border-t border-outline-variant flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <select
+                  value={aiTestProvider}
+                  onChange={(e) => setAiTestProvider(e.target.value as any)}
+                  className="bg-surface-container-low border border-outline-variant rounded px-3 py-1.5 text-white text-xs"
+                >
+                  <option value="openai">OpenAI</option>
+                  <option value="openrouter">OpenRouter</option>
+                </select>
+
+                <input
+                  type="text"
+                  value={aiTestModel}
+                  onChange={(e) => setAiTestModel(e.target.value)}
+                  placeholder="Modelo de teste"
+                  className="bg-surface-container-low border border-outline-variant rounded px-3 py-1.5 text-white text-xs font-mono w-40"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => void handleTestAi()}
+                  disabled={testingAi}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 rounded text-xs font-semibold transition-all disabled:opacity-40"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{testingAi ? 'Testando IA…' : 'Testar Provedor de IA'}</span>
+                </button>
+              </div>
+
+              {aiTestResult && (
+                <div
+                  className={`text-xs px-3 py-1.5 rounded border flex items-center gap-2 ${
+                    aiTestResult.success
+                      ? 'bg-ok/10 border-ok/30 text-ok'
+                      : 'bg-crit/10 border-crit/30 text-crit'
+                  }`}
+                >
+                  {aiTestResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                  )}
+                  <span>{aiTestResult.message}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Flow External Data Plane (Redis & Postgres) */}
+        <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-5">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded bg-surface-container-highest text-white">
+              <Database className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-white text-base">Fontes de Dados dos Fluxos (Opcional)</h3>
+              <p className="text-xs text-on-surface-variant">
+                Infraestrutura externa para sessões distribuídas (Redis) e consultas diretas (PostgreSQL).
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-outline-variant">
+            <div>
+              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                Redis URL (Sessões distribuídas)
+              </label>
+              <input
+                type="text"
+                placeholder={configuredSecrets.flowRedisUrl ? 'Manter URL atual' : 'redis://:senha@host:6379/0'}
+                value={flowRedisUrl}
+                onChange={(e) => setFlowRedisUrl(e.target.value)}
+                className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
+              />
+              <SecretStatus
+                configured={!!configuredSecrets.flowRedisUrl}
+                onClear={() => clearSecret('flowRedisUrl')}
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                PostgreSQL URL (Bloco SQL)
+              </label>
+              <input
+                type="text"
+                placeholder={configuredSecrets.flowPostgresUrl ? 'Manter URL atual' : 'postgres://user:senha@host:5432/db'}
+                value={flowPostgresUrl}
+                onChange={(e) => setFlowPostgresUrl(e.target.value)}
+                className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
+              />
+              <SecretStatus
+                configured={!!configuredSecrets.flowPostgresUrl}
+                onClear={() => clearSecret('flowPostgresUrl')}
+              />
+            </div>
+          </div>
         </div>
 
         {/* Telegram & Discord Notifications */}

@@ -259,12 +259,45 @@ export const upsertWaFlowBodySchema = z
     name: z.string().min(1).max(80).optional(),
     nodes: z.array(z.any()).max(80).optional(),
     edges: z.array(z.any()).max(160).optional(),
+    instanceNames: z.array(z.string().max(80)).max(20).optional(),
+    priority: z.number().int().min(-100).max(100).optional(),
+    sessionTtlMinutes: z.number().int().min(5).max(1440).optional(),
+    aiBudgetTokensPerDay: z.number().int().min(0).max(10_000_000).optional(),
+    dataBinding: z
+      .object({
+        postgresDatabaseId: z.string().optional(),
+        redisDatabaseId: z.string().optional(),
+      })
+      .optional(),
+    templateId: z.string().max(80).optional(),
   })
   .strict();
 
 export const publishWaFlowBodySchema = z
   .object({
     published: z.boolean(),
+  })
+  .strict();
+
+export const simulateWaFlowBodySchema = z
+  .object({
+    messages: z.array(z.string().max(1000)).min(1).max(30),
+    initialVars: z.record(z.string().max(1000)).optional(),
+  })
+  .strict();
+
+export const releaseHandoffBodySchema = z
+  .object({
+    instance: z.string().min(1).max(80),
+    phoneHash: z.string().min(1).max(64),
+  })
+  .strict();
+
+export const testAiBodySchema = z
+  .object({
+    provider: z.enum(['openai', 'openrouter']),
+    model: z.string().min(1).max(80),
+    apiKey: z.string().max(500).optional(),
   })
   .strict();
 

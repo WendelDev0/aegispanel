@@ -15,8 +15,12 @@ import {
   updateSettingsBodySchema,
   importStateBodySchema,
   testAlertBodySchema,
+  testAiBodySchema,
   emptyBodySchema,
 } from '../validation/schemas.js';
+import { CONFIG } from '../config.js';
+import { evolutionFetchInstances, evolutionTestConnection } from '../utils/evolution.client.js';
+import { WaFlowService } from '../services/wa-flow.service.js';
 
 export const systemRouter = Router();
 
@@ -50,6 +54,25 @@ function redactSettings(settings: PanelSettings): PanelSettings {
       telegramBotToken: alert.telegramBotToken ? MASK : undefined,
       whatsappApiKey: alert.whatsappApiKey ? MASK : undefined,
     },
+    evolution: settings.evolution
+      ? {
+          apiUrl: settings.evolution.apiUrl,
+          apiKey: settings.evolution.apiKey ? MASK : '',
+        }
+      : undefined,
+    aiProviders: settings.aiProviders
+      ? {
+          openaiKey: settings.aiProviders.openaiKey ? MASK : undefined,
+          openrouterKey: settings.aiProviders.openrouterKey ? MASK : undefined,
+          allowedModels: settings.aiProviders.allowedModels || [],
+        }
+      : undefined,
+    flowDataUrls: settings.flowDataUrls
+      ? {
+          redisUrl: settings.flowDataUrls.redisUrl ? MASK : undefined,
+          postgresUrl: settings.flowDataUrls.postgresUrl ? MASK : undefined,
+        }
+      : undefined,
   };
 }
 
@@ -81,6 +104,35 @@ function mergeSettings(current: PanelSettings, patch: Partial<PanelSettings>): P
       },
     };
   }
+
+  if (patch.evolution) {
+    const incoming = patch.evolution;
+    const stored = current.evolution;
+    next.evolution = {
+      apiUrl: incoming.apiUrl ?? stored?.apiUrl ?? '',
+      apiKey: incoming.apiKey === MASK || incoming.apiKey === undefined ? stored?.apiKey ?? '' : incoming.apiKey,
+    };
+  }
+
+  if (patch.aiProviders) {
+    const incoming = patch.aiProviders;
+    const stored = current.aiProviders;
+    next.aiProviders = {
+      openaiKey: incoming.openaiKey === MASK || incoming.openaiKey === undefined ? stored?.openaiKey : incoming.openaiKey,
+      openrouterKey: incoming.openrouterKey === MASK || incoming.openrouterKey === undefined ? stored?.openrouterKey : incoming.openrouterKey,
+      allowedModels: incoming.allowedModels ?? stored?.allowedModels ?? [],
+    };
+  }
+
+  if (patch.flowDataUrls) {
+    const incoming = patch.flowDataUrls;
+    const stored = current.flowDataUrls;
+    next.flowDataUrls = {
+      redisUrl: incoming.redisUrl === MASK || incoming.redisUrl === undefined ? stored?.redisUrl : incoming.redisUrl,
+      postgresUrl: incoming.postgresUrl === MASK || incoming.postgresUrl === undefined ? stored?.postgresUrl : incoming.postgresUrl,
+    };
+  }
+
   if (!patch.alertConfig) return next;
 
   const incoming = patch.alertConfig as Partial<AlertConfig>;
@@ -114,6 +166,39 @@ function encryptAlertSecrets(patch: Partial<PanelSettings>): Partial<PanelSettin
       },
     };
   }
+
+  if (next.evolution?.apiKey && next.evolution.apiKey !== MASK && !EncryptionService.isEncrypted(next.evolution.apiKey)) {
+    next = {
+      ...next,
+      evolution: {
+        ...next.evolution,
+        apiKey: EncryptionService.encrypt(next.evolution.apiKey),
+      },
+    };
+  }
+
+  if (next.aiProviders) {
+    const prov = { ...next.aiProviders };
+    if (prov.openaiKey && prov.openaiKey !== MASK && !EncryptionService.isEncrypted(prov.openaiKey)) {
+      prov.openaiKey = EncryptionService.encrypt(prov.openaiKey);
+    }
+    if (prov.openrouterKey && prov.openrouterKey !== MASK && !EncryptionService.isEncrypted(prov.openrouterKey)) {
+      prov.openrouterKey = EncryptionService.encrypt(prov.openrouterKey);
+    }
+    next = { ...next, aiProviders: prov };
+  }
+
+  if (next.flowDataUrls) {
+    const urls = { ...next.flowDataUrls };
+    if (urls.redisUrl && urls.redisUrl !== MASK && !EncryptionService.isEncrypted(urls.redisUrl)) {
+      urls.redisUrl = EncryptionService.encrypt(urls.redisUrl);
+    }
+    if (urls.postgresUrl && urls.postgresUrl !== MASK && !EncryptionService.isEncrypted(urls.postgresUrl)) {
+      urls.postgresUrl = EncryptionService.encrypt(urls.postgresUrl);
+    }
+    next = { ...next, flowDataUrls: urls };
+  }
+
   if (!next.alertConfig) return next;
   const alert = { ...next.alertConfig } as AlertConfig;
   for (const key of ['discordWebhookUrl', 'telegramBotToken', 'whatsappApiKey'] as const) {
@@ -508,6 +593,90 @@ systemRouter.post('/test-alert', requireAdmin, validateBody(testAlertBodySchema)
     res.json({ success: true, message: `Mensagem de teste enviada via ${channel}!` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Proxy Evolution instances list
+systemRouter.get('/evolution/instances', requireAdmin, async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const creds = WaFlowService.evolutionCreds();
+    if (!creds || !creds.apiUrl) {
+      res.json({ ok: false, instances: [], error: 'Evolution API não configurada em Configurações.' });
+      return;
+    }
+    const result = await evolutionFetchInstances(creds);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ ok: false, instances: [], error: err.message });
+  }
+});
+
+// Test Evolution connection directly
+systemRouter.post('/evolution/test', requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const stored = WaFlowService.evolutionCreds();
+    const apiUrl = (req.body?.apiUrl && req.body.apiUrl !== MASK) ? req.body.apiUrl : stored?.apiUrl;
+    const apiKey = (req.body?.apiKey && req.body.apiKey !== MASK) ? req.body.apiKey : stored?.apiKey;
+
+    if (!apiUrl || !apiKey) {
+      res.status(400).json({ ok: false, error: 'URL e API Key da Evolution são obrigatórias.' });
+      return;
+    }
+    const result = await evolutionTestConnection({ apiUrl, apiKey });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Test AI Provider connection
+systemRouter.post('/ai/test', requireAdmin, validateBody(testAiBodySchema), async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (CONFIG.LOCAL_MODE && !CONFIG.ALLOW_OUTBOUND_ALERTS) {
+      res.status(400).json({ error: 'Chamadas de IA bloqueadas em modo local (LOCAL_MODE=true).' });
+      return;
+    }
+
+    const { provider, model } = req.body;
+    const settings = dbStorage.getSettings();
+    const provConfig = settings.aiProviders;
+    let apiKey = req.body.apiKey;
+
+    if (!apiKey || apiKey === MASK) {
+      if (provider === 'openai') apiKey = provConfig?.openaiKey;
+      else apiKey = provConfig?.openrouterKey;
+    }
+
+    if (!apiKey) {
+      res.status(400).json({ error: `Chave de API para ${provider} não configurada.` });
+      return;
+    }
+
+    const rawKey = EncryptionService.tryDecrypt(apiKey) ?? apiKey;
+    const baseUrl = provider === 'openai' ? 'https://api.openai.com/v1' : 'https://openrouter.ai/api/v1';
+
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${rawKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: 'Ping' }],
+        max_tokens: 5,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      res.status(400).json({ ok: false, error: `Provedor retornou HTTP ${response.status}: ${errText.slice(0, 200)}` });
+      return;
+    }
+
+    res.json({ ok: true, message: `Conexão com ${provider} (${model}) testada com sucesso!` });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 

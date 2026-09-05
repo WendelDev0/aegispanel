@@ -4,15 +4,16 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import { dbStorage } from '../src/db/storage.js';
 import { WaFlowService } from '../src/services/wa-flow.service.js';
-import { WaFlowEngine } from '../src/services/wa-flow-engine.js';
+import { HandoffManager, WaFlowEngine } from '../src/services/wa-flow-engine.js';
 import { evolutionOutboundBlocked, parseEvolutionUpsert } from '../src/utils/evolution.client.js';
 import { WaSessionStore } from '../src/utils/wa-session.store.js';
 import { waFlowRouter } from '../src/routes/wa-flow.routes.js';
+import { phoneHash } from '../src/utils/phone.js';
 
-function upsert(text: string, phone = '5511999999999') {
+function upsert(text: string, phone = '5511999999999', instance = 'clinic') {
   return {
     event: 'messages.upsert',
-    instance: 'clinic',
+    instance,
     data: {
       key: { remoteJid: `${phone}@s.whatsapp.net`, fromMe: false },
       pushName: 'Ana',
@@ -46,6 +47,10 @@ test('engine matches keyword, interpolates name and advances after a menu reply'
     id: 'waflow-menu',
     name: 'Menu',
     published: true,
+    instanceNames: ['clinic'],
+    priority: 0,
+    sessionTtlMinutes: 30,
+    aiBudgetTokensPerDay: 50_000,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     nodes: [
@@ -72,11 +77,69 @@ test('engine matches keyword, interpolates name and advances after a menu reply'
   assert.equal(WaSessionStore.read('clinic', '5511999999999'), null);
 });
 
+test('multi-instance routing routes to the correct instance binding', async () => {
+  dbStorage.saveWaFlow({
+    id: 'waflow-inst-a',
+    name: 'Flow Loja A',
+    published: true,
+    instanceNames: ['instance-loja-a'],
+    priority: 0,
+    sessionTtlMinutes: 30,
+    aiBudgetTokensPerDay: 50_000,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    nodes: [
+      { id: 't1', type: 'trigger_message', position: { x: 0, y: 0 }, data: { match: 'any' } },
+      { id: 's1', type: 'send_text', position: { x: 0, y: 1 }, data: { text: 'Resposta Loja A' } },
+      { id: 'e1', type: 'end', position: { x: 0, y: 2 }, data: {} },
+    ],
+    edges: [
+      { id: 'e1', source: 't1', target: 's1' },
+      { id: 'e2', source: 's1', target: 'e1' },
+    ],
+  });
+
+  dbStorage.saveWaFlow({
+    id: 'waflow-inst-b',
+    name: 'Flow Loja B',
+    published: true,
+    instanceNames: ['instance-loja-b'],
+    priority: 0,
+    sessionTtlMinutes: 30,
+    aiBudgetTokensPerDay: 50_000,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    nodes: [
+      { id: 't1', type: 'trigger_message', position: { x: 0, y: 0 }, data: { match: 'any' } },
+      { id: 's1', type: 'send_text', position: { x: 0, y: 1 }, data: { text: 'Resposta Loja B' } },
+      { id: 'e1', type: 'end', position: { x: 0, y: 2 }, data: {} },
+    ],
+    edges: [
+      { id: 'e1', source: 't1', target: 's1' },
+      { id: 'e2', source: 's1', target: 'e1' },
+    ],
+  });
+
+  const mockA = mockSender();
+  const handledA = await WaFlowEngine.handleInbound(upsert('oi', '5511111111111', 'instance-loja-a'), mockA.sender);
+  assert.equal(handledA, true);
+  assert.equal(mockA.sent[0]?.text, 'Resposta Loja A');
+
+  const mockB = mockSender();
+  const handledB = await WaFlowEngine.handleInbound(upsert('oi', '5511222222222', 'instance-loja-b'), mockB.sender);
+  assert.equal(handledB, true);
+  assert.equal(mockB.sent[0]?.text, 'Resposta Loja B');
+});
+
 test('condition splits yes and no', async () => {
   dbStorage.saveWaFlow({
     id: 'waflow-cond',
     name: 'Cond',
     published: true,
+    instanceNames: ['clinic'],
+    priority: 0,
+    sessionTtlMinutes: 30,
+    aiBudgetTokensPerDay: 50_000,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     nodes: [
@@ -101,6 +164,76 @@ test('condition splits yes and no', async () => {
   assert.equal(no.sent[0]?.text, 'negativo');
 });
 
+test('priority and specificity choose the best matching flow', async () => {
+  dbStorage.saveWaFlow({
+    id: 'waflow-generic',
+    name: 'Generic Flow',
+    published: true,
+    instanceNames: ['shop'],
+    priority: 0,
+    sessionTtlMinutes: 30,
+    aiBudgetTokensPerDay: 50_000,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    nodes: [
+      { id: 't1', type: 'trigger_message', position: { x: 0, y: 0 }, data: { match: 'any' } },
+      { id: 's1', type: 'send_text', position: { x: 0, y: 1 }, data: { text: 'Resposta Genérica' } },
+      { id: 'e1', type: 'end', position: { x: 0, y: 2 }, data: {} },
+    ],
+    edges: [{ id: 'e1', source: 't1', target: 's1' }, { id: 'e2', source: 's1', target: 'e1' }],
+  });
+
+  dbStorage.saveWaFlow({
+    id: 'waflow-specific',
+    name: 'Specific Flow',
+    published: true,
+    instanceNames: ['shop'],
+    priority: 10, // Higher priority wins!
+    sessionTtlMinutes: 30,
+    aiBudgetTokensPerDay: 50_000,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    nodes: [
+      { id: 't1', type: 'trigger_message', position: { x: 0, y: 0 }, data: { match: 'contains', keyword: 'especial' } },
+      { id: 's1', type: 'send_text', position: { x: 0, y: 1 }, data: { text: 'Resposta Especial Prioritária' } },
+      { id: 'e1', type: 'end', position: { x: 0, y: 2 }, data: {} },
+    ],
+    edges: [{ id: 'e1', source: 't1', target: 's1' }, { id: 'e2', source: 's1', target: 'e1' }],
+  });
+
+  const m = mockSender();
+  await WaFlowEngine.handleInbound(upsert('quero o especial', '5511333333333', 'shop'), m.sender);
+  assert.equal(m.sent[0]?.text, 'Resposta Especial Prioritária');
+});
+
+test('human handoff silences the bot until released', async () => {
+  const phone = '5511444444444';
+  const instance = 'shop';
+  const pHash = phoneHash(phone);
+
+  HandoffManager.set(instance, pHash, 60);
+  assert.equal(HandoffManager.isActive(instance, pHash), true);
+
+  const m = mockSender();
+  const handled = await WaFlowEngine.handleInbound(upsert('ola atendente', phone, instance), m.sender);
+  // Absorbed silently by handoff
+  assert.equal(handled, true);
+  assert.equal(m.sent.length, 0);
+
+  // Release handoff
+  HandoffManager.release(instance, pHash);
+  assert.equal(HandoffManager.isActive(instance, pHash), false);
+});
+
+test('simulate executes in memory without network calls', async () => {
+  const res = await WaFlowEngine.simulate('waflow-menu', ['bomdia', '1']);
+  assert.ok(res.turns.length >= 3);
+  assert.equal(res.turns[0].text, 'bomdia');
+  assert.match(res.turns[1].text, /Olá Visitante/);
+  assert.equal(res.turns[2].text, '1');
+  assert.equal(res.turns[3].text, 'Tabela enviada');
+});
+
 test('panel event trigger sends to the settings recipient', async () => {
   dbStorage.updateSettings({
     alertConfig: {
@@ -115,6 +248,10 @@ test('panel event trigger sends to the settings recipient', async () => {
     id: 'waflow-event',
     name: 'Deploy',
     published: true,
+    instanceNames: ['clinic'],
+    priority: 0,
+    sessionTtlMinutes: 30,
+    aiBudgetTokensPerDay: 50_000,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     nodes: [

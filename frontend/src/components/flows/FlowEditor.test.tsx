@@ -36,12 +36,12 @@ describe('FlowEditor', () => {
   it('renders the block palette', async () => {
     render(<FlowEditor flowId="waflow-1" onBack={() => {}} />);
     expect(await screen.findByText('Blocos')).toBeTruthy();
-    expect(screen.getByText('Mensagem recebida')).toBeTruthy();
-    expect(screen.getByText('Evento do painel')).toBeTruthy();
-    expect(screen.getByText('Enviar texto')).toBeTruthy();
-    expect(screen.getByText('Menu')).toBeTruthy();
-    expect(screen.getByText('Aguardar resposta')).toBeTruthy();
-    expect(screen.getByText('Condição')).toBeTruthy();
-    expect(screen.getByText('Encerrar')).toBeTruthy();
+    expect(screen.getByText('Ouvir cliente')).toBeTruthy();
+    expect(screen.getByText('Ouvir painel')).toBeTruthy();
+    expect(screen.getByText('Enviar mensagem')).toBeTruthy();
+    expect(screen.getByText('Menu interativo')).toBeTruthy();
+    expect(screen.getByText('Agente IA')).toBeTruthy();
+    expect(screen.getByText('Transbordo humano')).toBeTruthy();
+    expect(screen.getByText('Finalizar fluxo')).toBeTruthy();
   });
 });

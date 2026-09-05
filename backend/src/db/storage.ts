@@ -249,7 +249,13 @@ export type WaFlowNodeType =
   | 'send_text'
   | 'menu'
   | 'wait_reply'
+  | 'capture'
   | 'condition'
+  | 'agent'
+  | 'http'
+  | 'sql'
+  | 'handoff'
+  | 'delay'
   | 'end';
 
 export type WaPanelEvent = 'deploy_fail' | 'deploy_ok' | 'app_down' | 'backup';
@@ -258,10 +264,41 @@ export interface WaFlowNodeData {
   match?: 'any' | 'contains' | 'regex';
   keyword?: string;
   event?: WaPanelEvent;
+  instance?: string;
+  recipient?: string;
   text?: string;
   buttons?: Array<{ id: string; label: string }>;
-  operator?: 'contains' | 'equals';
+  operator?: 'contains' | 'equals' | 'regex' | 'gt' | 'lt' | 'exists';
+  source?: 'lastText' | 'var';
+  varName?: string;
   value?: string;
+  // capture
+  captureType?: 'text' | 'number' | 'phone' | 'email';
+  saveLead?: boolean;
+  // agent
+  provider?: 'openai' | 'openrouter';
+  model?: string;
+  systemPrompt?: string;
+  maxTokens?: number;
+  memoryTurns?: number;
+  fallbackText?: string;
+  // http
+  httpMethod?: 'GET' | 'POST';
+  httpUrl?: string;
+  httpHeaders?: Record<string, string>;
+  httpBody?: string;
+  saveAs?: string;
+  // sql
+  sqlQuery?: string;
+  sqlParams?: string[];
+  sqlMode?: 'read' | 'write';
+  sqlDatabaseId?: string;
+  // handoff
+  notifyNumber?: string;
+  notifyMessage?: string;
+  resumeMinutes?: number;
+  // delay
+  delaySeconds?: number;
 }
 
 export interface WaFlowNode {
@@ -278,12 +315,29 @@ export interface WaFlowEdge {
   sourceHandle?: string;
 }
 
+export interface WaFlowStats {
+  runsToday: number;
+  aiTokensToday: number;
+  errorsToday: number;
+  unmatchedToday?: number;
+  day: string;
+}
+
 export interface WaFlowRecord {
   id: string;
   name: string;
   published: boolean;
   nodes: WaFlowNode[];
   edges: WaFlowEdge[];
+  instanceNames: string[];
+  priority: number;
+  sessionTtlMinutes: number;
+  aiBudgetTokensPerDay: number;
+  dataBinding?: {
+    postgresDatabaseId?: string;
+    redisDatabaseId?: string;
+  };
+  stats?: WaFlowStats;
   lastRunAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -373,6 +427,24 @@ export interface PanelSettings {
   alertConfig: AlertConfig;
   /** Encrypted token Evolution sends back on inbound webhooks. */
   waFlowWebhookSecret?: string;
+  /** Global Evolution API credentials */
+  evolution?: {
+    apiUrl: string;
+    apiKey: string;
+  };
+  /** AI providers configuration for Flow AI agent blocks */
+  aiProviders?: {
+    openaiKey?: string;
+    openrouterKey?: string;
+    allowedModels: string[];
+  };
+  /** Host allowlist for Flow HTTP blocks */
+  flowHttpAllowlist?: string[];
+  /** Optional custom data plane URLs (escape hatch) */
+  flowDataUrls?: {
+    redisUrl?: string;
+    postgresUrl?: string;
+  };
 }
 
 export interface DatabaseSchema {
@@ -455,7 +527,15 @@ const DEFAULT_DATA: DatabaseSchema = {
       cpuThresholdPercent: 90,
       memThresholdPercent: 85,
       diskThresholdPercent: 90,
-    }
+    },
+    evolution: undefined,
+    aiProviders: {
+      openaiKey: undefined,
+      openrouterKey: undefined,
+      allowedModels: [],
+    },
+    flowHttpAllowlist: [],
+    flowDataUrls: undefined,
   }
 };
 
@@ -525,13 +605,42 @@ export class JsonStorage {
     // Merge one level into the defaults so a file written by an older version
     // gains newly added collections, and nested settings gain new fields
     // instead of being replaced wholesale by the stored object.
+    const alert = parsed.settings?.alertConfig;
+    const existingEvolution = parsed.settings?.evolution;
+    const evolution =
+      existingEvolution ||
+      (alert?.whatsappApiUrl && alert?.whatsappApiKey
+        ? {
+            apiUrl: alert.whatsappApiUrl,
+            apiKey: alert.whatsappApiKey,
+          }
+        : undefined);
+
+    const waFlows = (parsed.waFlows || []).map((flow: any) => {
+      const instanceNames = Array.isArray(flow.instanceNames)
+        ? flow.instanceNames
+        : alert?.whatsappInstance
+          ? [alert.whatsappInstance]
+          : [];
+      return {
+        ...flow,
+        instanceNames,
+        priority: typeof flow.priority === 'number' ? flow.priority : 0,
+        sessionTtlMinutes: typeof flow.sessionTtlMinutes === 'number' ? flow.sessionTtlMinutes : 30,
+        aiBudgetTokensPerDay: typeof flow.aiBudgetTokensPerDay === 'number' ? flow.aiBudgetTokensPerDay : 50_000,
+        published: instanceNames.length === 0 ? false : Boolean(flow.published),
+      };
+    });
+
     return {
       ...DEFAULT_DATA,
       ...parsed,
+      waFlows,
       cronJobs: this.withDefaultCronJobs(parsed.cronJobs),
       settings: {
         ...DEFAULT_DATA.settings,
         ...(parsed.settings || {}),
+        evolution: evolution ?? DEFAULT_DATA.settings.evolution,
         alertConfig: {
           ...DEFAULT_DATA.settings.alertConfig,
           ...(parsed.settings?.alertConfig || {}),
@@ -862,12 +971,41 @@ export class JsonStorage {
    */
   importState(candidate: Partial<DatabaseSchema>): DatabaseSchema {
     this.snapshot('import-state');
+    const alert = candidate.settings?.alertConfig;
+    const existingEvolution = candidate.settings?.evolution;
+    const evolution =
+      existingEvolution ||
+      (alert?.whatsappApiUrl && alert?.whatsappApiKey
+        ? {
+            apiUrl: alert.whatsappApiUrl,
+            apiKey: alert.whatsappApiKey,
+          }
+        : undefined);
+
+    const waFlows = (candidate.waFlows || []).map((flow: any) => {
+      const instanceNames = Array.isArray(flow.instanceNames)
+        ? flow.instanceNames
+        : alert?.whatsappInstance
+          ? [alert.whatsappInstance]
+          : [];
+      return {
+        ...flow,
+        instanceNames,
+        priority: typeof flow.priority === 'number' ? flow.priority : 0,
+        sessionTtlMinutes: typeof flow.sessionTtlMinutes === 'number' ? flow.sessionTtlMinutes : 30,
+        aiBudgetTokensPerDay: typeof flow.aiBudgetTokensPerDay === 'number' ? flow.aiBudgetTokensPerDay : 50_000,
+        published: instanceNames.length === 0 ? false : Boolean(flow.published),
+      };
+    });
+
     this.data = {
       ...DEFAULT_DATA,
       ...candidate,
+      waFlows,
       settings: {
         ...DEFAULT_DATA.settings,
         ...(candidate.settings || {}),
+        evolution: evolution ?? DEFAULT_DATA.settings.evolution,
         alertConfig: {
           ...DEFAULT_DATA.settings.alertConfig,
           ...(candidate.settings?.alertConfig || {}),
