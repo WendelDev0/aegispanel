@@ -398,7 +398,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
   };
 
   const handleSelfUpdate = async () => {
-    if (!confirm('Atualizar a stack do painel agora? Isso reconstrói os contêineres aegis-*.')) return;
+    if (!confirm('Atualizar a stack do painel agora? O painel pode recarregar sozinho por alguns segundos.')) return;
     try {
       selfUpdatingRef.current = true;
       setSelfUpdating(true);
@@ -1047,6 +1047,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
         <p className="text-xs text-on-surface-variant">
           Logs allowlisted da stack (backend, frontend, caddy, nginx) e self-update via Docker Compose.
           Quando o GitHub está à frente, o botão Atualizar também aparece no topo do painel, como numa IDE.
+          O compose sobe num contêiner irmão para o backend não se matar no meio (isso gerava 502).
           Bloqueado em LOCAL_MODE.
         </p>
 

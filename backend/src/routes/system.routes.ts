@@ -546,7 +546,7 @@ systemRouter.post('/panel/self-update', requireAdmin, validateBody(emptyBodySche
     });
     res.json({
       success: true,
-      message: 'Self-update da stack iniciado/concluído.',
+      message: 'Self-update: imagens prontas; a stack vai reiniciar em alguns segundos.',
       output: result.output,
     });
   } catch (err: any) {

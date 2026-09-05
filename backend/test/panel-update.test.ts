@@ -9,7 +9,10 @@ import {
   gitStatusCommands,
   gitUpdateCommands,
   hasComposeGit,
+  sanitizeImageRef,
   sanitizeUpdateRef,
+  SELF_UPDATE_HELPER_NAME,
+  selfUpdateHelperArgs,
   updateComposeCheckout,
 } from '../src/utils/panel-update.js';
 import { PanelService } from '../src/services/panel.service.js';
@@ -85,6 +88,33 @@ test('checkComposeUpdate is available when origin is ahead', async () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('selfUpdateHelperArgs runs compose in a sibling, not this process', () => {
+  const args = selfUpdateHelperArgs('/opt/aegispanel');
+  assert.equal(args[0], 'run');
+  assert.ok(args.includes('-d'));
+  assert.ok(args.includes(SELF_UPDATE_HELPER_NAME));
+  assert.ok(args.includes('--network'));
+  assert.ok(args.includes('none'));
+  assert.ok(args.includes('/opt/aegispanel:/opt/aegispanel'));
+  assert.ok(args.includes('aegispanel-backend'));
+  const composeAt = args.lastIndexOf('compose');
+  assert.ok(composeAt > 0);
+  assert.deepEqual(args.slice(composeAt), ['compose', 'up', '-d', '--remove-orphans']);
+  assert.equal(args.includes('--build'), false);
+  assert.equal(args.some((a) => a.includes(';')), false);
+  assert.throws(() => selfUpdateHelperArgs('/opt/aegispanel', { image: 'evil;rm' }), /inválida/);
+  assert.throws(
+    () => selfUpdateHelperArgs('/opt/aegispanel', { dockerSocket: '/tmp/x.sock' }),
+    /Socket/
+  );
+});
+
+test('sanitizeImageRef rejects injection', () => {
+  assert.equal(sanitizeImageRef(undefined), 'aegispanel-backend');
+  assert.throws(() => sanitizeImageRef('ghcr.io/x/y:latest'), /inválida/);
+  assert.throws(() => sanitizeImageRef('../evil'), /inválida/);
 });
 
 test('PanelService.selfUpdate is still blocked in LOCAL_MODE', async () => {

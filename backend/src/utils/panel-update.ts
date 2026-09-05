@@ -45,6 +45,78 @@ export function gitPrefix(composeDir: string): string[] {
   return ['-c', `safe.directory=${composeDir}`, '-C', composeDir];
 }
 
+/** Sibling container that finishes `compose up` after this process is replaced. */
+export const SELF_UPDATE_HELPER_NAME = 'aegis-self-update';
+
+export function sanitizeComposeDir(dir: string): string {
+  const value = dir.trim();
+  // Do not path.resolve(): on Windows that rewrites the VPS path /opt/aegispanel
+  // while unit tests run, and the helper bind mount must stay host-absolute.
+  if (
+    !value ||
+    value.includes('\0') ||
+    value.includes('..') ||
+    /[;\n\r]/.test(value) ||
+    (!path.posix.isAbsolute(value) && !path.win32.isAbsolute(value))
+  ) {
+    throw new Error('Diretório de compose inválido.');
+  }
+  return value;
+}
+
+export function sanitizeImageRef(raw: unknown, fallback = 'aegispanel-backend'): string {
+  const value = typeof raw === 'string' && raw.trim() ? raw.trim() : fallback;
+  if (
+    value.length > 128 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value) ||
+    value.includes('..') ||
+    value.includes('//')
+  ) {
+    throw new Error('Imagem de self-update inválida.');
+  }
+  return value;
+}
+
+/**
+ * `docker run` argv for a sibling that runs `compose up`.
+ *
+ * Compose started *inside* aegis-backend used to SIGTERM itself mid-`up`,
+ * leave Caddy in Created, and 502 every site. The helper is another
+ * container, so replacing the backend cannot kill the rest of the update.
+ */
+export function selfUpdateHelperArgs(
+  composeDir: string,
+  options: { image?: string; dockerSocket?: string } = {}
+): string[] {
+  const dir = sanitizeComposeDir(composeDir);
+  const image = sanitizeImageRef(options.image);
+  const socket = options.dockerSocket ?? '/var/run/docker.sock';
+  if (socket !== '/var/run/docker.sock') {
+    throw new Error('Socket Docker inválido para o helper de self-update.');
+  }
+  return [
+    'run',
+    '-d',
+    '--rm',
+    '--name',
+    SELF_UPDATE_HELPER_NAME,
+    '--network',
+    'none',
+    '-v',
+    `${socket}:${socket}`,
+    '-v',
+    `${dir}:${dir}`,
+    '-w',
+    dir,
+    image,
+    'docker',
+    'compose',
+    'up',
+    '-d',
+    '--remove-orphans',
+  ];
+}
+
 export function gitUpdateCommands(composeDir: string, ref: string): string[][] {
   const safe = sanitizeUpdateRef(ref);
   const prefix = gitPrefix(composeDir);

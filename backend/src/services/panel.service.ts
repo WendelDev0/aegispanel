@@ -4,7 +4,13 @@ import fs from 'fs';
 import { CONFIG } from '../config.js';
 import { dockerService } from './docker.service.js';
 import { emit } from '../realtime.js';
-import { checkComposeUpdate, updateComposeCheckout, type PanelUpdateStatus } from '../utils/panel-update.js';
+import {
+  checkComposeUpdate,
+  SELF_UPDATE_HELPER_NAME,
+  selfUpdateHelperArgs,
+  updateComposeCheckout,
+  type PanelUpdateStatus,
+} from '../utils/panel-update.js';
 
 /** Only these container name prefixes may be tailed through PanelService. */
 const ALLOWED_LOG_TARGETS = new Set([
@@ -147,15 +153,43 @@ export class PanelService {
         line:
           git.skippedReason === 'no-git'
             ? `[aegis] Sem .git em ${composeDir}; rebuild da cópia que já está no disco.\n`
-            : `[aegis] git: ${git.ref} atualizado.\n[aegis] docker compose up -d --build\n`,
+            : `[aegis] git: ${git.ref} atualizado.\n[aegis] docker compose build\n`,
         status: 'running',
       });
 
-      const output = await this.runCompose(composeDir, ['up', '-d', '--build'], (chunk) => {
+      /**
+       * Build here, swap in a sibling.
+       *
+       * `docker compose up` from this process used to stop aegis-backend
+       * (this container) and die with it — Caddy stayed down and every
+       * site 502'd. Images are built first so the helper only has to
+       * `up` already-local layers.
+       */
+      if (await this.helperRunning()) {
+        throw new Error('Já existe um self-update em andamento (helper aegis-self-update).');
+      }
+      const buildOutput = await this.runDocker(composeDir, ['compose', 'build'], (chunk) => {
         this.emitUpdate({ line: chunk, status: 'running' });
       });
-      const safe = this.redactPanelSecrets([git.output, output].filter(Boolean).join('\n'));
-      this.emitUpdate({ line: `\n[aegis] Concluído.\n`, status: 'success', done: true });
+      await this.runDocker(composeDir, ['rm', '-f', SELF_UPDATE_HELPER_NAME]);
+      const helperArgs = selfUpdateHelperArgs(composeDir, {
+        image: process.env.AEGIS_SELF_UPDATE_IMAGE,
+      });
+      this.emitUpdate({
+        line: '[aegis] Subindo helper para trocar os contêineres sem matar este processo.\n',
+        status: 'running',
+      });
+      const helperId = await this.runDocker(composeDir, helperArgs, (chunk) => {
+        this.emitUpdate({ line: chunk, status: 'running' });
+      });
+      const safe = this.redactPanelSecrets(
+        [git.output, buildOutput, helperId].filter(Boolean).join('\n')
+      );
+      this.emitUpdate({
+        line: `\n[aegis] Imagens prontas. A stack vai reiniciar em alguns segundos — recarregue se a página cair.\n`,
+        status: 'success',
+        done: true,
+      });
       return { ok: true, output: safe };
     } catch (err: any) {
       const message = this.redactPanelSecrets(err.message || String(err));
@@ -221,13 +255,27 @@ export class PanelService {
     });
   }
 
-  private static runCompose(
+  private static async helperRunning(): Promise<boolean> {
+    try {
+      const state = await this.runDocker(this.resolveComposeDir(), [
+        'inspect',
+        '-f',
+        '{{.State.Running}}',
+        SELF_UPDATE_HELPER_NAME,
+      ]);
+      return state.trim() === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  private static runDocker(
     cwd: string,
     args: string[],
     onOutput?: (chunk: string) => void
   ): Promise<string> {
     return new Promise((resolve, reject) => {
-      const child = spawn('docker', ['compose', ...args], {
+      const child = spawn('docker', args, {
         cwd,
         shell: false,
         env: process.env,
