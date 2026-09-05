@@ -460,6 +460,7 @@ export interface WaInboundSkipSummary {
   broadcast: number;
   newsletter: number;
   from_me: number;
+  duplicate: number;
   total: number;
 }
 

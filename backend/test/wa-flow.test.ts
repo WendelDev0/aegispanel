@@ -20,6 +20,8 @@ import { providedWaWebhookSecret } from '../src/utils/wa-webhook-auth.js';
 import { assessBoundInstances } from '../src/utils/wa-publish-ready.js';
 import { evolutionSendFailed, evolutionManagerUrl } from '../src/utils/evolution.client.js';
 import { WaInboundStore } from '../src/utils/wa-inbound.store.js';
+import { isDuplicateMessage, resetDedupe } from '../src/utils/wa-dedupe.js';
+import { runSerial, pendingSerialKeys } from '../src/utils/serial-queue.js';
 
 function upsert(text: string, phone = '5511999999999', instance = 'clinic') {
   return {
@@ -697,4 +699,133 @@ test('the manager link stays public even when the internal route is on', () => {
   assert.equal(WaFlowService.publicEvolutionApiUrl(), 'https://evo.exemplo.com');
 
   dbStorage.updateSettings({ evolution: before.evolution, waFlowInternalRoute: before.waFlowInternalRoute });
+});
+
+// --- Etapa 4: ACK imediato + dedupe de reentrega ---
+
+test('runSerial keeps one conversation in order and lets others run in parallel', async () => {
+  const order: string[] = [];
+  const slow = (tag: string, ms: number) => async () => {
+    order.push(`${tag}:start`);
+    await new Promise((r) => setTimeout(r, ms));
+    order.push(`${tag}:end`);
+    return tag;
+  };
+
+  // Same key: the second task must not start before the first finishes, even
+  // though it is queued while the first is still awaiting.
+  const a1 = runSerial('ana', slow('a1', 30));
+  const a2 = runSerial('ana', slow('a2', 1));
+  // Different key: no reason to wait behind Ana.
+  const b1 = runSerial('bruno', slow('b1', 1));
+
+  await Promise.all([a1, a2, b1]);
+
+  assert.deepEqual(
+    order.filter((o) => o.startsWith('a')),
+    ['a1:start', 'a1:end', 'a2:start', 'a2:end']
+  );
+  assert.ok(order.indexOf('b1:end') < order.indexOf('a1:end'), 'bruno não espera a fila da ana');
+});
+
+test('runSerial survives a task that throws', async () => {
+  const done: string[] = [];
+  const boom = runSerial('zeca', async () => {
+    throw new Error('falhou');
+  });
+  await assert.rejects(boom, /falhou/);
+
+  // A failed turn must not wedge the queue for that contact.
+  await runSerial('zeca', async () => {
+    done.push('depois');
+  });
+  assert.deepEqual(done, ['depois']);
+
+  // A limpeza do mapa é encadeada depois da tarefa, então roda um tick após
+  // o await de quem chamou. Sem isso o mapa cresceria uma entrada por contato.
+  await new Promise((r) => setImmediate(r));
+  assert.equal(pendingSerialKeys(), 0, 'a fila se limpa quando esvazia');
+});
+
+test('isDuplicateMessage recognises a retried delivery, per instance', () => {
+  resetDedupe();
+  assert.equal(isDuplicateMessage('clinic', 'WAMSG1'), false, 'primeira entrega');
+  assert.equal(isDuplicateMessage('clinic', 'WAMSG1'), true, 'reentrega');
+
+  // The same id on another line is a different conversation.
+  assert.equal(isDuplicateMessage('loja', 'WAMSG1'), false);
+
+  // No id: never dropped. Descartar mensagem real é bot mudo, pior que
+  // responder duas vezes.
+  assert.equal(isDuplicateMessage('clinic', undefined), false);
+  assert.equal(isDuplicateMessage('clinic', undefined), false);
+  assert.equal(isDuplicateMessage('clinic', '   '), false);
+});
+
+test('a retried webhook does not replay the flow', async () => {
+  resetDedupe();
+  WaInboundStore.resetSkipped();
+  WaSessionStore.clear('clinic', '5511999999999');
+
+  dbStorage.saveWaFlow({
+    id: 'waflow-retry',
+    name: 'Retry',
+    published: true,
+    instanceNames: ['clinic'],
+    priority: 50,
+    sessionTtlMinutes: 30,
+    aiBudgetTokensPerDay: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    nodes: [
+      { id: 't1', type: 'trigger_message', position: { x: 0, y: 0 }, data: { match: 'contains', keyword: 'orcamento' } },
+      { id: 's1', type: 'send_text', position: { x: 0, y: 1 }, data: { text: 'Orçamento a caminho' } },
+      { id: 'e1', type: 'end', position: { x: 0, y: 2 }, data: {} },
+    ],
+    edges: [
+      { id: 'e1', source: 't1', target: 's1' },
+      { id: 'e2', source: 's1', target: 'e1' },
+    ],
+  });
+
+  const payload = upsert('orcamento');
+  (payload.data.key as any).id = 'WAMSG-RETRY-1';
+
+  const first = mockSender();
+  assert.equal(await WaFlowEngine.handleInbound(payload, first.sender), true);
+  assert.equal(first.sent.length, 1);
+
+  // Evolution reenvia o mesmo key.id: precisa ser aceito (true) sem reenviar.
+  const retry = mockSender();
+  assert.equal(await WaFlowEngine.handleInbound(payload, retry.sender), true);
+  assert.equal(retry.sent.length, 0, 'reentrega não pode disparar envio de novo');
+  assert.equal(WaInboundStore.skipSummary().duplicate, 1);
+
+  dbStorage.removeWaFlow('waflow-retry');
+});
+
+test('webhook answers before the flow runs so Evolution stops retrying', async () => {
+  resetDedupe();
+  const token = WaFlowService.webhookSecret();
+  const app = express();
+  app.use(express.json());
+  app.use('/api/wa-flows', waFlowRouter);
+
+  const res = await new Promise<{ status: number; body: any }>((resolve) => {
+    const server = app.listen(0, async () => {
+      const port = (server.address() as { port: number }).port;
+      const response = await fetch(`http://127.0.0.1:${port}/api/wa-flows/webhook?token=${token}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(upsert('oi')),
+      });
+      const body = await response.json();
+      server.close();
+      resolve({ status: response.status, body });
+    });
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.ok, true);
+  assert.equal(res.body.queued, true, 'a resposta não espera o fluxo terminar');
 });

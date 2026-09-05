@@ -49,10 +49,22 @@ waFlowRouter.post('/webhook', async (req: Request, res: Response): Promise<void>
       res.status(401).json({ error: 'Webhook recusado: segredo inválido.' });
       return;
     }
-    const handled = await WaFlowEngine.handleInbound(req.body);
-    res.json({ ok: true, handled });
+    // Answer before running the flow. Evolution retries anything that is not
+    // a quick 2xx, and a flow legitimately takes seconds — an agent call, a
+    // delay node, a slow send. Waiting turned every slow reply into a retried
+    // webhook, which replayed the whole conversation. The outcome is not lost:
+    // it lands in WaInboundStore either way, which is what the strip reads.
+    res.json({ ok: true, queued: true });
+
+    void WaFlowEngine.handleInbound(req.body).catch((err: any) => {
+      console.error('⚠️ Falha ao processar inbound do WhatsApp:', err?.message || err);
+      WaInboundStore.record({
+        outcome: 'send_failed',
+        error: String(err?.message || err).slice(0, 300),
+      });
+    });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    if (!res.headersSent) res.status(500).json({ error: err.message });
   }
 });
 

@@ -219,6 +219,8 @@ export interface InboundWaMessage {
   text: string;
   pushName: string;
   fromMe: boolean;
+  /** WhatsApp's own id (`key.id`), used to recognise a retried webhook. */
+  messageId?: string;
 }
 
 function firstMessageRecord(root: Record<string, any>): Record<string, any> {
@@ -354,6 +356,7 @@ export function classifyEvolutionInbound(body: unknown): EvolutionInbound {
       text: trimmed.slice(0, 2000),
       pushName: String(data.pushName || key.pushName || ''),
       fromMe: false,
+      messageId: String(key.id || '').trim() || undefined,
     },
   };
 }

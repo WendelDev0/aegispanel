@@ -29,10 +29,11 @@ const SkippedNote: React.FC<{ skipped?: WaInboundSkipSummary | null }> = ({ skip
   if (skipped.from_me) parts.push(`${skipped.from_me} suas`);
   if (skipped.broadcast) parts.push(`${skipped.broadcast} de status`);
   if (skipped.newsletter) parts.push(`${skipped.newsletter} de canal`);
+  if (skipped.duplicate) parts.push(`${skipped.duplicate} reentregas`);
 
   return (
     <p className="text-[10px] text-on-surface-variant mt-1">
-      Webhook ativo: {skipped.total} mensagens ignoradas por não serem conversa 1:1
+      Webhook ativo: {skipped.total} mensagens ignoradas por não abrirem um turno novo
       {parts.length ? ` (${parts.join(', ')})` : ''}.
     </p>
   );

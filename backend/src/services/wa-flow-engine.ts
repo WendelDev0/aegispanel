@@ -5,12 +5,15 @@ import {
   evolutionSendButtons,
   evolutionSendFailed,
   evolutionSendText,
+  type InboundWaMessage,
   type EvolutionCredentials,
 } from '../utils/evolution.client.js';
 import { phoneHash, phoneTail } from '../utils/phone.js';
 import { WaSessionStore } from '../utils/wa-session.store.js';
 import { WaLogStore } from '../utils/wa-log.store.js';
 import { WaInboundStore } from '../utils/wa-inbound.store.js';
+import { isDuplicateMessage } from '../utils/wa-dedupe.js';
+import { runSerial } from '../utils/serial-queue.js';
 import { WaFlowService } from './wa-flow.service.js';
 import type {
   EvolutionSender,
@@ -589,6 +592,29 @@ export class WaFlowEngine {
       });
       return false;
     }
+
+    // A retry carries the same key.id. Replaying it would send the greeting
+    // twice and let a `capture` node eat the answer to a question it already
+    // moved past. True, not false: the message was handled the first time.
+    if (isDuplicateMessage(instance, inbound.messageId)) {
+      WaInboundStore.countSkipped('duplicate');
+      return true;
+    }
+
+    // One turn at a time per contact. The session is a single file: two
+    // messages read the same node and the slower write wins, so the customer
+    // sees the same question twice.
+    return runSerial(`${instance}__${phoneHash(inbound.phone)}`, () =>
+      this.runConversation(inbound, instance, customSender, customPorts)
+    );
+  }
+
+  private static async runConversation(
+    inbound: InboundWaMessage,
+    instance: string,
+    customSender?: EvolutionSender,
+    customPorts?: Partial<FlowPorts>
+  ): Promise<boolean> {
     // Reply from the instance that received the message, not Settings' leftover name.
     const creds = WaFlowService.evolutionCreds(instance);
 

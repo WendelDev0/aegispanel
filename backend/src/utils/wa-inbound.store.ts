@@ -13,7 +13,7 @@ export type InboundOutcome =
   | 'handled';
 
 /** Traffic the panel drops by design; counted, never listed. */
-export type InboundSkipCounter = 'group' | 'broadcast' | 'newsletter' | 'from_me';
+export type InboundSkipCounter = 'group' | 'broadcast' | 'newsletter' | 'from_me' | 'duplicate';
 
 export interface InboundEvent {
   at: string;
@@ -34,6 +34,7 @@ export interface InboundSkipSummary {
   broadcast: number;
   newsletter: number;
   from_me: number;
+  duplicate: number;
   total: number;
 }
 
@@ -63,6 +64,7 @@ const skipped: Record<InboundSkipCounter, number> = {
   broadcast: 0,
   newsletter: 0,
   from_me: 0,
+  duplicate: 0,
 };
 let skippedSince = new Date().toISOString();
 
@@ -128,7 +130,8 @@ export class WaInboundStore {
       broadcast: skipped.broadcast,
       newsletter: skipped.newsletter,
       from_me: skipped.from_me,
-      total: skipped.group + skipped.broadcast + skipped.newsletter + skipped.from_me,
+      duplicate: skipped.duplicate,
+      total: skipped.group + skipped.broadcast + skipped.newsletter + skipped.from_me + skipped.duplicate,
     };
   }
 
@@ -138,6 +141,7 @@ export class WaInboundStore {
     skipped.broadcast = 0;
     skipped.newsletter = 0;
     skipped.from_me = 0;
+    skipped.duplicate = 0;
     skippedSince = new Date().toISOString();
   }
 
