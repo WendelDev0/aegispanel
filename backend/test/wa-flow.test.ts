@@ -21,6 +21,7 @@ import { assessBoundInstances } from '../src/utils/wa-publish-ready.js';
 import { evolutionSendFailed, evolutionManagerUrl, evolutionSendButtons } from '../src/utils/evolution.client.js';
 import { WaInboundStore } from '../src/utils/wa-inbound.store.js';
 import { CONFIG } from '../src/config.js';
+import { assertSafeFlowHttpUrl, hostIsAllowlisted } from '../src/utils/flow-http-guard.js';
 import { isDuplicateMessage, resetDedupe } from '../src/utils/wa-dedupe.js';
 import { runSerial, pendingSerialKeys } from '../src/utils/serial-queue.js';
 import { WaHandoffStore } from '../src/utils/wa-handoff.store.js';
@@ -1076,4 +1077,59 @@ test('a menu is sent as text, never as a native buttons message', async () => {
   assert.match(body, /Como podemos te ajudar hoje\?/);
   assert.match(body, /1\. Horários/);
   assert.match(body, /2\. Falar com Humano/);
+});
+
+// --- Gateways: guard do bloco HTTP ---
+
+test('the HTTP block reaches the public internet by default', async () => {
+  const target = await assertSafeFlowHttpUrl('https://api.exemplo.com/pedidos');
+  assert.equal(target.url.hostname, 'api.exemplo.com');
+});
+
+test('the HTTP block refuses what would escalate through the Docker socket host', async () => {
+  // O processo que resolve esta URL tem o socket do Docker montado, então
+  // uma requisição que cai na bridge é uma requisição feita como root.
+  await assert.rejects(assertSafeFlowHttpUrl('http://169.254.169.254/latest/meta-data/'), /metadados/i);
+  await assert.rejects(assertSafeFlowHttpUrl('http://127.0.0.1:4000/api/health'), /loopback/i);
+  await assert.rejects(assertSafeFlowHttpUrl('http://localhost/api'), /próprio painel/i);
+  await assert.rejects(assertSafeFlowHttpUrl('http://aegis-backend:4000/api/wa-flows'), /próprio painel/i);
+  await assert.rejects(assertSafeFlowHttpUrl('http://metadata.google.internal/'), /não pode acessar/i);
+
+  // Rede privada sem allowlist continua fora.
+  await assert.rejects(assertSafeFlowHttpUrl('http://10.0.0.5/interno'), /allowlist/i);
+  await assert.rejects(assertSafeFlowHttpUrl('http://172.18.0.9:3000/'), /allowlist/i);
+
+  // Protocolo e credencial embutida.
+  await assert.rejects(assertSafeFlowHttpUrl('file:///etc/passwd'), /http/i);
+  await assert.rejects(assertSafeFlowHttpUrl('http://user:senha@api.exemplo.com/'), /credenciais/i);
+});
+
+test('an allowlisted neighbour on the Docker network is reachable', async () => {
+  // O caso legítimo: um fluxo chamando a API de uma aplicação do próprio painel.
+  const target = await assertSafeFlowHttpUrl('http://aegis-app-loja:3000/estoque', ['aegis-app-loja']);
+  assert.equal(target.url.hostname, 'aegis-app-loja');
+
+  const byIp = await assertSafeFlowHttpUrl('http://172.18.0.9:3000/', ['172.18.0.9']);
+  assert.equal(byIp.url.port, '3000');
+
+  // Allowlist nunca libera os três que escalam privilégio.
+  await assert.rejects(
+    assertSafeFlowHttpUrl('http://169.254.169.254/', ['169.254.169.254']),
+    /metadados/i
+  );
+  await assert.rejects(assertSafeFlowHttpUrl('http://aegis-backend:4000/', ['aegis-backend']), /próprio painel/i);
+});
+
+test('hostIsAllowlisted matches the host and its subdomains, not a prefix', () => {
+  assert.equal(hostIsAllowlisted('api.interno.com', ['interno.com']), true);
+  assert.equal(hostIsAllowlisted('interno.com', ['interno.com']), true);
+  assert.equal(hostIsAllowlisted('aegis-app-loja', ['aegis-app-loja']), true);
+
+  // "interno.com.br" não pode passar por causa de "interno.com".
+  assert.equal(hostIsAllowlisted('interno.com.br', ['interno.com']), false);
+  assert.equal(hostIsAllowlisted('naointerno.com', ['interno.com']), false);
+  assert.equal(hostIsAllowlisted('api.exemplo.com', []), false);
+
+  // Entradas coladas com esquema ou porta ainda funcionam.
+  assert.equal(hostIsAllowlisted('interno.com', ['https://interno.com:8443/']), true);
 });

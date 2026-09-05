@@ -7,7 +7,7 @@ export interface SafeGitTarget {
   address: string;
 }
 
-function isPrivateAddress(address: string): boolean {
+export function isPrivateAddress(address: string): boolean {
   const normalized = address.toLowerCase();
   if (normalized === '::' || normalized === '::1' || normalized === '0.0.0.0' || normalized.startsWith('127.') || normalized.startsWith('169.254.')) {
     return true;

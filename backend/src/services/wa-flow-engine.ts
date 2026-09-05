@@ -15,6 +15,7 @@ import { WaInboundStore } from '../utils/wa-inbound.store.js';
 import { isDuplicateMessage } from '../utils/wa-dedupe.js';
 import { runSerial } from '../utils/serial-queue.js';
 import { WaHandoffStore } from '../utils/wa-handoff.store.js';
+import { liveFlowGateways } from './wa-flow-gateways.js';
 import { WaFlowService } from './wa-flow.service.js';
 import type {
   EvolutionSender,
@@ -43,10 +44,19 @@ const defaultSender: EvolutionSender = {
   sendButtons: evolutionSendButtons,
 };
 
+/**
+ * The agent, http and sql gateways belong here, not only in the simulator.
+ * Leaving them out made `ports.ai` undefined in production, so an AI block
+ * took its error branch without a word while the same flow answered fine in
+ * the preview — the simulator was the only place those blocks ever ran.
+ */
 const defaultPorts: FlowPorts = {
   sender: defaultSender,
   sessions: new WaSessionStore(),
   logs: new WaLogStore(),
+  ai: liveFlowGateways.ai,
+  http: liveFlowGateways.http,
+  sql: liveFlowGateways.sql,
 };
 
 /**
@@ -205,6 +215,36 @@ async function deliverButtons(
     return false;
   }
   return true;
+}
+
+/**
+ * Records why a gateway block failed.
+ *
+ * The customer only ever sees the fallback text, so without this the operator
+ * cannot tell a missing API key from a refused model, an unreachable host from
+ * one the SSRF guard blocked, or a write rejected by read mode. The flow still
+ * follows its error edge — this only makes the reason reach the turn log.
+ */
+async function logNodeError(
+  ports: FlowPorts,
+  ctx: FlowContext,
+  flow: WaFlowRecord,
+  node: { id: string; type: string },
+  err: unknown
+): Promise<void> {
+  const message = String((err as Error)?.message || err || 'Falha desconhecida.');
+  await ports.logs.appendTurn({
+    at: new Date().toISOString(),
+    instance: ctx.instance,
+    flowId: flow.id,
+    phoneHash: ctx.phoneHash,
+    phoneTail: ctx.phoneTail,
+    direction: 'out',
+    nodeId: node.id,
+    nodeType: node.type,
+    textExcerpt: `[${node.type}] falhou`,
+    error: message.slice(0, 300),
+  });
 }
 
 async function runFrom(
@@ -405,15 +445,19 @@ async function runFrom(
           continue;
         } catch (err: any) {
           WaFlowService.markRun(flow.id, { error: true });
-          const fallback = fallbackText;
-          const sent = await deliverText(ctx, creds, ports, ctx.phone, fallback);
+          // The reason has to survive: the customer only sees the fallback,
+          // so without this line the operator has no way to tell a missing
+          // API key from a model that was refused or a provider outage.
+          await logNodeError(ports, ctx, flow, { id: nodeId, type: 'agent' }, err);
+          const sent = await deliverText(ctx, creds, ports, ctx.phone, fallbackText);
           if (!sent) return null;
           const next = outgoing(flow, nodeId, 'error');
           current = next ? nodeById(flow, next.target) : undefined;
           continue;
         }
       } else {
-        // No AI provider injected: advance to next or error
+        WaFlowService.markRun(flow.id, { error: true });
+        await logNodeError(ports, ctx, flow, { id: nodeId, type: 'agent' }, new Error('Nenhum provedor de IA disponível neste painel.'));
         const next = outgoing(flow, nodeId, 'error') || outgoing(flow, nodeId);
         current = next ? nodeById(flow, next.target) : undefined;
         continue;
@@ -443,11 +487,15 @@ async function runFrom(
             current = next ? nodeById(flow, next.target) : undefined;
             continue;
           } else {
+            await logNodeError(ports, ctx, flow, { id: nodeId, type: 'http' }, new Error(`A chamada respondeu HTTP ${res.status}.`));
             const next = outgoing(flow, nodeId, 'error');
             current = next ? nodeById(flow, next.target) : undefined;
             continue;
           }
-        } catch {
+        } catch (err: any) {
+          // Includes the SSRF guard's refusal, which is the message that tells
+          // the operator to allowlist the host instead of guessing.
+          await logNodeError(ports, ctx, flow, { id: nodeId, type: 'http' }, err);
           const next = outgoing(flow, nodeId, 'error');
           current = next ? nodeById(flow, next.target) : undefined;
           continue;
@@ -468,7 +516,9 @@ async function runFrom(
             text: current.data.sqlQuery,
             params,
             mode: current.data.sqlMode || 'read',
-            databaseId: current.data.sqlDatabaseId,
+            // The flow-level binding is the default so every SQL block in a
+            // flow does not have to repeat the same database.
+            databaseId: current.data.sqlDatabaseId || flow.dataBinding?.postgresDatabaseId,
             timeoutMs: 5000,
           });
 
@@ -484,7 +534,11 @@ async function runFrom(
             current = next ? nodeById(flow, next.target) : undefined;
             continue;
           }
-        } catch {
+        } catch (err: any) {
+          // A refused write, a wrong database or a driver error all used to
+          // look the same from the outside: the flow silently took the error
+          // edge and nothing said why.
+          await logNodeError(ports, ctx, flow, { id: nodeId, type: 'sql' }, err);
           const next = outgoing(flow, nodeId, 'error');
           current = next ? nodeById(flow, next.target) : undefined;
           continue;
