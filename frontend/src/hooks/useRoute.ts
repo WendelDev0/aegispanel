@@ -11,6 +11,7 @@ const TABS: NavTab[] = [
   'querystudio',
   'filemanager',
   'cron',
+  'flows',
   'containers',
   'domains',
   'firewall',

@@ -243,6 +243,52 @@ export interface AlertConfig {
   lastAlertSentAt?: string;
 }
 
+export type WaFlowNodeType =
+  | 'trigger_message'
+  | 'trigger_event'
+  | 'send_text'
+  | 'menu'
+  | 'wait_reply'
+  | 'condition'
+  | 'end';
+
+export type WaPanelEvent = 'deploy_fail' | 'deploy_ok' | 'app_down' | 'backup';
+
+export interface WaFlowNodeData {
+  match?: 'any' | 'contains' | 'regex';
+  keyword?: string;
+  event?: WaPanelEvent;
+  text?: string;
+  buttons?: Array<{ id: string; label: string }>;
+  operator?: 'contains' | 'equals';
+  value?: string;
+}
+
+export interface WaFlowNode {
+  id: string;
+  type: WaFlowNodeType;
+  position: { x: number; y: number };
+  data: WaFlowNodeData;
+}
+
+export interface WaFlowEdge {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string;
+}
+
+export interface WaFlowRecord {
+  id: string;
+  name: string;
+  published: boolean;
+  nodes: WaFlowNode[];
+  edges: WaFlowEdge[];
+  lastRunAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ServerNode {
   id: string;
   name: string;
@@ -325,6 +371,8 @@ export interface PanelSettings {
   /** Same, for provisioned database engines. */
   defaultDatabaseLimits: ResourceLimits;
   alertConfig: AlertConfig;
+  /** Encrypted token Evolution sends back on inbound webhooks. */
+  waFlowWebhookSecret?: string;
 }
 
 export interface DatabaseSchema {
@@ -340,6 +388,7 @@ export interface DatabaseSchema {
   activities: ActivityRecord[];
   alertHistory: AlertHistoryRecord[];
   sessions: SessionRecord[];
+  waFlows: WaFlowRecord[];
   settings: PanelSettings;
 }
 
@@ -351,6 +400,7 @@ const DEFAULT_DATA: DatabaseSchema = {
   activities: [],
   alertHistory: [],
   sessions: [],
+  waFlows: [],
   cronJobs: [
     {
       id: 'cron-daily-backup',
@@ -773,6 +823,7 @@ export class JsonStorage {
       'activities',
       'alertHistory',
       'sessions',
+      'waFlows',
     ];
 
     for (const key of arrayKeys) {
@@ -1164,6 +1215,33 @@ export class JsonStorage {
     return record;
   }
 
+  getWaFlows(): WaFlowRecord[] {
+    if (!this.data.waFlows) this.data.waFlows = [];
+    return this.data.waFlows;
+  }
+
+  getWaFlowById(id: string): WaFlowRecord | undefined {
+    return this.getWaFlows().find((f) => f.id === id);
+  }
+
+  saveWaFlow(flow: WaFlowRecord): WaFlowRecord {
+    if (!this.data.waFlows) this.data.waFlows = [];
+    const idx = this.data.waFlows.findIndex((f) => f.id === flow.id);
+    if (idx >= 0) this.data.waFlows[idx] = flow;
+    else this.data.waFlows.push(flow);
+    this.save();
+    return flow;
+  }
+
+  removeWaFlow(id: string): boolean {
+    if (!this.data.waFlows) return false;
+    const before = this.data.waFlows.length;
+    this.data.waFlows = this.data.waFlows.filter((f) => f.id !== id);
+    if (this.data.waFlows.length === before) return false;
+    this.save();
+    return true;
+  }
+
   // Storage health
   /**
    * Returns the on-disk size of the panel database and record counts.
@@ -1197,6 +1275,7 @@ export class JsonStorage {
         activities: this.data.activities?.length ?? 0,
         alertHistory: this.data.alertHistory?.length ?? 0,
         sessions: this.data.sessions?.length ?? 0,
+        waFlows: this.data.waFlows?.length ?? 0,
       },
     };
   }

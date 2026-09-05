@@ -37,6 +37,7 @@ function redactSettings(settings: PanelSettings): PanelSettings {
   const target = settings.backupTarget;
   return {
     ...settings,
+    waFlowWebhookSecret: settings.waFlowWebhookSecret ? MASK : undefined,
     backupTarget: target
       ? {
           ...target,

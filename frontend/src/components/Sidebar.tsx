@@ -18,6 +18,7 @@ import {
   Clock,
   HelpCircle,
   Globe2,
+  MessageCircle,
   X
 } from 'lucide-react';
 
@@ -31,6 +32,7 @@ export type NavTab =
   | 'querystudio'
   | 'filemanager'
   | 'cron'
+  | 'flows'
   | 'containers'
   | 'domains'
   | 'firewall'
@@ -76,6 +78,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: [
         { id: 'containers' as NavTab, label: 'Containers Docker', icon: Boxes, tooltip: 'Gerenciador Docker estilo Portainer (iniciar, parar, logs)' },
         { id: 'cron' as NavTab, label: 'Agendador Cron', icon: Clock, badge: 'Auto', tooltip: 'Backups automáticos agendados e rotinas cron periódicas' },
+        { id: 'flows' as NavTab, label: 'Fluxos WhatsApp', icon: MessageCircle, badge: 'NOVO', tooltip: 'Construtor visual de fluxos para chatbot e alertas no WhatsApp' },
         { id: 'domains' as NavTab, label: 'Domínios & SSL', icon: Globe, tooltip: 'Mapeamento de domínios Hostinger com HTTPS grátis automático' },
         { id: 'firewall' as NavTab, label: 'Segurança & Firewall', icon: Shield, tooltip: 'Controle de portas abertas e regras de firewall UFW' },
         { id: 'backups' as NavTab, label: 'Backups & Restore', icon: HardDriveDownload, tooltip: 'Cópias de segurança de bancos e restauração em 1 clique' },

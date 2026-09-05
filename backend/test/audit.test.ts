@@ -164,6 +164,7 @@ test('toda rota mutante registrada usa requireWrite ou requireAdmin', () => {
     'auth.routes.ts POST /login',
     'auth.routes.ts POST /setup',
     'auth.routes.ts POST /2fa/verify',
+    'wa-flow.routes.ts POST /webhook',
   ]);
   const selfService = new Set([
     'auth.routes.ts POST /2fa/setup',
