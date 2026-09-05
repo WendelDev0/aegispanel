@@ -13,6 +13,7 @@ import { CronService } from './services/cron.service.js';
 import { AnalyticsService } from './services/analytics.service.js';
 import { CicdService } from './services/cicd.service.js';
 import { WatchdogService } from './services/watchdog.service.js';
+import { WaFlowService } from './services/wa-flow.service.js';
 import { BuildsCleanupService } from './services/builds-cleanup.service.js';
 import { DeployQueueService } from './services/deploy-queue.service.js';
 import { NodeService } from './services/node.service.js';
@@ -180,6 +181,18 @@ const sessionWatchTimer = setInterval(() => {
     }
   }
 }, SESSION_WATCH_MS);
+
+/**
+ * Safety net for the WhatsApp counter buffer.
+ *
+ * The buffer normally flushes itself once it ages out, but only while
+ * messages keep arriving. Without this, the last few counts before a quiet
+ * period would sit in memory until the next inbound — which on a low-traffic
+ * line can be hours.
+ */
+const waStatsTimer = setInterval(() => {
+  WaFlowService.flushStats();
+}, 15_000);
 
 /**
  * Broadcast realtime system metrics.
@@ -385,9 +398,14 @@ function shutdown(signal: string) {
   // starts before the heartbeat of a hard-killed owner would look abandoned.
   // Without this the new backend refuses to boot for up to 30s.
   releasePanelLock();
+  // Counters are buffered to keep panel_db.json off the per-message path. A
+  // self-update restarts this container, so the tail since the last flush
+  // would otherwise be lost every time the panel updates itself.
+  WaFlowService.flushStats();
   clearInterval(metricsTimer);
   clearInterval(storageTimer);
   clearInterval(sessionWatchTimer);
+  clearInterval(waStatsTimer);
   CronService.stop();
   AnalyticsService.stop();
   WatchdogService.stop();

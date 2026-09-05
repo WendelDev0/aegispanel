@@ -14,6 +14,7 @@ import { WaLogStore } from '../utils/wa-log.store.js';
 import { WaInboundStore } from '../utils/wa-inbound.store.js';
 import { isDuplicateMessage } from '../utils/wa-dedupe.js';
 import { runSerial } from '../utils/serial-queue.js';
+import { WaHandoffStore } from '../utils/wa-handoff.store.js';
 import { WaFlowService } from './wa-flow.service.js';
 import type {
   EvolutionSender,
@@ -48,34 +49,31 @@ const defaultPorts: FlowPorts = {
   logs: new WaLogStore(),
 };
 
-// In-memory registry for active human handoffs: key = `${instance}__${phoneHash}` -> expiresAt
-const activeHandoffs = new Map<string, number>();
-
+/**
+ * Active human handoffs. Backed by disk: a restart used to drop them all and
+ * the bot resumed talking over an attendant mid-conversation, with nothing in
+ * the logs to say why.
+ */
 export class HandoffManager {
   static set(instance: string, pHash: string, minutes = 120): void {
-    const key = `${instance}__${pHash}`;
     const expiresAt = Date.now() + Math.max(5, Math.min(1440, minutes)) * 60 * 1000;
-    activeHandoffs.set(key, expiresAt);
+    WaHandoffStore.set(instance, pHash, expiresAt);
   }
 
   static isActive(instance: string, pHash: string): boolean {
-    const key = `${instance}__${pHash}`;
-    const expiresAt = activeHandoffs.get(key);
-    if (!expiresAt) return false;
-    if (Date.now() >= expiresAt) {
-      activeHandoffs.delete(key);
-      return false;
-    }
-    return true;
+    return WaHandoffStore.isActive(instance, pHash);
   }
 
   static release(instance: string, pHash: string): boolean {
-    const key = `${instance}__${pHash}`;
-    return activeHandoffs.delete(key);
+    return WaHandoffStore.release(instance, pHash);
+  }
+
+  static list(): Array<{ instance: string; phoneHash: string; expiresAt: string }> {
+    return WaHandoffStore.list();
   }
 
   static clear(): void {
-    activeHandoffs.clear();
+    WaHandoffStore.clear();
   }
 }
 

@@ -22,6 +22,8 @@ import { evolutionSendFailed, evolutionManagerUrl } from '../src/utils/evolution
 import { WaInboundStore } from '../src/utils/wa-inbound.store.js';
 import { isDuplicateMessage, resetDedupe } from '../src/utils/wa-dedupe.js';
 import { runSerial, pendingSerialKeys } from '../src/utils/serial-queue.js';
+import { WaHandoffStore } from '../src/utils/wa-handoff.store.js';
+import { WaStatsBuffer } from '../src/utils/wa-stats.buffer.js';
 
 function upsert(text: string, phone = '5511999999999', instance = 'clinic') {
   return {
@@ -828,4 +830,147 @@ test('webhook answers before the flow runs so Evolution stops retrying', async (
   assert.equal(res.status, 200);
   assert.equal(res.body.ok, true);
   assert.equal(res.body.queued, true, 'a resposta não espera o fluxo terminar');
+});
+
+// --- Etapa 6: handoff sobrevive a restart ---
+
+test('a handoff survives a panel restart', () => {
+  HandoffManager.clear();
+  HandoffManager.set('clinic', 'hash-ana', 60);
+  assert.equal(HandoffManager.isActive('clinic', 'hash-ana'), true);
+
+  // Um self-update recria o container. Antes o Map sumia e o bot voltava a
+  // falar por cima do atendente, sem nada no log dizendo por quê.
+  WaHandoffStore.resetCache();
+  assert.equal(HandoffManager.isActive('clinic', 'hash-ana'), true, 'handoff perdido no restart');
+
+  // Escopo por instância: a mesma pessoa em outra linha não está em handoff.
+  assert.equal(HandoffManager.isActive('loja', 'hash-ana'), false);
+
+  assert.equal(HandoffManager.release('clinic', 'hash-ana'), true);
+  WaHandoffStore.resetCache();
+  assert.equal(HandoffManager.isActive('clinic', 'hash-ana'), false, 'release precisa persistir');
+});
+
+test('an expired handoff releases itself across a restart', () => {
+  HandoffManager.clear();
+  // O expiresAt vai direto ao store: HandoffManager tem piso de 5 minutos.
+  WaHandoffStore.set('clinic', 'hash-velho', Date.now() - 1000);
+  WaHandoffStore.resetCache();
+  assert.equal(HandoffManager.isActive('clinic', 'hash-velho'), false);
+  HandoffManager.clear();
+});
+
+test('an active handoff still absorbs the message silently', async () => {
+  HandoffManager.clear();
+  resetDedupe();
+  WaSessionStore.clear('clinic', '5511999999999');
+  HandoffManager.set('clinic', phoneHash('5511999999999'), 60);
+
+  const sender = mockSender();
+  assert.equal(await WaFlowEngine.handleInbound(upsert('oi'), sender.sender), true);
+  assert.equal(sender.sent.length, 0, 'o bot não pode responder por cima do humano');
+
+  HandoffManager.clear();
+});
+
+// --- Etapa 7: contadores bufferizados ---
+
+test('markRun buffers instead of rewriting panel_db per message', () => {
+  WaStatsBuffer.reset();
+  const today = localDayStamp();
+
+  dbStorage.saveWaFlow({
+    id: 'waflow-stats',
+    name: 'Stats',
+    published: false,
+    instanceNames: [],
+    priority: 0,
+    sessionTtlMinutes: 30,
+    aiBudgetTokensPerDay: 0,
+    nodes: [],
+    edges: [],
+    stats: { runsToday: 0, aiTokensToday: 0, errorsToday: 0, unmatchedToday: 0, day: today },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  for (let i = 0; i < 5; i += 1) {
+    WaFlowService.markRun('waflow-stats', { aiTokens: 10 });
+  }
+  WaFlowService.markRun('waflow-stats', { error: true });
+
+  // Nada foi escrito ainda: o documento do painel é reescrito inteiro por
+  // mutação, e contar cada mensagem lá reescrevia o control plane por ping.
+  assert.equal(dbStorage.getWaFlowById('waflow-stats')?.stats?.runsToday, 0);
+
+  // ...mas a UI não pode ficar um flush atrás.
+  const shown = WaFlowService.list().find((f) => f.id === 'waflow-stats');
+  assert.equal(shown?.stats?.runsToday, 6);
+  assert.equal(shown?.stats?.aiTokensToday, 50);
+  assert.equal(shown?.stats?.errorsToday, 1);
+  assert.ok(shown?.lastRunAt, 'lastRunAt aparece antes do flush');
+
+  WaFlowService.flushStats();
+  const stored = dbStorage.getWaFlowById('waflow-stats');
+  assert.equal(stored?.stats?.runsToday, 6);
+  assert.equal(stored?.stats?.aiTokensToday, 50);
+  assert.equal(stored?.stats?.errorsToday, 1);
+  assert.ok(stored?.lastRunAt);
+
+  // Um flush não pode contar duas vezes.
+  WaFlowService.flushStats();
+  assert.equal(dbStorage.getWaFlowById('waflow-stats')?.stats?.runsToday, 6);
+
+  dbStorage.removeWaFlow('waflow-stats');
+  WaStatsBuffer.reset();
+});
+
+test('a delta collected yesterday does not land on today', () => {
+  WaStatsBuffer.reset();
+  WaStatsBuffer.bump('waflow-dia', '2026-09-04', { runs: 3 });
+  assert.equal(WaStatsBuffer.dayChanged('waflow-dia', '2026-09-05'), true);
+  assert.equal(WaStatsBuffer.dayChanged('waflow-dia', '2026-09-04'), false);
+
+  const drained = WaStatsBuffer.drain();
+  assert.equal(drained.get('waflow-dia')?.day, '2026-09-04');
+  assert.equal(drained.get('waflow-dia')?.delta.runs, 3);
+  assert.equal(WaStatsBuffer.hasPending(), false, 'drain esvazia');
+});
+
+test('flushStats skips a flow deleted while counts were pending', () => {
+  WaStatsBuffer.reset();
+  WaStatsBuffer.bump('waflow-fantasma', localDayStamp(), { runs: 2 });
+  assert.doesNotThrow(() => WaFlowService.flushStats());
+  assert.equal(WaStatsBuffer.hasPending(), false);
+});
+
+test('unmatched messages are buffered per bound flow', () => {
+  WaStatsBuffer.reset();
+  const today = localDayStamp();
+
+  dbStorage.saveWaFlow({
+    id: 'waflow-sem-gatilho',
+    name: 'Sem gatilho',
+    published: true,
+    instanceNames: ['clinic'],
+    priority: 0,
+    sessionTtlMinutes: 30,
+    aiBudgetTokensPerDay: 0,
+    nodes: [],
+    edges: [],
+    stats: { runsToday: 0, aiTokensToday: 0, errorsToday: 0, unmatchedToday: 0, day: today },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  WaFlowService.recordUnmatched('clinic');
+  WaFlowService.recordUnmatched('clinic');
+  assert.equal(dbStorage.getWaFlowById('waflow-sem-gatilho')?.stats?.unmatchedToday, 0);
+
+  WaFlowService.flushStats();
+  assert.equal(dbStorage.getWaFlowById('waflow-sem-gatilho')?.stats?.unmatchedToday, 2);
+
+  dbStorage.removeWaFlow('waflow-sem-gatilho');
+  WaStatsBuffer.reset();
 });

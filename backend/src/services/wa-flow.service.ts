@@ -22,6 +22,7 @@ import {
 } from '../utils/wa-internal-route.js';
 import { CONFIG } from '../config.js';
 import { WaSessionStore } from '../utils/wa-session.store.js';
+import { WaStatsBuffer } from '../utils/wa-stats.buffer.js';
 import { dockerService } from './docker.service.js';
 import { validateFlowGraph, type ValidationResult } from './wa-flow-validator.js';
 import { WA_FLOW_TEMPLATES } from './wa-flow-templates.js';
@@ -76,6 +77,9 @@ async function probeFromContainer(
   return { ok: false, error: lastError };
 }
 
+/** Rides along with the buffered counters; flushed in the same write. */
+const lastRunAtPending = new Map<string, string>();
+
 const NODE_TYPES = new Set([
   'trigger_message',
   'trigger_event',
@@ -123,7 +127,8 @@ export interface UpdateFlowInput {
 
 export class WaFlowService {
   static list(): WaFlowRecord[] {
-    return dbStorage.getWaFlows();
+    // Read-only view: pending counters merged so the UI is not one flush behind.
+    return dbStorage.getWaFlows().map((f) => this.withPendingStats(f));
   }
 
   static get(id: string): WaFlowRecord {
@@ -499,26 +504,26 @@ export class WaFlowService {
     return assessBoundInstances(instanceNames, live, { skipLiveCheck });
   }
 
+  /**
+   * Buffers the counter instead of writing through. panel_db.json is one
+   * document rewritten in full on every mutation, so counting each inbound
+   * message there rewrote the whole control plane per WhatsApp ping.
+   *
+   * `lastRunAt` rides along in the same flush; nothing here reads it between
+   * flushes except the UI, which gets the pending value merged in.
+   */
   static markRun(id: string, details?: { aiTokens?: number; error?: boolean }): void {
-    const flow = dbStorage.getWaFlowById(id);
-    if (!flow) return;
+    const todayStr = localDayStamp();
+    if (WaStatsBuffer.dayChanged(id, todayStr)) this.flushStats();
 
-    const now = new Date();
-    const todayStr = localDayStamp(now);
-
-    const stats = flow.stats && flow.stats.day === todayStr
-      ? { ...flow.stats }
-      : { runsToday: 0, aiTokensToday: 0, errorsToday: 0, unmatchedToday: 0, day: todayStr };
-
-    stats.runsToday += 1;
-    if (details?.aiTokens) stats.aiTokensToday += details.aiTokens;
-    if (details?.error) stats.errorsToday += 1;
-
-    dbStorage.saveWaFlow({
-      ...flow,
-      stats,
-      lastRunAt: now.toISOString(),
+    WaStatsBuffer.bump(id, todayStr, {
+      runs: 1,
+      aiTokens: details?.aiTokens || 0,
+      errors: details?.error ? 1 : 0,
     });
+    lastRunAtPending.set(id, new Date().toISOString());
+
+    if (WaStatsBuffer.isDue()) this.flushStats();
   }
 
   static recordUnmatched(instance: string): void {
@@ -531,12 +536,72 @@ export class WaFlowService {
     );
     const todayStr = localDayStamp();
     for (const flow of flows) {
-      const stats = flow.stats && flow.stats.day === todayStr
-        ? { ...flow.stats }
-        : { runsToday: 0, aiTokensToday: 0, errorsToday: 0, unmatchedToday: 0, day: todayStr };
-      stats.unmatchedToday = (stats.unmatchedToday || 0) + 1;
-      dbStorage.saveWaFlow({ ...flow, stats });
+      if (WaStatsBuffer.dayChanged(flow.id, todayStr)) this.flushStats();
+      WaStatsBuffer.bump(flow.id, todayStr, { unmatched: 1 });
     }
+    if (WaStatsBuffer.isDue()) this.flushStats();
+  }
+
+  /**
+   * Applies every buffered counter in one pass. Called on a timer, when the
+   * buffer ages out, and at shutdown — the last one matters because a
+   * self-update restarts the container and would otherwise lose the tail.
+   */
+  static flushStats(): void {
+    if (!WaStatsBuffer.hasPending()) return;
+    const drained = WaStatsBuffer.drain();
+
+    for (const [flowId, entry] of drained) {
+      const flow = dbStorage.getWaFlowById(flowId);
+      // The flow may have been deleted while counts were pending.
+      if (!flow) {
+        lastRunAtPending.delete(flowId);
+        continue;
+      }
+
+      const stats = flow.stats && flow.stats.day === entry.day
+        ? { ...flow.stats }
+        : { runsToday: 0, aiTokensToday: 0, errorsToday: 0, unmatchedToday: 0, day: entry.day };
+
+      stats.runsToday += entry.delta.runs;
+      stats.aiTokensToday += entry.delta.aiTokens;
+      stats.errorsToday += entry.delta.errors;
+      stats.unmatchedToday = (stats.unmatchedToday || 0) + entry.delta.unmatched;
+
+      const lastRunAt = lastRunAtPending.get(flowId);
+      lastRunAtPending.delete(flowId);
+
+      dbStorage.saveWaFlow({
+        ...flow,
+        stats,
+        lastRunAt: lastRunAt || flow.lastRunAt,
+      });
+    }
+  }
+
+  /**
+   * Stored record plus whatever has not been flushed yet. Read-only view:
+   * mutation paths use `get()` so a pending delta is never written twice.
+   */
+  static withPendingStats(flow: WaFlowRecord): WaFlowRecord {
+    const entry = WaStatsBuffer.peek(flow.id);
+    if (!entry) return flow;
+
+    const base = flow.stats && flow.stats.day === entry.day
+      ? flow.stats
+      : { runsToday: 0, aiTokensToday: 0, errorsToday: 0, unmatchedToday: 0, day: entry.day };
+
+    return {
+      ...flow,
+      stats: {
+        day: entry.day,
+        runsToday: base.runsToday + entry.delta.runs,
+        aiTokensToday: base.aiTokensToday + entry.delta.aiTokens,
+        errorsToday: base.errorsToday + entry.delta.errors,
+        unmatchedToday: (base.unmatchedToday || 0) + entry.delta.unmatched,
+      },
+      lastRunAt: lastRunAtPending.get(flow.id) || flow.lastRunAt,
+    };
   }
 
   static getAggregatedStats(): {
@@ -547,7 +612,7 @@ export class WaFlowService {
     errorsToday: number;
     unmatchedToday: number;
   } {
-    const flows = dbStorage.getWaFlows();
+    const flows = dbStorage.getWaFlows().map((f) => this.withPendingStats(f));
     const todayStr = localDayStamp();
 
     let runsToday = 0;
