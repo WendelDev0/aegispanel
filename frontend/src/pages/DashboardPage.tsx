@@ -27,7 +27,10 @@ import {
   Filter,
   SlidersHorizontal,
   TrendingUp,
-  BarChart3
+  BarChart3,
+  Rocket,
+  RotateCcw,
+  HardDriveDownload,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -44,7 +47,25 @@ import {
 import { OverviewData, SystemStats, ActivityRecord, User } from '../types/index.js';
 import { NavTab } from '../components/Sidebar.js';
 import { api } from '../services/api.js';
-import { toneForUsage } from '../components/ui.js';
+import { toneForUsage, Badge } from '../components/ui.js';
+
+/**
+ * Strips raw informal/social media emojis, ensuring clean and professional typography.
+ */
+function stripEmojis(text?: string | null): string {
+  if (!text) return '';
+  return text
+    .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F1E6}-\u{1F1FF}\u{1F900}-\u{1F9FF}\u{1FA70}-\u{1FAFF}]/gu, '')
+    .trim();
+}
+
+const ACTIVITY_TABS = [
+  { id: 'all', label: 'Todos', icon: Layers },
+  { id: 'deploy', label: 'Deploys', icon: Rocket },
+  { id: 'domain', label: 'Domínios', icon: Globe },
+  { id: 'database', label: 'Bancos', icon: Database },
+  { id: 'alert', label: 'Alertas', icon: AlertTriangle },
+] as const;
 
 interface DashboardPageProps {
   overview: OverviewData | null;
@@ -354,41 +375,90 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={handleRunSpeedtest}
-            className="flex items-center gap-2 px-4 py-2.5 rounded bg-warn/15 hover:bg-warn/30 text-warn font-semibold text-xs border border-warn/30 transition-all active:scale-95"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface font-semibold text-xs border border-outline-variant transition-all active:scale-95"
           >
-            <Zap className="w-4 h-4 text-warn" />
-            Teste de Velocidade (Speedtest)
+            <Gauge className="w-4 h-4 text-warn" />
+            <span>Teste de Velocidade</span>
           </button>
           <button
             onClick={() => setActiveTab('apps')}
-            className="flex items-center gap-2 px-4 py-2.5 rounded bg-primary-container hover:bg-primary text-white font-semibold text-xs transition-all active:scale-95"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-container hover:bg-primary text-white font-semibold text-xs transition-all active:scale-95"
           >
-            <Plus className="w-4 h-4" />
-            Novo Deploy
+            <Rocket className="w-4 h-4" />
+            <span>Novo Deploy</span>
           </button>
         </div>
       </div>
 
-      {/* External service links are configured per installation. */}
+      {/* Quick Ops Hub */}
       <div className="bg-surface-container rounded-lg p-4 border border-outline-variant flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded bg-primary/10 text-primary border border-primary/20">
-            <Zap className="w-5 h-5" />
+          <div className="p-2.5 rounded-lg bg-primary/10 text-primary border border-primary/20 shrink-0">
+            <Layers className="w-5 h-5" />
           </div>
           <div>
-            <h4 className="text-sm font-bold text-white">Serviços da instalação</h4>
+            <h4 className="text-sm font-bold text-white flex items-center gap-2">
+              <span>Atalhos de Operação</span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-surface-container-high text-primary border border-outline-variant">
+                Acesso Rápido
+              </span>
+            </h4>
             <p className="text-xs text-on-surface-variant">
-              Links de serviços externos devem ser configurados pela própria instalação do painel.
+              Acesse diretamente os recursos essenciais e gerencie os serviços da VPS.
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setActiveTab('databases')}
-          className="flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg bg-surface-container-high hover:bg-surface-container text-white font-semibold text-xs border border-outline-variant transition-all"
-        >
-          Gerenciar serviços
-        </button>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setActiveTab('apps')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-semibold border border-outline-variant transition-colors active:scale-95"
+          >
+            <Rocket className="w-3.5 h-3.5 text-primary" />
+            <span>Aplicações</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('databases')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-semibold border border-outline-variant transition-colors active:scale-95"
+          >
+            <Database className="w-3.5 h-3.5 text-ok" />
+            <span>Bancos</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('containers')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-semibold border border-outline-variant transition-colors active:scale-95"
+          >
+            <Boxes className="w-3.5 h-3.5 text-tertiary" />
+            <span>Containers</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('domains')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-semibold border border-outline-variant transition-colors active:scale-95"
+          >
+            <Globe className="w-3.5 h-3.5 text-secondary" />
+            <span>Domínios</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('terminal')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-semibold border border-outline-variant transition-colors active:scale-95"
+          >
+            <Terminal className="w-3.5 h-3.5 text-primary" />
+            <span>Terminal</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('backups')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-semibold border border-outline-variant transition-colors active:scale-95"
+          >
+            <HardDriveDownload className="w-3.5 h-3.5 text-warn" />
+            <span>Backups</span>
+          </button>
+        </div>
       </div>
 
       {/* Real-time Metric Cards */}
@@ -506,43 +576,48 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <div className="flex items-center gap-1 bg-surface-container-lowest p-1 rounded border border-outline-variant">
               <button
                 onClick={() => setActiveChartMetric('all')}
-                className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
-                  activeChartMetric === 'all' ? 'bg-primary-container text-white shadow' : 'text-on-surface-variant hover:text-white'
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeChartMetric === 'all' ? 'bg-primary-container text-white shadow-sm' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
-                Todos
+                <Activity className="w-3.5 h-3.5" />
+                <span>Todos</span>
               </button>
               <button
                 onClick={() => setActiveChartMetric('cpu')}
-                className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
-                  activeChartMetric === 'cpu' ? 'bg-primary/25 text-primary border border-primary/40 shadow' : 'text-on-surface-variant hover:text-white'
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeChartMetric === 'cpu' ? 'bg-primary/25 text-primary border border-primary/40 shadow-sm' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
-                CPU
+                <Cpu className="w-3.5 h-3.5" />
+                <span>CPU</span>
               </button>
               <button
                 onClick={() => setActiveChartMetric('memory')}
-                className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
-                  activeChartMetric === 'memory' ? 'bg-ok/30 text-ok border border-emerald-500/40 shadow' : 'text-on-surface-variant hover:text-white'
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeChartMetric === 'memory' ? 'bg-ok/30 text-ok border border-emerald-500/40 shadow-sm' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
-                RAM
+                <Layers className="w-3.5 h-3.5" />
+                <span>RAM</span>
               </button>
               <button
                 onClick={() => setActiveChartMetric('disk')}
-                className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
-                  activeChartMetric === 'disk' ? 'bg-warn/30 text-warn border border-warn/30 shadow' : 'text-on-surface-variant hover:text-white'
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeChartMetric === 'disk' ? 'bg-warn/30 text-warn border border-warn/30 shadow-sm' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
-                Disco
+                <HardDrive className="w-3.5 h-3.5" />
+                <span>Disco</span>
               </button>
               <button
                 onClick={() => setActiveChartMetric('network')}
-                className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
-                  activeChartMetric === 'network' ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 shadow' : 'text-on-surface-variant hover:text-white'
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeChartMetric === 'network' ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 shadow-sm' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
-                Rede
+                <Wifi className="w-3.5 h-3.5" />
+                <span>Rede</span>
               </button>
             </div>
 
@@ -550,11 +625,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <div className="flex items-center gap-1 bg-surface-container-lowest p-1 rounded border border-outline-variant">
               <button
                 onClick={() => handleTimeRangeChange('realtime')}
-                className={`px-2.5 py-1.5 rounded text-xs font-semibold transition-all ${
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-semibold transition-all ${
                   activeTimeRange === 'realtime' ? 'bg-surface-container-high text-white font-bold' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
-                Tempo Real
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Tempo Real</span>
               </button>
               <button
                 onClick={() => handleTimeRangeChange('1d')}
@@ -590,33 +666,46 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               </button>
               <button
                 onClick={() => handleTimeRangeChange('custom')}
-                className={`px-2.5 py-1.5 rounded text-xs font-semibold transition-all flex items-center gap-1 ${
+                className={`px-2.5 py-1.5 rounded text-xs font-semibold transition-all flex items-center gap-1.5 ${
                   activeTimeRange === 'custom' ? 'bg-primary-container text-white font-bold' : 'text-on-surface-variant hover:text-white'
                 }`}
               >
-                <Calendar className="w-3 h-3" /> Personalizado
+                <Calendar className="w-3.5 h-3.5" />
+                <span>Personalizado</span>
               </button>
             </div>
           </div>
         </div>
 
-        {/* Statistical Summary Pills */}
+        {/* Statistical Summary Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="bg-surface-container-lowest/70 p-3 rounded-lg border border-outline-variant">
-            <span className="text-[10px] font-mono text-on-surface-variant block uppercase">Média de CPU</span>
-            <span className="text-lg font-extrabold text-primary">{avgCpu}%</span>
+          <div className="bg-surface-container-lowest/70 p-3.5 rounded-lg border border-outline-variant">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="mono-label">Média de CPU</span>
+              <Cpu className="w-3.5 h-3.5 text-primary opacity-80" />
+            </div>
+            <span className="text-xl font-extrabold text-primary tabular-nums">{avgCpu}%</span>
           </div>
-          <div className="bg-surface-container-lowest/70 p-3 rounded-lg border border-outline-variant">
-            <span className="text-[10px] font-mono text-on-surface-variant block uppercase">Pico Máximo de CPU</span>
-            <span className="text-lg font-extrabold text-crit">{maxCpu}%</span>
+          <div className="bg-surface-container-lowest/70 p-3.5 rounded-lg border border-outline-variant">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="mono-label">Pico Máximo de CPU</span>
+              <TrendingUp className="w-3.5 h-3.5 text-crit opacity-80" />
+            </div>
+            <span className="text-xl font-extrabold text-crit tabular-nums">{maxCpu}%</span>
           </div>
-          <div className="bg-surface-container-lowest/70 p-3 rounded-lg border border-outline-variant">
-            <span className="text-[10px] font-mono text-on-surface-variant block uppercase">Média de Memória RAM</span>
-            <span className="text-lg font-extrabold text-ok">{avgMem}%</span>
+          <div className="bg-surface-container-lowest/70 p-3.5 rounded-lg border border-outline-variant">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="mono-label">Média de RAM</span>
+              <Layers className="w-3.5 h-3.5 text-ok opacity-80" />
+            </div>
+            <span className="text-xl font-extrabold text-ok tabular-nums">{avgMem}%</span>
           </div>
-          <div className="bg-surface-container-lowest/70 p-3 rounded-lg border border-outline-variant">
-            <span className="text-[10px] font-mono text-on-surface-variant block uppercase">Pico de Banda (Download)</span>
-            <span className="text-lg font-extrabold text-tertiary">{maxRx} Mbps</span>
+          <div className="bg-surface-container-lowest/70 p-3.5 rounded-lg border border-outline-variant">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="mono-label">Pico de Download</span>
+              <ArrowDownRight className="w-3.5 h-3.5 text-tertiary opacity-80" />
+            </div>
+            <span className="text-xl font-extrabold text-tertiary tabular-nums">{maxRx} Mbps</span>
           </div>
         </div>
 
@@ -734,15 +823,18 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <div
           onClick={() => setActiveTab('apps')}
-          className="bg-surface-container/70 p-5 rounded-lg border border-outline-variant hover:border-primary/50 cursor-pointer transition-all hover:bg-surface-container-high group"
+          className="bg-surface-container/70 p-5 rounded-lg border border-outline-variant hover:border-primary/50 cursor-pointer transition-all hover:bg-surface-container-high group relative"
         >
           <div className="flex items-center justify-between mb-4">
             <div className="w-10 h-10 rounded bg-primary/10 text-primary flex items-center justify-center group-hover:scale-110 transition-transform">
               <Layers className="w-5 h-5" />
             </div>
-            <span className="text-xs bg-primary/20 text-primary px-2.5 py-1 rounded-full font-semibold">
-              {overview?.counts.runningApps || 0} Ativos
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs bg-primary/20 text-primary px-2.5 py-1 rounded-full font-semibold">
+                {overview?.counts.runningApps || 0} Ativos
+              </span>
+              <ArrowUpRight className="w-4 h-4 text-on-surface-variant group-hover:text-primary group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
+            </div>
           </div>
           <h3 className="text-lg font-bold text-white group-hover:text-primary transition-colors">
             Aplicações Web (PaaS)
@@ -754,15 +846,18 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
         <div
           onClick={() => setActiveTab('databases')}
-          className="bg-surface-container/70 p-5 rounded-lg border border-outline-variant hover:border-emerald-500/50 cursor-pointer transition-all hover:bg-surface-container-high group"
+          className="bg-surface-container/70 p-5 rounded-lg border border-outline-variant hover:border-ok/50 cursor-pointer transition-all hover:bg-surface-container-high group relative"
         >
           <div className="flex items-center justify-between mb-4">
             <div className="w-10 h-10 rounded bg-ok/10 text-ok flex items-center justify-center group-hover:scale-110 transition-transform">
               <Database className="w-5 h-5" />
             </div>
-            <span className="text-xs bg-ok/15 text-ok px-2.5 py-1 rounded-full font-semibold">
-              {overview?.counts.runningDatabases || 0} Rodando
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs bg-ok/15 text-ok px-2.5 py-1 rounded-full font-semibold">
+                {overview?.counts.runningDatabases || 0} Rodando
+              </span>
+              <ArrowUpRight className="w-4 h-4 text-on-surface-variant group-hover:text-ok group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
+            </div>
           </div>
           <h3 className="text-lg font-bold text-white group-hover:text-ok transition-colors">
             Bancos de Dados
@@ -774,15 +869,18 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
         <div
           onClick={() => setActiveTab('containers')}
-          className="bg-surface-container/70 p-5 rounded-lg border border-outline-variant hover:border-cyan-500/50 cursor-pointer transition-all hover:bg-surface-container-high group"
+          className="bg-surface-container/70 p-5 rounded-lg border border-outline-variant hover:border-tertiary/50 cursor-pointer transition-all hover:bg-surface-container-high group relative"
         >
           <div className="flex items-center justify-between mb-4">
             <div className="w-10 h-10 rounded bg-tertiary/10 text-tertiary flex items-center justify-center group-hover:scale-110 transition-transform">
               <Boxes className="w-5 h-5" />
             </div>
-            <span className="text-xs bg-cyan-500/20 text-cyan-300 px-2.5 py-1 rounded-full font-semibold">
-              {overview?.docker.runningContainers || 0} Contêineres
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs bg-tertiary/20 text-tertiary px-2.5 py-1 rounded-full font-semibold">
+                {overview?.docker.runningContainers || 0} Contêineres
+              </span>
+              <ArrowUpRight className="w-4 h-4 text-on-surface-variant group-hover:text-tertiary group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
+            </div>
           </div>
           <h3 className="text-lg font-bold text-white group-hover:text-tertiary transition-colors">
             Docker Engine
@@ -812,21 +910,37 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Filter buttons */}
+            {/* Filter buttons without emojis */}
             <div className="bg-surface-container-low/90 p-1 rounded border border-outline-variant flex items-center gap-1 text-[11px]">
-              {(['all', 'deploy', 'domain', 'database', 'alert'] as const).map(tab => (
-                <button
-                  key={tab}
-                  onClick={() => setActivityFilter(tab)}
-                  className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
-                    activityFilter === tab
-                      ? 'bg-primary-container text-white'
-                      : 'text-on-surface-variant hover:text-white'
-                  }`}
-                >
-                  {tab === 'all' ? 'Todos' : tab === 'deploy' ? 'Deploys 🚀' : tab === 'domain' ? 'Domínios 🌐' : tab === 'database' ? 'Bancos 🗄️' : 'Alertas ⚠️'}
-                </button>
-              ))}
+              {ACTIVITY_TABS.map(tab => {
+                const Icon = tab.icon;
+                const count = tab.id === 'all'
+                  ? activities.length
+                  : activities.filter(a => a.type === tab.id).length;
+                const isActive = activityFilter === tab.id;
+
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActivityFilter(tab.id)}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
+                      isActive
+                        ? 'bg-primary-container text-white shadow-sm'
+                        : 'text-on-surface-variant hover:text-white hover:bg-surface-container-high'
+                    }`}
+                  >
+                    <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : 'text-on-surface-variant/70'}`} />
+                    <span>{tab.label}</span>
+                    {count > 0 && (
+                      <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                        isActive ? 'bg-white/20 text-white' : 'bg-surface-container-high text-on-surface-variant'
+                      }`}>
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
             <button
@@ -848,45 +962,61 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           ) : (
             activities
               .filter(act => activityFilter === 'all' || act.type === activityFilter)
-              .map(act => (
-                <div
-                  key={act.id}
-                  className="flex items-start justify-between p-3 rounded-lg bg-surface-container-lowest/70 border border-outline-variant hover:border-outline-variant transition-all text-xs"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className={`p-2 rounded mt-0.5 ${
-                      act.status === 'success' ? 'bg-ok/10 text-ok border border-ok/30' :
-                      act.status === 'error' ? 'bg-crit/10 text-crit border border-crit/25' :
-                      act.status === 'warning' ? 'bg-warn/10 text-warn border border-warn/30' :
-                      'bg-primary/10 text-primary border border-primary/25'
-                    }`}>
-                      {act.type === 'deploy' ? <Zap className="w-4 h-4" /> :
-                       act.type === 'rollback' ? <Clock className="w-4 h-4" /> :
-                       act.type === 'domain' ? <Globe className="w-4 h-4" /> :
-                       act.type === 'database' ? <Database className="w-4 h-4" /> :
-                       <Activity className="w-4 h-4" />}
-                    </div>
-                    <div>
-                      <div className="font-bold text-white flex items-center gap-2">
-                        <span>{act.title}</span>
-                        <span className={`text-[10px] px-2 py-0.5 rounded-md font-mono ${
-                          act.status === 'success' ? 'bg-ok/10 text-ok' :
-                          act.status === 'error' ? 'bg-crit/10 text-crit' :
-                          act.status === 'warning' ? 'bg-warn/10 text-warn' :
-                          'bg-primary/15 text-primary'
-                        }`}>
-                          {act.status.toUpperCase()}
-                        </span>
-                      </div>
-                      <p className="text-on-surface-variant text-xs mt-0.5">{act.description}</p>
-                    </div>
-                  </div>
+              .map(act => {
+                const cleanTitleText = stripEmojis(act.title);
+                const cleanDescText = stripEmojis(act.description);
+                const tone =
+                  act.status === 'success' ? 'ok' :
+                  act.status === 'error' ? 'crit' :
+                  act.status === 'warning' ? 'warn' : 'info';
 
-                  <div className="text-[11px] text-on-surface-variant/70 font-mono shrink-0 ml-3 text-right">
-                    {new Date(act.timestamp).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                return (
+                  <div
+                    key={act.id}
+                    className="flex items-start justify-between p-3 rounded-lg bg-surface-container-lowest/70 border border-outline-variant hover:border-outline transition-all text-xs group"
+                  >
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className={`p-2 rounded mt-0.5 shrink-0 border ${
+                        act.status === 'success' ? 'bg-ok/10 text-ok border-ok/30' :
+                        act.status === 'error' ? 'bg-crit/10 text-crit border-crit/25' :
+                        act.status === 'warning' ? 'bg-warn/10 text-warn border-warn/30' :
+                        'bg-primary/10 text-primary border-primary/25'
+                      }`}>
+                        {act.type === 'deploy' ? <Rocket className="w-4 h-4" /> :
+                         act.type === 'rollback' ? <RotateCcw className="w-4 h-4" /> :
+                         act.type === 'domain' ? <Globe className="w-4 h-4" /> :
+                         act.type === 'database' ? <Database className="w-4 h-4" /> :
+                         act.type === 'backup' ? <HardDriveDownload className="w-4 h-4" /> :
+                         act.type === 'alert' ? <AlertTriangle className="w-4 h-4" /> :
+                         <Activity className="w-4 h-4 text-primary" />}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-bold text-white flex items-center gap-2 flex-wrap">
+                          <span className="truncate">{cleanTitleText}</span>
+                          <Badge tone={tone} dot>
+                            {act.status.toUpperCase()}
+                          </Badge>
+                        </div>
+                        {cleanDescText && (
+                          <p className="text-on-surface-variant text-xs mt-0.5 break-words">{cleanDescText}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-[11px] text-on-surface-variant/70 font-mono shrink-0 ml-3 text-right">
+                      <Clock className="w-3 h-3 opacity-60" />
+                      <span>
+                        {new Date(act.timestamp).toLocaleTimeString('pt-BR', {
+                          timeZone: 'America/Sao_Paulo',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                        })}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
           )}
         </div>
       </div>
@@ -957,14 +1087,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-lg overflow-hidden p-6 space-y-6">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-white font-bold text-lg">
-                <Zap className="w-6 h-6 text-warn" />
-                <span>Teste de Velocidade da VPS (Speedtest)</span>
+              <div className="flex items-center gap-2.5 text-white font-bold text-lg">
+                <div className="p-2 rounded-lg bg-warn/10 text-warn border border-warn/25">
+                  <Gauge className="w-5 h-5" />
+                </div>
+                <span>Teste de Velocidade de Rede (Speedtest)</span>
               </div>
               <button
                 onClick={() => setShowSpeedtestModal(false)}
                 disabled={runningSpeedtest}
-                className="text-on-surface-variant hover:text-white disabled:opacity-30"
+                className="text-on-surface-variant hover:text-white disabled:opacity-30 p-1 rounded hover:bg-surface-container-high transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -972,10 +1104,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
             {runningSpeedtest ? (
               <div className="py-12 text-center space-y-4">
-                <RefreshCw className="w-12 h-12 text-warn animate-spin mx-auto" />
-                <h4 className="font-bold text-white text-base">Testando velocidade da conexão...</h4>
+                <RefreshCw className="w-10 h-10 text-warn animate-spin mx-auto opacity-80" />
+                <h4 className="font-bold text-white text-base">Medindo desempenho da rede...</h4>
                 <p className="text-xs text-on-surface-variant max-w-sm mx-auto">
-                  Enviando e recebendo pacotes de teste via CDN de alta velocidade para medir Latência, Download e Upload.
+                  Transferindo pacotes de teste via CDN de baixa latência para avaliar throughput de Download, Upload e Jitter.
                 </p>
               </div>
             ) : speedtestResult ? (
@@ -987,7 +1119,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     <span className="text-[10px] font-mono uppercase text-on-surface-variant flex items-center justify-center gap-1">
                       <ArrowDownRight className="w-3.5 h-3.5 text-ok" /> VELOCIDADE DOWNLOAD
                     </span>
-                    <div className="text-3xl font-extrabold text-ok">
+                    <div className="text-3xl font-extrabold text-ok tabular-nums">
                       {speedtestResult.downloadMbps} <span className="text-xs font-normal">Mbps</span>
                     </div>
                   </div>
@@ -997,29 +1129,45 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     <span className="text-[10px] font-mono uppercase text-on-surface-variant flex items-center justify-center gap-1">
                       <ArrowUpRight className="w-3.5 h-3.5 text-primary" /> VELOCIDADE UPLOAD
                     </span>
-                    <div className="text-3xl font-extrabold text-primary">
+                    <div className="text-3xl font-extrabold text-primary tabular-nums">
                       {speedtestResult.uploadMbps} <span className="text-xs font-normal">Mbps</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Detailed Info */}
-                <div className="bg-surface-container-lowest/80 p-4 rounded-lg border border-outline-variant space-y-2.5 text-xs font-mono">
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Ping (Latência):</span>
-                    <span className="text-white font-bold">{speedtestResult.pingMs} ms</span>
+                {/* Detailed Info Grid */}
+                <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                  <div className="bg-surface-container-lowest/80 p-3 rounded-lg border border-outline-variant">
+                    <div className="flex items-center gap-1.5 text-on-surface-variant mb-1">
+                      <Clock className="w-3.5 h-3.5 text-primary" />
+                      <span>Ping (Latência)</span>
+                    </div>
+                    <p className="text-white font-bold text-sm tabular-nums">{speedtestResult.pingMs} ms</p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Jitter:</span>
-                    <span className="text-on-surface">{speedtestResult.jitterMs} ms</span>
+                  <div className="bg-surface-container-lowest/80 p-3 rounded-lg border border-outline-variant">
+                    <div className="flex items-center gap-1.5 text-on-surface-variant mb-1">
+                      <Activity className="w-3.5 h-3.5 text-ok" />
+                      <span>Jitter</span>
+                    </div>
+                    <p className="text-white font-bold text-sm tabular-nums">{speedtestResult.jitterMs} ms</p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Provedor / Backbone:</span>
-                    <span className="text-warn">{speedtestResult.isp}</span>
+                  <div className="bg-surface-container-lowest/80 p-3 rounded-lg border border-outline-variant">
+                    <div className="flex items-center gap-1.5 text-on-surface-variant mb-1">
+                      <Server className="w-3.5 h-3.5 text-warn" />
+                      <span>Provedor / ASN</span>
+                    </div>
+                    <p className="text-warn font-semibold text-xs truncate" title={speedtestResult.isp}>
+                      {speedtestResult.isp}
+                    </p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Localização do Servidor:</span>
-                    <span className="text-on-surface">{speedtestResult.serverLocation}</span>
+                  <div className="bg-surface-container-lowest/80 p-3 rounded-lg border border-outline-variant">
+                    <div className="flex items-center gap-1.5 text-on-surface-variant mb-1">
+                      <Globe className="w-3.5 h-3.5 text-tertiary" />
+                      <span>Localização</span>
+                    </div>
+                    <p className="text-on-surface font-semibold text-xs truncate" title={speedtestResult.serverLocation}>
+                      {speedtestResult.serverLocation}
+                    </p>
                   </div>
                 </div>
 
