@@ -132,36 +132,23 @@ export async function evolutionSendButtons(
   const limited = buttons.slice(0, 3).filter((b) => b.label?.trim());
   const numbered = [text, ...limited.map((b, i) => `${i + 1}. ${b.label}`)].join('\n');
 
-  if (evolutionOutboundBlocked()) return { ok: false, skipped: 'local_mode' };
-  const apiKey = revealEvolutionKey(creds.apiKey);
-  const instance = creds.instance?.trim();
-  const phone = digits(number);
-  if (!creds.apiUrl || !apiKey || !instance || !phone) {
-    return { ok: false, skipped: 'missing' };
-  }
-
-  try {
-    const res = await requestJson(
-      creds.apiUrl,
-      apiKey,
-      'POST',
-      `/message/sendButtons/${encodeURIComponent(instance)}`,
-      {
-        number: phone,
-        title: text.slice(0, 60) || 'Menu',
-        description: text,
-        buttons: limited.map((b) => ({
-          type: 'reply',
-          displayText: b.label.slice(0, 20),
-          id: b.id,
-        })),
-      }
-    );
-    if (res.status >= 200 && res.status < 300) return { ok: true };
-  } catch {
-    /* WhatsApp dropped native buttons on many accounts; fall through. */
-  }
-
+  /**
+   * Numbered text, not native buttons.
+   *
+   * This used to POST /message/sendButtons and only fall back to the numbered
+   * list on an exception or a non-2xx. Evolution answers 200: it accepts the
+   * request, Baileys puts a buttonsMessage on the wire and WhatsApp delivers
+   * it — two ticks and all. The recipient's client then cannot render it and
+   * shows "Não foi possível carregar a mensagem", because interactive buttons
+   * are not available to accounts driven this way. The fallback never ran, and
+   * the panel logged a healthy send for a menu nobody could read.
+   *
+   * HTTP 200 from Evolution means queued, never legible. There is no response
+   * that distinguishes the two, so the only safe menu is one made of text.
+   *
+   * The reply side already expects this: pickMenuHandle accepts the position
+   * ("1"), the button id, or the label.
+   */
   return evolutionSendText(creds, number, numbered);
 }
 

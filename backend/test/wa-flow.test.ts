@@ -18,8 +18,9 @@ import { phoneHash } from '../src/utils/phone.js';
 import { WA_FLOW_TEMPLATES } from '../src/services/wa-flow-templates.js';
 import { providedWaWebhookSecret } from '../src/utils/wa-webhook-auth.js';
 import { assessBoundInstances } from '../src/utils/wa-publish-ready.js';
-import { evolutionSendFailed, evolutionManagerUrl } from '../src/utils/evolution.client.js';
+import { evolutionSendFailed, evolutionManagerUrl, evolutionSendButtons } from '../src/utils/evolution.client.js';
 import { WaInboundStore } from '../src/utils/wa-inbound.store.js';
+import { CONFIG } from '../src/config.js';
 import { isDuplicateMessage, resetDedupe } from '../src/utils/wa-dedupe.js';
 import { runSerial, pendingSerialKeys } from '../src/utils/serial-queue.js';
 import { WaHandoffStore } from '../src/utils/wa-handoff.store.js';
@@ -973,4 +974,106 @@ test('unmatched messages are buffered per bound flow', () => {
 
   dbStorage.removeWaFlow('waflow-sem-gatilho');
   WaStatsBuffer.reset();
+});
+
+// --- Menu: texto numerado, não botão nativo ---
+
+test('a menu goes out as numbered text, and a numeric reply advances it', async () => {
+  resetDedupe();
+  WaSessionStore.clear('clinic', '5511999999999');
+
+  dbStorage.saveWaFlow({
+    id: 'waflow-menu-texto',
+    name: 'Menu texto',
+    published: true,
+    instanceNames: ['clinic'],
+    priority: 90,
+    sessionTtlMinutes: 30,
+    aiBudgetTokensPerDay: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    nodes: [
+      { id: 't1', type: 'trigger_message', position: { x: 0, y: 0 }, data: { match: 'contains', keyword: 'ajuda' } },
+      {
+        id: 'm1',
+        type: 'menu',
+        position: { x: 0, y: 1 },
+        data: {
+          text: 'Olá {{nome}}! Como podemos te ajudar hoje?',
+          buttons: [
+            { id: 'horarios', label: 'Horários' },
+            { id: 'humano', label: 'Falar com Humano' },
+          ],
+        },
+      },
+      { id: 's1', type: 'send_text', position: { x: 0, y: 2 }, data: { text: 'Abrimos das 9h às 18h' } },
+      { id: 'e1', type: 'end', position: { x: 0, y: 3 }, data: {} },
+    ],
+    edges: [
+      { id: 'e1', source: 't1', target: 'm1' },
+      { id: 'e2', source: 'm1', target: 's1', sourceHandle: 'horarios' },
+      { id: 'e3', source: 's1', target: 'e1' },
+    ],
+  });
+
+  // O sender real chama evolutionSendButtons, que agora entrega texto. Aqui o
+  // mock registra o que o motor pediu; o formato do fio é coberto abaixo.
+  const first = mockSender();
+  assert.equal(await WaFlowEngine.handleInbound(upsert('ajuda'), first.sender), true);
+  assert.equal(first.sent[0]?.kind, 'menu');
+  assert.deepEqual(first.sent[0]?.buttons, ['Horários', 'Falar com Humano']);
+
+  // Responder pelo número precisa avançar: sem botão nativo, é o caminho real.
+  const second = mockSender();
+  assert.equal(await WaFlowEngine.handleInbound(upsert('1'), second.sender), true);
+  assert.equal(second.sent[0]?.text, 'Abrimos das 9h às 18h');
+
+  dbStorage.removeWaFlow('waflow-menu-texto');
+});
+
+test('a menu is sent as text, never as a native buttons message', async () => {
+  // A regressão: a Evolution devolve 200 para sendButtons, o WhatsApp entrega
+  // com dois ticks, e o cliente mostra "Não foi possível carregar a mensagem".
+  // Nenhum campo da resposta distingue entregue de legível, então o painel
+  // registrava envio saudável de um menu que ninguém conseguia ler. O único
+  // teste que vale é o do fio: qual rota e qual corpo.
+  const seen: Array<{ path: string; body: any }> = [];
+  const fake = express();
+  fake.use(express.json());
+  fake.post('/message/*', (req, res) => {
+    seen.push({ path: req.path, body: req.body });
+    res.json({ key: { id: 'FAKE' } });
+  });
+
+  const previous = CONFIG.ALLOW_OUTBOUND_ALERTS;
+  CONFIG.ALLOW_OUTBOUND_ALERTS = true; // libera a chamada contra o servidor local
+  try {
+    await new Promise<void>((resolve) => {
+      const server = fake.listen(0, async () => {
+        const port = (server.address() as { port: number }).port;
+        await evolutionSendButtons(
+          { apiUrl: `http://127.0.0.1:${port}`, apiKey: 'k', instance: 'clinic' },
+          '5511999999999',
+          'Como podemos te ajudar hoje?',
+          [
+            { id: 'horarios', label: 'Horários' },
+            { id: 'humano', label: 'Falar com Humano' },
+          ]
+        );
+        server.close();
+        resolve();
+      });
+    });
+  } finally {
+    CONFIG.ALLOW_OUTBOUND_ALERTS = previous;
+  }
+
+  assert.equal(seen.length, 1, 'um único envio');
+  assert.match(seen[0].path, /^\/message\/sendText\//, 'menu não pode sair por sendButtons');
+  assert.ok(!seen[0].path.includes('sendButtons'));
+
+  const body = String(seen[0].body?.text || '');
+  assert.match(body, /Como podemos te ajudar hoje\?/);
+  assert.match(body, /1\. Horários/);
+  assert.match(body, /2\. Falar com Humano/);
 });
