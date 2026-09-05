@@ -13,6 +13,7 @@ import { WaFlowService } from '../services/wa-flow.service.js';
 import { HandoffManager, WaFlowEngine } from '../services/wa-flow-engine.js';
 import { WaLogStore } from '../utils/wa-log.store.js';
 import { WA_FLOW_TEMPLATES } from '../services/wa-flow-templates.js';
+import { providedWaWebhookSecret } from '../utils/wa-webhook-auth.js';
 
 export const waFlowRouter = Router();
 
@@ -23,9 +24,10 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 function webhookToken(req: Request): string {
-  const header = String(req.headers['x-aegis-wa-secret'] || req.headers.apikey || '');
-  const query = typeof req.query.token === 'string' ? req.query.token : '';
-  return header || query;
+  return providedWaWebhookSecret({
+    aegisHeader: String(req.headers['x-aegis-wa-secret'] || ''),
+    queryToken: typeof req.query.token === 'string' ? req.query.token : '',
+  });
 }
 
 waFlowRouter.post('/webhook', async (req: Request, res: Response): Promise<void> => {

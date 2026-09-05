@@ -9,6 +9,8 @@ import { evolutionOutboundBlocked, parseEvolutionUpsert } from '../src/utils/evo
 import { WaSessionStore } from '../src/utils/wa-session.store.js';
 import { waFlowRouter } from '../src/routes/wa-flow.routes.js';
 import { phoneHash } from '../src/utils/phone.js';
+import { WA_FLOW_TEMPLATES } from '../src/services/wa-flow-templates.js';
+import { providedWaWebhookSecret } from '../src/utils/wa-webhook-auth.js';
 
 function upsert(text: string, phone = '5511999999999', instance = 'clinic') {
   return {
@@ -40,6 +42,63 @@ function mockSender() {
 test('parseEvolutionUpsert ignores groups and empty bodies', () => {
   assert.equal(parseEvolutionUpsert({ data: { key: { remoteJid: 'x@g.us' }, message: { conversation: 'oi' } } }), null);
   assert.ok(parseEvolutionUpsert(upsert('oi'))?.phone === '5511999999999');
+});
+
+test('parseEvolutionUpsert reads ephemeral, array and LID payloads', () => {
+  const ephemeral = parseEvolutionUpsert({
+    event: 'messages.upsert',
+    instance: 'clinic',
+    data: {
+      key: { remoteJid: '5511999999999@s.whatsapp.net', fromMe: false },
+      pushName: 'Ana',
+      message: { ephemeralMessage: { message: { conversation: 'Ajuda' } } },
+    },
+  });
+  assert.equal(ephemeral?.text, 'Ajuda');
+  assert.equal(ephemeral?.instance, 'clinic');
+
+  const asArray = parseEvolutionUpsert({
+    event: 'MESSAGES_UPSERT',
+    instance: 'clinic',
+    data: [
+      {
+        key: { remoteJid: '5511888888888@s.whatsapp.net', fromMe: false },
+        message: { extendedTextMessage: { text: 'ajuda por favor' } },
+      },
+    ],
+  });
+  assert.equal(asArray?.text, 'ajuda por favor');
+  assert.equal(asArray?.phone, '5511888888888');
+
+  const lid = parseEvolutionUpsert({
+    instance: 'clinic',
+    data: {
+      key: {
+        remoteJid: '123456789012345@lid',
+        remoteJidAlt: '5511777777777@s.whatsapp.net',
+        fromMe: false,
+      },
+      message: { conversation: 'oi' },
+    },
+  });
+  assert.equal(lid?.phone, '5511777777777');
+});
+
+test('webhook secret ignores Evolution apikey and prefers the Aegis header', () => {
+  assert.equal(
+    providedWaWebhookSecret({
+      aegisHeader: '',
+      queryToken: 'aegis-token',
+    }),
+    'aegis-token'
+  );
+  assert.equal(
+    providedWaWebhookSecret({
+      aegisHeader: 'from-header',
+      queryToken: 'from-query',
+    }),
+    'from-header'
+  );
 });
 
 test('engine matches keyword, interpolates name and advances after a menu reply', async () => {
@@ -295,6 +354,67 @@ test('webhook refuses a missing secret', async () => {
   assert.match(res.body.error, /segredo/i);
 });
 
+test('suporte-handoff template fires on Ajuda and sends the menu', async () => {
+  const tmpl = WA_FLOW_TEMPLATES.find((t) => t.id === 'suporte-handoff');
+  assert.ok(tmpl);
+  dbStorage.saveWaFlow({
+    id: 'waflow-ajuda-template',
+    name: tmpl.name,
+    published: true,
+    instanceNames: ['clinic'],
+    priority: 0,
+    sessionTtlMinutes: 30,
+    aiBudgetTokensPerDay: 50_000,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    nodes: tmpl.nodes,
+    edges: tmpl.edges,
+  });
+
+  const first = mockSender();
+  assert.equal(await WaFlowEngine.handleInbound(upsert('Ajuda'), first.sender), true);
+  assert.equal(first.sent[0]?.kind, 'menu');
+  assert.ok(first.sent[0]?.buttons?.includes('Horários'));
+  assert.ok(first.sent[0]?.buttons?.includes('Falar com Humano'));
+});
+
+test('inbound replies from the receiving instance, not Settings leftover', async () => {
+  dbStorage.updateSettings({
+    alertConfig: {
+      ...dbStorage.getSettings().alertConfig,
+      whatsappApiUrl: 'http://127.0.0.1:4103',
+      whatsappApiKey: 'test-key',
+      whatsappInstance: 'ops-number',
+    },
+  });
+  dbStorage.saveWaFlow({
+    id: 'waflow-instance-send',
+    name: 'Clinic',
+    published: true,
+    instanceNames: ['Clinic'],
+    priority: 0,
+    sessionTtlMinutes: 30,
+    aiBudgetTokensPerDay: 50_000,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    nodes: [
+      { id: 't1', type: 'trigger_message', position: { x: 0, y: 0 }, data: { match: 'contains', keyword: 'ajuda' } },
+      { id: 's1', type: 'send_text', position: { x: 0, y: 1 }, data: { text: 'menu real' } },
+    ],
+    edges: [{ id: 'e1', source: 't1', target: 's1' }],
+  });
+
+  const sent: string[] = [];
+  const handled = await WaFlowEngine.handleInbound(upsert('Ajuda', '5511666666666', 'clinic'), {
+    sendText: async (creds, _n, text) => {
+      sent.push(`${creds.instance}:${text}`);
+    },
+    sendButtons: async () => {},
+  });
+  assert.equal(handled, true);
+  assert.equal(sent[0], 'clinic:menu real');
+});
+
 test('webhook accepts the configured token', async () => {
   const token = WaFlowService.webhookSecret();
   const app = express();
@@ -307,6 +427,33 @@ test('webhook accepts the configured token', async () => {
       const response = await fetch(`http://127.0.0.1:${port}/api/wa-flows/webhook?token=${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(upsert('oi')),
+      });
+      const body = await response.json();
+      server.close();
+      resolve({ status: response.status, body });
+    });
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.ok, true);
+});
+
+test('webhook accepts ?token= even when Evolution sends its own apikey header', async () => {
+  const token = WaFlowService.webhookSecret();
+  const app = express();
+  app.use(express.json());
+  app.use('/api/wa-flows', waFlowRouter);
+
+  const res = await new Promise<{ status: number; body: any }>((resolve) => {
+    const server = app.listen(0, async () => {
+      const port = (server.address() as { port: number }).port;
+      const response = await fetch(`http://127.0.0.1:${port}/api/wa-flows/webhook?token=${token}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: 'evolution-global-key-NOT-ours',
+        },
         body: JSON.stringify(upsert('oi')),
       });
       const body = await response.json();

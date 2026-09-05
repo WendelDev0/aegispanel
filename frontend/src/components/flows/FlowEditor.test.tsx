@@ -43,5 +43,6 @@ describe('FlowEditor', () => {
     expect(screen.getByText('Agente IA')).toBeTruthy();
     expect(screen.getByText('Transbordo humano')).toBeTruthy();
     expect(screen.getByText('Finalizar fluxo')).toBeTruthy();
+    expect(screen.getByText(/Rascunho: vincule a linha Evolution/)).toBeTruthy();
   });
 });

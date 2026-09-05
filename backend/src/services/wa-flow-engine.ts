@@ -89,6 +89,12 @@ function nodeById(flow: WaFlowRecord, id: string): WaFlowNode | undefined {
   return flow.nodes.find((n) => n.id === id);
 }
 
+function flowBoundToInstance(flow: WaFlowRecord, instance: string): boolean {
+  const want = instance.trim().toLowerCase();
+  if (!want) return false;
+  return (flow.instanceNames || []).some((name) => String(name).trim().toLowerCase() === want);
+}
+
 function matchesTrigger(node: WaFlowNode, text: string): boolean {
   if (node.type !== 'trigger_message') return false;
   const match = node.data.match || 'any';
@@ -480,12 +486,14 @@ export class WaFlowEngine {
     const inbound = parseEvolutionUpsert(body);
     if (!inbound) return false;
 
-    const creds = WaFlowService.evolutionCreds();
-    const instance = inbound.instance || creds?.instance || '';
+    const fallbackCreds = WaFlowService.evolutionCreds();
+    const instance = inbound.instance || fallbackCreds?.instance || '';
     if (!instance) {
       console.warn('⚠️ Inbound do WhatsApp recebido sem identificação de instância.');
       return false;
     }
+    // Reply from the instance that received the message, not Settings' leftover name.
+    const creds = WaFlowService.evolutionCreds(instance);
 
     const ports: FlowPorts = {
       ...defaultPorts,
@@ -618,8 +626,7 @@ export class WaFlowEngine {
       .filter(
         (f) =>
           f.published &&
-          Array.isArray(f.instanceNames) &&
-          f.instanceNames.includes(instance) &&
+          flowBoundToInstance(f, instance) &&
           f.nodes.some((n) => n.type === 'trigger_message' && matchesTrigger(n, inbound.text))
       );
 

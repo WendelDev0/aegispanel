@@ -84,6 +84,10 @@ export class WaFlowService {
 
     const now = new Date().toISOString();
     const todayStr = now.slice(0, 10);
+    const instanceNames = Array.isArray(input.instanceNames)
+      ? input.instanceNames.map((n) => String(n).trim()).filter(Boolean)
+      : [];
+    const fallbackInstance = (this.evolutionCreds()?.instance || '').trim();
 
     const flow: WaFlowRecord = {
       id: `waflow-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
@@ -91,7 +95,7 @@ export class WaFlowService {
       published: false,
       nodes: this.sanitizeNodes(nodes),
       edges: this.sanitizeEdges(edges),
-      instanceNames: Array.isArray(input.instanceNames) ? input.instanceNames.map((n) => String(n).trim()).filter(Boolean) : [],
+      instanceNames: instanceNames.length ? instanceNames : (fallbackInstance ? [fallbackInstance] : []),
       priority: Number.isFinite(input.priority) ? Number(input.priority) : 0,
       sessionTtlMinutes: Math.max(5, Math.min(1440, Number(input.sessionTtlMinutes) || 30)),
       aiBudgetTokensPerDay: Math.max(0, Number(input.aiBudgetTokensPerDay) || 50_000),
@@ -237,8 +241,9 @@ export class WaFlowService {
 
       // 2. Register webhook on each bound instance
       const webhookUrl = this.webhookUrl();
+      const webhookHeaders = { 'x-aegis-wa-secret': this.webhookSecret() };
       for (const inst of flow.instanceNames) {
-        const result = await evolutionSetWebhook({ ...creds, instance: inst }, webhookUrl);
+        const result = await evolutionSetWebhook({ ...creds, instance: inst }, webhookUrl, webhookHeaders);
         if (!result.ok && result.skipped !== 'local_mode') {
           throw new Error(result.error || `Não foi possível registrar o webhook na instância "${inst}".`);
         }
@@ -289,7 +294,12 @@ export class WaFlowService {
 
   static recordUnmatched(instance: string): void {
     // Increment unmatchedToday on published flows matching this instance
-    const flows = dbStorage.getWaFlows().filter((f) => f.published && f.instanceNames?.includes(instance));
+    const want = instance.trim().toLowerCase();
+    const flows = dbStorage.getWaFlows().filter(
+      (f) =>
+        f.published &&
+        (f.instanceNames || []).some((name) => String(name).trim().toLowerCase() === want)
+    );
     const todayStr = new Date().toISOString().slice(0, 10);
     for (const flow of flows) {
       const stats = flow.stats && flow.stats.day === todayStr

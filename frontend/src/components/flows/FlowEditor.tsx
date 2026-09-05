@@ -370,7 +370,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
         </div>
 
         {/* Center: Instances Binding Pills */}
-        <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 bg-surface-container-low rounded-lg border border-outline-variant/60">
+        <div className="flex flex-wrap items-center gap-1.5 px-3 py-1 bg-surface-container-low rounded-lg border border-outline-variant/60">
           <Radio className="w-3.5 h-3.5 text-primary" />
           <span className="text-[11px] font-semibold text-on-surface-variant mr-1">Linhas:</span>
           {availableInstances.length === 0 ? (
@@ -526,6 +526,15 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-crit/15 border border-crit/30 text-crit text-xs animate-in fade-in">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span>{error}</span>
+        </div>
+      )}
+
+      {flow && !flow.published && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-warn/10 border border-warn/30 text-warn text-xs">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>
+            Rascunho: vincule a linha Evolution e clique em Publicar. Sem isso o WhatsApp não dispara o fluxo.
+          </span>
         </div>
       )}
 

@@ -148,7 +148,8 @@ export async function evolutionSendButtons(
 
 export async function evolutionSetWebhook(
   creds: EvolutionCredentials,
-  webhookUrl: string
+  webhookUrl: string,
+  headers?: Record<string, string>
 ): Promise<EvolutionSendResult> {
   if (evolutionOutboundBlocked()) return { ok: false, skipped: 'local_mode' };
   const apiKey = revealEvolutionKey(creds.apiKey);
@@ -165,6 +166,8 @@ export async function evolutionSetWebhook(
         events: ['MESSAGES_UPSERT'],
         webhookByEvents: false,
         webhookBase64: false,
+        // Dedicated header so auth still works if a proxy strips `?token=`.
+        ...(headers && Object.keys(headers).length ? { headers } : {}),
       },
     });
     if (res.status >= 200 && res.status < 300) return { ok: true };
@@ -199,32 +202,93 @@ export interface InboundWaMessage {
   fromMe: boolean;
 }
 
+function firstMessageRecord(root: Record<string, any>): Record<string, any> {
+  const data = root.data ?? root;
+  if (Array.isArray(data)) return data[0] && typeof data[0] === 'object' ? data[0] : {};
+  if (Array.isArray(data?.messages)) {
+    return data.messages[0] && typeof data.messages[0] === 'object' ? data.messages[0] : {};
+  }
+  return data && typeof data === 'object' ? data : {};
+}
+
+function unwrapWaMessage(message: Record<string, any> | undefined): Record<string, any> {
+  if (!message || typeof message !== 'object') return {};
+  return (
+    message.ephemeralMessage?.message ||
+    message.viewOnceMessage?.message ||
+    message.viewOnceMessageV2?.message ||
+    message.viewOnceMessageV2Extension?.message ||
+    message.documentWithCaptionMessage?.message ||
+    message.editedMessage?.message ||
+    message
+  );
+}
+
+function textFromInteractive(message: Record<string, any>): string {
+  const params = message.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  if (typeof params === 'string' && params.trim()) {
+    try {
+      const parsed = JSON.parse(params);
+      const picked = parsed.id || parsed.selectedId || parsed.title || parsed.displayText;
+      if (picked) return String(picked);
+    } catch {
+      /* WhatsApp sometimes sends non-JSON here; ignore rather than echo the blob. */
+    }
+  }
+  return String(message.interactiveResponseMessage?.body?.text || '');
+}
+
+function extractWaText(message: Record<string, any>): string {
+  const m = unwrapWaMessage(message);
+  return (
+    m.conversation ||
+    m.extendedTextMessage?.text ||
+    m.imageMessage?.caption ||
+    m.videoMessage?.caption ||
+    m.buttonsResponseMessage?.selectedDisplayText ||
+    m.buttonsResponseMessage?.selectedButtonId ||
+    m.templateButtonReplyMessage?.selectedDisplayText ||
+    m.templateButtonReplyMessage?.selectedId ||
+    m.listResponseMessage?.title ||
+    m.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    textFromInteractive(m) ||
+    ''
+  );
+}
+
+function phoneFromKey(key: Record<string, any>): string {
+  const remoteJid = String(key.remoteJid || '');
+  if (!remoteJid || remoteJid.endsWith('@g.us') || remoteJid.endsWith('@newsletter') || remoteJid === 'status@broadcast') {
+    return '';
+  }
+
+  const candidates = [key.remoteJid, key.remoteJidAlt, key.participant, key.participantAlt];
+  for (const jid of candidates) {
+    const value = String(jid || '');
+    if (value.endsWith('@s.whatsapp.net') || value.endsWith('@c.us')) {
+      const phone = value.replace(/@.*$/, '').replace(/\D/g, '');
+      if (phone) return phone;
+    }
+  }
+
+  return remoteJid.replace(/@.*$/, '').replace(/\D/g, '');
+}
+
 export function parseEvolutionUpsert(body: unknown): InboundWaMessage | null {
   if (!body || typeof body !== 'object') return null;
   const root = body as Record<string, any>;
-  const data = root.data || root;
+  const data = firstMessageRecord(root);
   const key = data.key || {};
   if (key.fromMe) return null;
 
-  const remoteJid = String(key.remoteJid || '');
-  if (!remoteJid || remoteJid.endsWith('@g.us')) return null;
-  const phone = remoteJid.replace(/@.*$/, '').replace(/\D/g, '');
+  const phone = phoneFromKey(key);
   if (!phone) return null;
 
-  const message = data.message || {};
-  const text =
-    message.conversation ||
-    message.extendedTextMessage?.text ||
-    message.buttonsResponseMessage?.selectedDisplayText ||
-    message.buttonsResponseMessage?.selectedButtonId ||
-    message.listResponseMessage?.title ||
-    message.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    '';
-  const trimmed = String(text).trim();
+  const trimmed = String(extractWaText(data.message || {})).trim();
   if (!trimmed) return null;
 
   return {
-    instance: String(root.instance || data.instance || ''),
+    instance: String(root.instance || data.instance || '').trim(),
     phone,
     text: trimmed.slice(0, 2000),
     pushName: String(data.pushName || key.pushName || ''),
