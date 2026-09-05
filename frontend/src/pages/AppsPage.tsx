@@ -36,6 +36,7 @@ import {
   HardDrive,
 } from 'lucide-react';
 import { api } from '../services/api.js';
+import { SectionHeader, StatCard } from '../components/ui.js';
 import { useToast } from '../components/Toast.js';
 import { socket } from '../services/socket.js';
 import { AppRecord, AppMetricsSnapshot, DeploymentRecord, ServerNode } from '../types/index.js';
@@ -114,7 +115,10 @@ function appStatusBadge(
         ? 'Respondendo normalmente na última verificação.'
         : 'Contêiner em execução; ainda sem verificação de saúde.',
     className: 'bg-ok/10 text-ok border border-ok/30',
-    dotClassName: 'bg-emerald-400 animate-pulse',
+    // No pulse and no raw emerald: motion is for the states that are changing
+    // or wrong. A healthy app blinking forever is noise competing with the
+    // two dots that actually mean something.
+    dotClassName: 'bg-ok',
   };
 }
 
@@ -432,89 +436,75 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
 
   return (
     <div className="space-y-6">
-      {/* Executive Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-primary/10 text-primary border border-primary/20">
-              <Layers className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-white tracking-[-0.01em]">
-                Aplicações & CI/CD
-              </h2>
-              <p className="text-xs text-on-surface-variant mt-0.5">
-                Plataforma PaaS Cloud com automação de builds, rollback instantâneo e domínios com SSL.
-              </p>
-            </div>
-          </div>
-        </div>
+      <SectionHeader
+        icon={<Layers className="w-[18px] h-[18px]" />}
+        title="Aplicações"
+        subtitle="Builds automáticos, rollback instantâneo e domínios com SSL."
+        actions={
+          <>
+            <button
+              onClick={() => setShowAiHelpModal(true)}
+              title="Copie o prompt para sua IA preparar o projeto para o AegisPanel"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-outline-variant bg-surface-container hover:border-outline text-on-surface text-xs font-semibold transition-colors"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              Prompt para IA
+            </button>
 
-        <div className="flex items-center gap-2.5 shrink-0">
-          <button
-            onClick={() => setShowAiHelpModal(true)}
-            title="Copie o prompt para sua IA preparar o projeto para o AegisPanel"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 font-semibold text-xs border border-purple-500/30 transition-all active:scale-95"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-            <span>Prompt para IA ✨</span>
-          </button>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              title="Fazer deploy de um novo projeto do GitHub ou imagem Docker"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary-container hover:bg-primary text-on-primary-container text-xs font-semibold transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Novo deploy
+            </button>
+          </>
+        }
+      />
 
-          <button
-            onClick={() => setShowCreateModal(true)}
-            title="Fazer deploy de um novo projeto do GitHub ou imagem Docker"
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-on-primary font-semibold text-xs transition-all hover:bg-primary/90 active:scale-95 shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Novo Projeto / Deploy</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Fleet Telemetry KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="p-3.5 rounded-lg bg-surface-container border border-outline-variant">
-          <div className="flex items-center justify-between text-on-surface-variant text-[11px] mb-1">
-            <span>Total de Apps</span>
-            <HardDrive className="w-3.5 h-3.5 text-on-surface-variant/60" />
-          </div>
-          <div className="text-xl font-bold text-white tabular-nums font-mono">
-            {fleetKpis.total}
-          </div>
-        </div>
-
-        <div className="p-3.5 rounded-lg bg-surface-container border border-outline-variant">
-          <div className="flex items-center justify-between text-on-surface-variant text-[11px] mb-1">
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-ok animate-pulse" />
-              Online
-            </span>
-            <CheckCircle2 className="w-3.5 h-3.5 text-ok/80" />
-          </div>
-          <div className="text-xl font-bold text-ok tabular-nums font-mono">
-            {fleetKpis.healthy}
-          </div>
-        </div>
-
-        <div className="p-3.5 rounded-lg bg-surface-container border border-outline-variant">
-          <div className="flex items-center justify-between text-on-surface-variant text-[11px] mb-1">
-            <span>Parados ou Erro</span>
-            <AlertCircle className="w-3.5 h-3.5 text-warn/80" />
-          </div>
-          <div className="text-xl font-bold text-on-surface-variant tabular-nums font-mono">
-            {fleetKpis.stoppedOrError}
-          </div>
-        </div>
-
-        <div className="p-3.5 rounded-lg bg-surface-container border border-outline-variant">
-          <div className="flex items-center justify-between text-on-surface-variant text-[11px] mb-1">
-            <span>RAM Total em Uso</span>
-            <Activity className="w-3.5 h-3.5 text-tertiary/80" />
-          </div>
-          <div className="text-xl font-bold text-tertiary tabular-nums font-mono truncate">
-            {fleetKpis.totalRamStr}
-          </div>
-        </div>
+      {/*
+        A number on its own reads as a form field. These carry a detail line
+        and, where there is a whole to compare against, the fill bar — which is
+        what makes the difference between "3" and "3 de 5 saudáveis".
+        `buildingOrStarting` was computed and never rendered, so a deploy in
+        flight looked identical to a fleet standing still.
+      */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          icon={<HardDrive className="w-4 h-4" />}
+          label="Aplicações"
+          value={fleetKpis.total}
+          detail={
+            fleetKpis.buildingOrStarting > 0
+              ? `${fleetKpis.buildingOrStarting} subindo agora`
+              : `${fleetKpis.healthy} em execução`
+          }
+          tone={fleetKpis.buildingOrStarting > 0 ? 'info' : 'neutral'}
+        />
+        <StatCard
+          icon={<CheckCircle2 className="w-4 h-4" />}
+          label="Saudáveis"
+          value={fleetKpis.healthy}
+          detail={fleetKpis.total ? `de ${fleetKpis.total} no total` : 'nenhuma aplicação ainda'}
+          percent={fleetKpis.total ? (fleetKpis.healthy / fleetKpis.total) * 100 : 0}
+          tone="ok"
+        />
+        <StatCard
+          icon={<AlertCircle className="w-4 h-4" />}
+          label="Parados ou erro"
+          value={fleetKpis.stoppedOrError}
+          detail={fleetKpis.stoppedOrError > 0 ? 'requer atenção' : 'nada fora do ar'}
+          percent={fleetKpis.total ? (fleetKpis.stoppedOrError / fleetKpis.total) * 100 : 0}
+          tone={fleetKpis.stoppedOrError > 0 ? 'crit' : 'ok'}
+        />
+        <StatCard
+          icon={<Activity className="w-4 h-4" />}
+          label="RAM em uso"
+          value={fleetKpis.totalRamStr}
+          detail="soma dos containers"
+          tone="info"
+        />
       </div>
 
       {/* Control Toolbar: Search + Filter Pills + View Switch */}
@@ -527,7 +517,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
             placeholder="Buscar por nome, domínio, porta, repo..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-surface-container border border-outline-variant rounded-md pl-8 pr-3 py-1.5 text-xs text-white placeholder-on-surface-variant/50 focus:outline-none focus:border-primary transition-colors"
+            className="w-full bg-surface-container border border-outline-variant rounded-md pl-8 pr-3 py-1.5 text-xs text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:border-primary transition-colors"
           />
         </div>
 
@@ -555,7 +545,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
               className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                 filterStatus === f.id
                   ? 'bg-primary/20 text-primary border border-primary/30 font-semibold'
-                  : 'text-on-surface-variant hover:text-white hover:bg-surface-container'
+                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container'
               }`}
             >
               <span>{f.label}</span>
@@ -570,14 +560,14 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
             <button
               onClick={() => setViewMode('grid')}
               title="Modo Grade (Cards)"
-              className={`p-1 rounded ${viewMode === 'grid' ? 'bg-primary/20 text-primary' : 'text-on-surface-variant hover:text-white'}`}
+              className={`p-1 rounded ${viewMode === 'grid' ? 'bg-primary/20 text-primary' : 'text-on-surface-variant hover:text-on-surface'}`}
             >
               <LayoutGrid className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => setViewMode('table')}
               title="Modo Tabela (Compacto)"
-              className={`p-1 rounded ${viewMode === 'table' ? 'bg-primary/20 text-primary' : 'text-on-surface-variant hover:text-white'}`}
+              className={`p-1 rounded ${viewMode === 'table' ? 'bg-primary/20 text-primary' : 'text-on-surface-variant hover:text-on-surface'}`}
             >
               <List className="w-3.5 h-3.5" />
             </button>
@@ -586,7 +576,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
           <button
             onClick={fetchApps}
             title="Recarregar aplicações"
-            className="p-1.5 rounded bg-surface-container hover:bg-surface-container-high border border-outline-variant text-on-surface-variant hover:text-white transition-colors"
+            className="p-1.5 rounded bg-surface-container hover:bg-surface-container-high border border-outline-variant text-on-surface-variant hover:text-on-surface transition-colors"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           </button>
@@ -604,7 +594,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
           <div className="w-12 h-12 rounded-lg bg-primary/10 text-primary flex items-center justify-center mx-auto mb-4 border border-primary/20">
             <Layers className="w-6 h-6" />
           </div>
-          <h3 className="text-base font-bold text-white mb-1">
+          <h3 className="text-base font-bold text-on-surface mb-1">
             {apps.length === 0 ? 'Nenhuma aplicação hospedada' : 'Nenhuma aplicação com estes filtros'}
           </h3>
           <p className="text-xs text-on-surface-variant max-w-md mx-auto mb-5">
@@ -649,7 +639,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-bold text-white text-base truncate">
+                          <h3 className="font-bold text-on-surface text-base truncate">
                             {onOpenApp ? (
                               <button
                                 onClick={() => onOpenApp(app.id)}
@@ -727,7 +717,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                       </div>
                       <button
                         onClick={() => setSelectedDomainApp(app)}
-                        className="text-[10px] text-on-surface-variant hover:text-white shrink-0 font-sans px-1 py-0.5 rounded hover:bg-surface-container"
+                        className="text-[10px] text-on-surface-variant hover:text-on-surface shrink-0 font-sans px-1 py-0.5 rounded hover:bg-surface-container"
                       >
                         {app.domain ? 'Editar' : '+ Vincular'}
                       </button>
@@ -738,7 +728,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
                         <span className="text-on-surface-variant text-[11px]">Porta:</span>
-                        <span className="text-white font-bold truncate">:{app.port}</span>
+                        <span className="text-on-surface font-bold truncate">:{app.port}</span>
                         {app.internalPort && app.internalPort !== app.port && (
                           <span className="text-[10px] text-on-surface-variant/70">
                             (app :{app.internalPort})
@@ -749,7 +739,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                         <button
                           onClick={(e) => handleCopyDirectUrl(e, app.port, app.id)}
                           title="Copiar link IP:Porta"
-                          className="p-1 rounded text-on-surface-variant hover:text-white hover:bg-surface-container"
+                          className="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container"
                         >
                           {copiedPortId === app.id ? (
                             <Check className="w-3 h-3 text-ok" />
@@ -781,7 +771,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                       <div>
                         <div className="flex items-center justify-between text-[11px] mb-1">
                           <span className="text-on-surface-variant">CPU</span>
-                          <span className="font-mono text-white font-semibold">
+                          <span className="font-mono text-on-surface font-semibold">
                             {metrics.cpuPercent}%
                           </span>
                         </div>
@@ -802,7 +792,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                       <div>
                         <div className="flex items-center justify-between text-[11px] mb-1">
                           <span className="text-on-surface-variant">RAM</span>
-                          <span className="font-mono text-white font-semibold">
+                          <span className="font-mono text-on-surface font-semibold">
                             {formatRam(metrics.memoryUsedBytes)}
                           </span>
                         </div>
@@ -888,7 +878,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                     <button
                       onClick={() => handleRestart(app.id)}
                       title="Reiniciar contêiner"
-                      className="p-1.5 rounded-md text-on-surface-variant hover:text-white hover:bg-surface-container transition-colors"
+                      className="p-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors"
                     >
                       <RefreshCw className="w-4 h-4" />
                     </button>
@@ -911,7 +901,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                         setOpenDropdownId(openDropdownId === app.id ? null : app.id);
                       }}
                       title="Mais opções"
-                      className="p-1.5 rounded-md text-on-surface-variant hover:text-white hover:bg-surface-container transition-colors"
+                      className="p-1.5 rounded-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors"
                     >
                       <MoreVertical className="w-4 h-4" />
                     </button>
@@ -1050,12 +1040,12 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                             {onOpenApp ? (
                               <button
                                 onClick={() => onOpenApp(app.id)}
-                                className="font-bold text-white hover:text-primary transition-colors text-left"
+                                className="font-bold text-on-surface hover:text-primary transition-colors text-left"
                               >
                                 {app.name}
                               </button>
                             ) : (
-                              <span className="font-bold text-white">{app.name}</span>
+                              <span className="font-bold text-on-surface">{app.name}</span>
                             )}
                             {app.sourceType === 'git' && (
                               <span className="text-[10px] font-mono text-primary bg-primary/10 px-1.5 py-0.2 rounded border border-primary/30">
@@ -1107,8 +1097,8 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                     <td className="py-3 px-4 font-mono text-[11px] whitespace-nowrap">
                       {metrics && metrics.available ? (
                         <div>
-                          <span className="text-white">CPU {metrics.cpuPercent}%</span> ·{' '}
-                          <span className="text-white">{formatRam(metrics.memoryUsedBytes)}</span>
+                          <span className="text-on-surface">CPU {metrics.cpuPercent}%</span> ·{' '}
+                          <span className="text-on-surface">{formatRam(metrics.memoryUsedBytes)}</span>
                         </div>
                       ) : (
                         <span className="text-on-surface-variant/60">—</span>
@@ -1148,7 +1138,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                         <button
                           onClick={() => handleRestart(app.id)}
                           title="Reiniciar"
-                          className="p-1 rounded text-on-surface-variant hover:text-white hover:bg-surface-container-high"
+                          className="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high"
                         >
                           <RefreshCw className="w-3.5 h-3.5" />
                         </button>
