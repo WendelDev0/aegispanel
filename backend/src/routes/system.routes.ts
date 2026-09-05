@@ -19,7 +19,7 @@ import {
   emptyBodySchema,
 } from '../validation/schemas.js';
 import { CONFIG } from '../config.js';
-import { evolutionFetchInstances, evolutionTestConnection } from '../utils/evolution.client.js';
+import { evolutionFetchInstances, evolutionManagerUrl, evolutionTestConnection } from '../utils/evolution.client.js';
 import { WaFlowService } from '../services/wa-flow.service.js';
 
 export const systemRouter = Router();
@@ -605,7 +605,7 @@ systemRouter.get('/evolution/instances', requireAdmin, async (_req: Request, res
       return;
     }
     const result = await evolutionFetchInstances(creds);
-    res.json(result);
+    res.json({ ...result, managerUrl: evolutionManagerUrl(creds.apiUrl) });
   } catch (err: any) {
     res.status(500).json({ ok: false, instances: [], error: err.message });
   }

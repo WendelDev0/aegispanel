@@ -24,6 +24,7 @@ import {
   Bot,
   RefreshCw,
   Radio,
+  ExternalLink,
 } from 'lucide-react';
 import { api, persistSession } from '../services/api.js';
 import { socket } from '../services/socket.js';
@@ -104,6 +105,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
     Array<{ name: string; connectionStatus?: string; profileName?: string; number?: string }>
   >([]);
   const [loadingInstances, setLoadingInstances] = useState(false);
+  const [evolutionManagerUrl, setEvolutionManagerUrl] = useState<string | null>(null);
 
   // AI Providers (OpenAI & OpenRouter)
   const [openaiKey, setOpenaiKey] = useState('');
@@ -260,6 +262,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
       setLoadingInstances(true);
       const res = await api.get('/system/evolution/instances');
       setEvolutionInstances(Array.isArray(res.data?.instances) ? res.data.instances : []);
+      setEvolutionManagerUrl(res.data?.managerUrl || null);
     } catch (err: any) {
       console.warn('Não foi possível carregar instâncias da Evolution:', err);
     } finally {
@@ -798,15 +801,28 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
                       Instâncias Conectadas na Evolution
                     </h4>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void fetchEvolutionInstances()}
-                    disabled={loadingInstances || !whatsappApiUrl}
-                    className="text-xs text-primary hover:underline flex items-center gap-1"
-                  >
-                    <RefreshCw className={`w-3 h-3 ${loadingInstances ? 'animate-spin' : ''}`} />
-                    <span>Atualizar lista</span>
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {evolutionManagerUrl && (
+                      <a
+                        href={evolutionManagerUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-primary hover:underline flex items-center gap-1"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        Manager da Evolution
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void fetchEvolutionInstances()}
+                      disabled={loadingInstances || !whatsappApiUrl}
+                      className="text-xs text-primary hover:underline flex items-center gap-1"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${loadingInstances ? 'animate-spin' : ''}`} />
+                      <span>Atualizar lista</span>
+                    </button>
+                  </div>
                 </div>
 
                 {loadingInstances ? (

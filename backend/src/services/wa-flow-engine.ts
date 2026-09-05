@@ -2,6 +2,7 @@ import type { WaFlowEdge, WaFlowNode, WaFlowRecord, WaPanelEvent } from '../db/s
 import { dbStorage } from '../db/storage.js';
 import {
   evolutionSendButtons,
+  evolutionSendFailed,
   evolutionSendText,
   parseEvolutionUpsert,
   type EvolutionCredentials,
@@ -9,6 +10,7 @@ import {
 import { phoneHash, phoneTail } from '../utils/phone.js';
 import { WaSessionStore } from '../utils/wa-session.store.js';
 import { WaLogStore } from '../utils/wa-log.store.js';
+import { WaInboundStore } from '../utils/wa-inbound.store.js';
 import { WaFlowService } from './wa-flow.service.js';
 import type {
   EvolutionSender,
@@ -27,6 +29,7 @@ export interface FlowContext {
   text: string;
   vars: Record<string, string>;
   stepsCount: number;
+  sendError?: string;
 }
 
 const emptyCreds: EvolutionCredentials = { apiUrl: '', apiKey: '', instance: '' };
@@ -170,6 +173,39 @@ function validateCaptureValue(type: string, text: string): boolean {
   return true;
 }
 
+async function deliverText(
+  ctx: FlowContext,
+  creds: EvolutionCredentials | null,
+  ports: FlowPorts,
+  phone: string,
+  text: string
+): Promise<boolean> {
+  const result = await ports.sender.sendText(creds ?? emptyCreds, phone, text);
+  const err = evolutionSendFailed(result);
+  if (err) {
+    ctx.sendError = err;
+    return false;
+  }
+  return true;
+}
+
+async function deliverButtons(
+  ctx: FlowContext,
+  creds: EvolutionCredentials | null,
+  ports: FlowPorts,
+  phone: string,
+  text: string,
+  buttons: Array<{ id: string; label: string }>
+): Promise<boolean> {
+  const result = await ports.sender.sendButtons(creds ?? emptyCreds, phone, text, buttons);
+  const err = evolutionSendFailed(result);
+  if (err) {
+    ctx.sendError = err;
+    return false;
+  }
+  return true;
+}
+
 async function runFrom(
   flow: WaFlowRecord,
   startId: string,
@@ -193,7 +229,22 @@ async function runFrom(
     if (current.type === 'send_text') {
       const body = applyVars(current.data.text || '', ctx.vars);
       if (body) {
-        await ports.sender.sendText(creds ?? emptyCreds, ctx.phone, body);
+        const sent = await deliverText(ctx, creds, ports, ctx.phone, body);
+        if (!sent) {
+          await ports.logs.appendTurn({
+            at: new Date().toISOString(),
+            instance: ctx.instance,
+            flowId: flow.id,
+            phoneHash: ctx.phoneHash,
+            phoneTail: ctx.phoneTail,
+            direction: 'out',
+            nodeId: current.id,
+            nodeType: current.type,
+            textExcerpt: body.slice(0, 240),
+            error: ctx.sendError,
+          });
+          return null;
+        }
         await ports.logs.appendTurn({
           at: new Date().toISOString(),
           instance: ctx.instance,
@@ -215,7 +266,22 @@ async function runFrom(
     if (current.type === 'menu') {
       const body = applyVars(current.data.text || 'Escolha uma opção:', ctx.vars);
       const buttons = current.data.buttons || [];
-      await ports.sender.sendButtons(creds ?? emptyCreds, ctx.phone, body, buttons);
+      const sent = await deliverButtons(ctx, creds, ports, ctx.phone, body, buttons);
+      if (!sent) {
+        await ports.logs.appendTurn({
+          at: new Date().toISOString(),
+          instance: ctx.instance,
+          flowId: flow.id,
+          phoneHash: ctx.phoneHash,
+          phoneTail: ctx.phoneTail,
+          direction: 'out',
+          nodeId: current.id,
+          nodeType: current.type,
+          textExcerpt: body.slice(0, 240),
+          error: ctx.sendError,
+        });
+        return null;
+      }
       await ports.logs.appendTurn({
         at: new Date().toISOString(),
         instance: ctx.instance,
@@ -255,7 +321,8 @@ async function runFrom(
     if (current.type === 'capture') {
       const promptText = current.data.text ? applyVars(current.data.text, ctx.vars) : '';
       if (promptText) {
-        await ports.sender.sendText(creds ?? emptyCreds, ctx.phone, promptText);
+        const sent = await deliverText(ctx, creds, ports, ctx.phone, promptText);
+        if (!sent) return null;
       }
       return {
         flowId: flow.id,
@@ -291,7 +358,8 @@ async function runFrom(
       if (budget > 0 && todayTokens >= budget) {
         // Budget exhausted
         const fallback = current.data.fallbackText || 'Nosso assistente de IA atingiu a cota diária. Em breve retornaremos!';
-        await ports.sender.sendText(creds ?? emptyCreds, ctx.phone, fallback);
+        const sent = await deliverText(ctx, creds, ports, ctx.phone, fallback);
+        if (!sent) return null;
         const next = outgoing(flow, nodeId, 'error') || outgoing(flow, nodeId);
         current = next ? nodeById(flow, next.target) : undefined;
         continue;
@@ -313,7 +381,8 @@ async function runFrom(
 
           // Send answer, splitting if > 1500 chars
           const text = res.text.slice(0, 1500);
-          await ports.sender.sendText(creds ?? emptyCreds, ctx.phone, text);
+          const sent = await deliverText(ctx, creds, ports, ctx.phone, text);
+          if (!sent) return null;
 
           await ports.logs.appendTurn({
             at: new Date().toISOString(),
@@ -336,7 +405,8 @@ async function runFrom(
         } catch (err: any) {
           WaFlowService.markRun(flow.id, { error: true });
           const fallback = fallbackText;
-          await ports.sender.sendText(creds ?? emptyCreds, ctx.phone, fallback);
+          const sent = await deliverText(ctx, creds, ports, ctx.phone, fallback);
+          if (!sent) return null;
           const next = outgoing(flow, nodeId, 'error');
           current = next ? nodeById(flow, next.target) : undefined;
           continue;
@@ -434,7 +504,7 @@ async function runFrom(
           current.data.notifyMessage || 'Transbordo humano solicitado por {{nome}} ({{telefone_final}})',
           ctx.vars
         );
-        await ports.sender.sendText(creds ?? emptyCreds, current.data.notifyNumber, msg);
+        await deliverText(ctx, creds, ports, current.data.notifyNumber, msg);
       }
 
       await ports.logs.appendTurn({
@@ -484,12 +554,20 @@ export class WaFlowEngine {
     customPorts?: Partial<FlowPorts>
   ): Promise<boolean> {
     const inbound = parseEvolutionUpsert(body);
-    if (!inbound) return false;
+    if (!inbound) {
+      WaInboundStore.record({ outcome: 'parse_failed' });
+      return false;
+    }
 
     const fallbackCreds = WaFlowService.evolutionCreds();
     const instance = inbound.instance || fallbackCreds?.instance || '';
     if (!instance) {
       console.warn('⚠️ Inbound do WhatsApp recebido sem identificação de instância.');
+      WaInboundStore.record({
+        outcome: 'no_instance',
+        phoneTail: phoneTail(inbound.phone),
+        textExcerpt: inbound.text,
+      });
       return false;
     }
     // Reply from the instance that received the message, not Settings' leftover name.
@@ -514,6 +592,12 @@ export class WaFlowEngine {
         phoneTail: pTail,
         direction: 'in',
         textExcerpt: `[Handoff Humano Ativo] ${inbound.text.slice(0, 200)}`,
+      });
+      WaInboundStore.record({
+        outcome: 'handoff',
+        instance,
+        phoneTail: pTail,
+        textExcerpt: inbound.text,
       });
       return true; // silently absorbed
     }
@@ -574,7 +658,16 @@ export class WaFlowEngine {
               // re-prompt menu
               await ports.sessions.write(instance, inbound.phone, { ...session, attempts });
               const bodyMsg = applyVars(waitingNode.data.text || 'Opção inválida. Escolha uma das opções:', ctx.vars);
-              await ports.sender.sendButtons(creds ?? emptyCreds, ctx.phone, bodyMsg, waitingNode.data.buttons || []);
+              await deliverButtons(ctx, creds, ports, ctx.phone, bodyMsg, waitingNode.data.buttons || []);
+              WaInboundStore.record({
+                outcome: ctx.sendError ? 'send_failed' : 'handled',
+                instance,
+                phoneTail: pTail,
+                textExcerpt: inbound.text,
+                flowId: flow.id,
+                flowName: flow.name,
+                error: ctx.sendError,
+              });
               return true;
             }
           }
@@ -593,11 +686,22 @@ export class WaFlowEngine {
               nextId = outgoing(flow, waitingNode.id, 'invalid')?.target;
             } else {
               await ports.sessions.write(instance, inbound.phone, { ...session, attempts });
-              await ports.sender.sendText(
-                creds ?? emptyCreds,
+              await deliverText(
+                ctx,
+                creds,
+                ports,
                 ctx.phone,
                 `Formato inválido para ${capType}. Por favor, envie um valor válido.`
               );
+              WaInboundStore.record({
+                outcome: ctx.sendError ? 'send_failed' : 'handled',
+                instance,
+                phoneTail: pTail,
+                textExcerpt: inbound.text,
+                flowId: flow.id,
+                flowName: flow.name,
+                error: ctx.sendError,
+              });
               return true;
             }
           }
@@ -607,12 +711,22 @@ export class WaFlowEngine {
 
         if (nextId) {
           const nextSession = await runFrom(flow, nextId, ctx, creds, ports);
-          WaFlowService.markRun(flow.id);
+          if (ctx.sendError) WaFlowService.markRun(flow.id, { error: true });
+          else WaFlowService.markRun(flow.id);
           if (nextSession) {
             await ports.sessions.write(instance, inbound.phone, nextSession, flow.sessionTtlMinutes);
           } else {
             await ports.sessions.clear(instance, inbound.phone);
           }
+          WaInboundStore.record({
+            outcome: ctx.sendError ? 'send_failed' : 'handled',
+            instance,
+            phoneTail: pTail,
+            textExcerpt: inbound.text,
+            flowId: flow.id,
+            flowName: flow.name,
+            error: ctx.sendError,
+          });
           return true;
         }
       }
@@ -632,6 +746,12 @@ export class WaFlowEngine {
 
     if (candidates.length === 0) {
       WaFlowService.recordUnmatched(instance);
+      WaInboundStore.record({
+        outcome: 'unmatched',
+        instance,
+        phoneTail: pTail,
+        textExcerpt: inbound.text,
+      });
       return false;
     }
 
@@ -664,12 +784,22 @@ export class WaFlowEngine {
     if (!trigger) return false;
 
     const nextSession = await runFrom(flow, trigger.id, ctx, creds, ports);
-    WaFlowService.markRun(flow.id);
+    if (ctx.sendError) WaFlowService.markRun(flow.id, { error: true });
+    else WaFlowService.markRun(flow.id);
     if (nextSession) {
       await ports.sessions.write(instance, inbound.phone, nextSession, flow.sessionTtlMinutes);
     } else {
       await ports.sessions.clear(instance, inbound.phone);
     }
+    WaInboundStore.record({
+      outcome: ctx.sendError ? 'send_failed' : 'handled',
+      instance,
+      phoneTail: pTail,
+      textExcerpt: inbound.text,
+      flowId: flow.id,
+      flowName: flow.name,
+      error: ctx.sendError,
+    });
     return true;
   }
 

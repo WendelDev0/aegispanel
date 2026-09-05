@@ -408,6 +408,28 @@ export interface EvolutionInstanceInfo {
   connectionStatus: 'open' | 'close' | 'connecting' | 'unknown';
   profileName?: string;
   profilePicUrl?: string;
+  number?: string;
+  competitors?: string[];
+}
+
+export type WaInboundOutcome =
+  | 'rejected_secret'
+  | 'parse_failed'
+  | 'no_instance'
+  | 'handoff'
+  | 'unmatched'
+  | 'send_failed'
+  | 'handled';
+
+export interface WaInboundEvent {
+  at: string;
+  outcome: WaInboundOutcome;
+  instance?: string;
+  phoneTail?: string;
+  textExcerpt?: string;
+  flowId?: string;
+  flowName?: string;
+  error?: string;
 }
 
 export interface WaFlowTemplate {

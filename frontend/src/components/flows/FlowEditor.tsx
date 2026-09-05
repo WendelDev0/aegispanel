@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -20,8 +20,9 @@ import {
   Copy,
   CheckCircle2,
   AlertTriangle,
-  Radio,
   SlidersHorizontal,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import { api } from '../../services/api.js';
 import type {
@@ -30,14 +31,26 @@ import type {
   WaFlowNode,
   WaFlowNodeType,
   WaFlowRecord,
+  WaInboundEvent,
 } from '../../types/index.js';
 import { FlowBlockNode, type FlowBlockData } from './FlowBlockNode.js';
 import { FlowInspector } from './FlowInspector.js';
 import { FlowPhoneSimulator } from './FlowPhoneSimulator.js';
 import { FlowValidationModal, type ValidationError } from './FlowValidationModal.js';
+import { FlowInstancesPanel } from './FlowInstancesPanel.js';
+import { FlowInboundStrip } from './FlowInboundStrip.js';
 import { BLOCK_META, PALETTE } from './flow-blocks.js';
 
 const nodeTypes = { flowBlock: FlowBlockNode };
+
+type GraphSnap = { nodes: Node[]; edges: Edge[] };
+
+function cloneGraph(nodes: Node[], edges: Edge[]): GraphSnap {
+  return {
+    nodes: nodes.map((node) => ({ ...node, position: { ...node.position }, data: { ...node.data } })),
+    edges: edges.map((edge) => ({ ...edge })),
+  };
+}
 
 function toRfNodes(nodes: WaFlowNode[]): Node[] {
   return nodes.map((node) => ({
@@ -61,7 +74,7 @@ function toRfEdges(edges: WaFlowEdge[]): Edge[] {
 function fromRf(nodes: Node[], edges: Edge[]): { nodes: WaFlowNode[]; edges: WaFlowEdge[] } {
   return {
     nodes: nodes.map((node) => {
-      const { blockType, ...data } = (node.data || {}) as any;
+      const { blockType, onDelete, onDuplicate, onInspect, ...data } = (node.data || {}) as FlowBlockData;
       return {
         id: node.id,
         type: blockType,
@@ -82,6 +95,13 @@ function newId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+
 interface FlowEditorProps {
   flowId: string;
   onBack: () => void;
@@ -96,6 +116,12 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
   const [aiBudgetTokensPerDay, setAiBudgetTokensPerDay] = useState(50_000);
 
   const [availableInstances, setAvailableInstances] = useState<EvolutionInstanceInfo[]>([]);
+  const [managerUrl, setManagerUrl] = useState<string | null>(null);
+  const [instanceError, setInstanceError] = useState('');
+  const [loadingInstances, setLoadingInstances] = useState(false);
+  const [inboundEvents, setInboundEvents] = useState<WaInboundEvent[]>([]);
+  const [publishWarnings, setPublishWarnings] = useState<string[]>([]);
+
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -105,16 +131,50 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
   const [isDirty, setIsDirty] = useState(false);
   const [error, setError] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
-
-  // Validation modal state
   const [validationModalOpen, setValidationModalOpen] = useState(false);
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
-
-  // Right sidebar tab: 'preview' | 'simulate' | 'inspector'
   const [rightTab, setRightTab] = useState<'preview' | 'simulate' | 'inspector'>('preview');
-
-  // Config popover toggle
   const [showConfigPopover, setShowConfigPopover] = useState(false);
+
+  const pastRef = useRef<GraphSnap[]>([]);
+  const futureRef = useRef<GraphSnap[]>([]);
+  const [historyTick, setHistoryTick] = useState(0);
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  nodesRef.current = nodes;
+  edgesRef.current = edges;
+
+  const takeSnapshot = useCallback(() => {
+    pastRef.current.push(cloneGraph(nodesRef.current, edgesRef.current));
+    if (pastRef.current.length > 60) pastRef.current.shift();
+    futureRef.current = [];
+    setHistoryTick((n) => n + 1);
+  }, []);
+
+  const applySnap = useCallback(
+    (snap: GraphSnap) => {
+      setNodes(snap.nodes);
+      setEdges(snap.edges);
+      setIsDirty(true);
+    },
+    [setEdges, setNodes]
+  );
+
+  const undo = useCallback(() => {
+    const prev = pastRef.current.pop();
+    if (!prev) return;
+    futureRef.current.push(cloneGraph(nodesRef.current, edgesRef.current));
+    applySnap(prev);
+    setHistoryTick((n) => n + 1);
+  }, [applySnap]);
+
+  const redo = useCallback(() => {
+    const next = futureRef.current.pop();
+    if (!next) return;
+    pastRef.current.push(cloneGraph(nodesRef.current, edgesRef.current));
+    applySnap(next);
+    setHistoryTick((n) => n + 1);
+  }, [applySnap]);
 
   const load = useCallback(async () => {
     try {
@@ -129,28 +189,47 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
       setNodes(toRfNodes(next.nodes));
       setEdges(toRfEdges(next.edges));
       setIsDirty(false);
+      pastRef.current = [];
+      futureRef.current = [];
     } catch (err: any) {
       setError(err.response?.data?.error || err.message);
     }
   }, [flowId, setEdges, setNodes]);
 
   const loadInstances = useCallback(async () => {
+    setLoadingInstances(true);
     try {
-      const res = await api.get('/system/evolution/instances');
-      if (res.data?.ok && Array.isArray(res.data.instances)) {
-        setAvailableInstances(res.data.instances);
-      }
+      const res = await api.get('/wa-flows/instances');
+      setAvailableInstances(Array.isArray(res.data?.instances) ? res.data.instances : []);
+      setManagerUrl(res.data?.managerUrl || null);
+      setInstanceError(res.data?.ok ? '' : res.data?.error || '');
+    } catch (err: any) {
+      setInstanceError(err.response?.data?.error || 'Não foi possível listar as instâncias.');
+    } finally {
+      setLoadingInstances(false);
+    }
+  }, []);
+
+  const loadInbound = useCallback(async () => {
+    try {
+      const res = await api.get('/wa-flows/inbound', { params: { limit: 8 } });
+      setInboundEvents(Array.isArray(res.data?.events) ? res.data.events : []);
     } catch {
-      // best effort: instances can be typed or configured later
+      /* strip is best-effort */
     }
   }, []);
 
   useEffect(() => {
     void load();
     void loadInstances();
-  }, [load, loadInstances]);
+    void loadInbound();
+  }, [load, loadInstances, loadInbound]);
 
-  // Unsaved changes warning
+  useEffect(() => {
+    const timer = window.setInterval(() => void loadInbound(), 4000);
+    return () => window.clearInterval(timer);
+  }, [loadInbound]);
+
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (isDirty) {
@@ -162,17 +241,111 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
 
-  // Ctrl+S / Cmd+S save keyboard shortcut
+  const persist = async (): Promise<WaFlowRecord | null> => {
+    setSaving(true);
+    setError('');
+    setSaveSuccess(false);
+    try {
+      const graph = fromRf(nodes, edges);
+      const res = await api.put(`/wa-flows/${flowId}`, {
+        name,
+        instanceNames,
+        priority,
+        sessionTtlMinutes,
+        aiBudgetTokensPerDay,
+        ...graph,
+      });
+      setFlow(res.data);
+      setIsDirty(false);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2000);
+      return res.data;
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message);
+      return null;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteNode = useCallback(
+    (id: string) => {
+      takeSnapshot();
+      setNodes((current) => current.filter((n) => n.id !== id));
+      setEdges((current) => current.filter((e) => e.source !== id && e.target !== id));
+      setSelectedId((current) => (current === id ? null : current));
+      setIsDirty(true);
+    },
+    [setEdges, setNodes, takeSnapshot]
+  );
+
+  const inspectNode = useCallback((id: string) => {
+    setSelectedId(id);
+    setRightTab('inspector');
+  }, []);
+
+  const duplicateNode = useCallback(
+    (id: string) => {
+      const current = nodesRef.current.find((n) => n.id === id);
+      if (!current) return;
+      takeSnapshot();
+      const copyId = newId(String((current.data as FlowBlockData).blockType || 'block'));
+      const copy: Node = {
+        ...current,
+        id: copyId,
+        position: { x: current.position.x + 40, y: current.position.y + 40 },
+        selected: true,
+        data: { ...current.data },
+      };
+      setNodes((els) => [...els.map((n) => ({ ...n, selected: false })), copy]);
+      setSelectedId(copyId);
+      setIsDirty(true);
+    },
+    [setNodes, takeSnapshot]
+  );
+
+  const nodesWithActions = useMemo(
+    () =>
+      nodes.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          onDelete: deleteNode,
+          onDuplicate: duplicateNode,
+          onInspect: inspectNode,
+        },
+      })),
+    [deleteNode, duplicateNode, inspectNode, nodes]
+  );
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         void persist();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        if (isTypingTarget(e.target)) return;
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        if (isTypingTarget(e.target)) return;
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId && !isTypingTarget(e.target)) {
+        e.preventDefault();
+        deleteNode(selectedId);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [name, nodes, edges, instanceNames, priority, sessionTtlMinutes, aiBudgetTokensPerDay]);
+  });
 
   const selectedNode = useMemo(() => {
     if (!selectedId) return null;
@@ -181,13 +354,15 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
 
   const onConnect = useCallback(
     (connection: Connection) => {
+      takeSnapshot();
       setEdges((els) => addEdge({ ...connection, id: newId('e'), style: { stroke: '#424754', strokeWidth: 2 } }, els));
       setIsDirty(true);
     },
-    [setEdges]
+    [setEdges, takeSnapshot]
   );
 
   const addBlock = (type: WaFlowNodeType) => {
+    takeSnapshot();
     const id = newId(type);
     const buttons =
       type === 'menu'
@@ -223,46 +398,13 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
   };
 
   const updateSelected = (next: WaFlowNode) => {
+    takeSnapshot();
     setNodes((current) =>
       current.map((node) =>
         node.id === next.id ? { ...node, data: { blockType: next.type, ...next.data } } : node
       )
     );
     setIsDirty(true);
-  };
-
-  const deleteNode = (id: string) => {
-    setNodes((current) => current.filter((n) => n.id !== id));
-    setEdges((current) => current.filter((e) => e.source !== id && e.target !== id));
-    setSelectedId(null);
-    setIsDirty(true);
-  };
-
-  const persist = async (): Promise<WaFlowRecord | null> => {
-    setSaving(true);
-    setError('');
-    setSaveSuccess(false);
-    try {
-      const graph = fromRf(nodes, edges);
-      const res = await api.put(`/wa-flows/${flowId}`, {
-        name,
-        instanceNames,
-        priority,
-        sessionTtlMinutes,
-        aiBudgetTokensPerDay,
-        ...graph,
-      });
-      setFlow(res.data);
-      setIsDirty(false);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 2000);
-      return res.data;
-    } catch (err: any) {
-      setError(err.response?.data?.error || err.message);
-      return null;
-    } finally {
-      setSaving(false);
-    }
   };
 
   const handleClone = async () => {
@@ -288,7 +430,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
         setValidationErrors(res.data.errors || []);
         setValidationModalOpen(true);
       } else {
-        alert('Grafo validado com sucesso! Nenum erro encontrado.');
+        alert('Grafo validado com sucesso! Nenhum erro encontrado.');
       }
     } catch (err: any) {
       setError(err.response?.data?.error || err.message);
@@ -299,27 +441,28 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
     if (!flow) return;
     setSaving(true);
     setError('');
+    setPublishWarnings([]);
     try {
       const saved = await persist();
       if (!saved) return;
 
       if (!flow.published) {
-        // Run validation check before publish
-        const valRes = await api.post(`/wa-flows/${flowId}/validate`, {});
-        if (!valRes.data.valid) {
-          setValidationErrors(valRes.data.errors || []);
+        const ready = await api.get(`/wa-flows/${flowId}/readiness`);
+        if (!ready.data?.validation?.valid) {
+          setValidationErrors(ready.data.validation.errors || []);
           setValidationModalOpen(true);
           return;
         }
-
-        if (instanceNames.length === 0) {
-          setError('Vincule pelo menos uma instância da Evolution ao fluxo antes de publicar.');
+        if (!ready.data?.publish?.ok) {
+          setError(ready.data?.publish?.error || 'Não é possível publicar ainda.');
           return;
         }
+        setPublishWarnings(ready.data?.publish?.warnings || []);
       }
 
       const res = await api.post(`/wa-flows/${flowId}/publish`, { published: !flow.published });
       setFlow(res.data);
+      void loadInbound();
     } catch (err: any) {
       setError(err.response?.data?.error || err.message);
     } finally {
@@ -329,16 +472,16 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
 
   const toggleInstance = (inst: string) => {
     setInstanceNames((prev) =>
-      prev.includes(inst) ? prev.filter((i) => i !== inst) : [...prev, inst]
+      prev.some((name) => name.toLowerCase() === inst.toLowerCase())
+        ? prev.filter((i) => i.toLowerCase() !== inst.toLowerCase())
+        : [...prev, inst]
     );
     setIsDirty(true);
   };
 
   return (
     <div className="h-[calc(100vh-7.5rem)] flex flex-col gap-2 min-h-[560px]">
-      {/* Top Action Bar */}
-      <div className="flex items-center justify-between gap-3 bg-surface-container border border-outline-variant rounded-xl px-4 py-2.5 shadow-sm">
-        {/* Left: Back & Name */}
+      <div className="flex items-center justify-between gap-3 bg-surface-container border border-outline-variant rounded-xl px-4 py-2.5">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <button
             type="button"
@@ -369,58 +512,37 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
           </div>
         </div>
 
-        {/* Center: Instances Binding Pills */}
-        <div className="flex flex-wrap items-center gap-1.5 px-3 py-1 bg-surface-container-low rounded-lg border border-outline-variant/60">
-          <Radio className="w-3.5 h-3.5 text-primary" />
-          <span className="text-[11px] font-semibold text-on-surface-variant mr-1">Linhas:</span>
-          {availableInstances.length === 0 ? (
-            <input
-              type="text"
-              placeholder="Nome da instância"
-              value={instanceNames.join(', ')}
-              onChange={(e) => {
-                setInstanceNames(e.target.value.split(',').map((s) => s.trim()).filter(Boolean));
-                setIsDirty(true);
-              }}
-              className="bg-transparent text-xs text-white font-mono focus:outline-none w-32"
-            />
-          ) : (
-            <div className="flex items-center gap-1">
-              {availableInstances.map((inst) => {
-                const active = instanceNames.includes(inst.name);
-                return (
-                  <button
-                    key={inst.name}
-                    type="button"
-                    onClick={() => toggleInstance(inst.name)}
-                    className={`text-[10px] font-mono px-2 py-0.5 rounded-full border transition-all ${
-                      active
-                        ? 'bg-primary/20 text-primary border-primary/40 font-semibold'
-                        : 'bg-surface-container-high text-on-surface-variant border-outline-variant hover:text-white'
-                    }`}
-                  >
-                    {inst.name}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Right: Actions */}
         <div className="flex items-center gap-2">
-          {/* Config Popover Toggle */}
+          <button
+            type="button"
+            onClick={undo}
+            disabled={historyTick < 0 || pastRef.current.length === 0}
+            className="p-2 rounded-lg bg-surface-container-high text-on-surface-variant hover:text-white disabled:opacity-30"
+            title="Desfazer (Ctrl+Z)"
+          >
+            <Undo2 className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={redo}
+            disabled={historyTick < 0 || futureRef.current.length === 0}
+            className="p-2 rounded-lg bg-surface-container-high text-on-surface-variant hover:text-white disabled:opacity-30"
+            title="Refazer (Ctrl+Shift+Z)"
+          >
+            <Redo2 className="w-4 h-4" />
+          </button>
+
           <div className="relative">
             <button
               type="button"
               onClick={() => setShowConfigPopover(!showConfigPopover)}
               className="p-2 rounded-lg bg-surface-container-high text-on-surface-variant hover:text-white transition-colors"
-              title="Configurações de TTL, Prioridade e Orçamento"
+              title="TTL, prioridade e orçamento"
             >
               <SlidersHorizontal className="w-4 h-4" />
             </button>
             {showConfigPopover && (
-              <div className="absolute right-0 mt-2 w-64 bg-surface-container border border-outline-variant rounded-xl p-3.5 shadow-2xl z-50 space-y-3">
+              <div className="absolute right-0 mt-2 w-64 bg-surface-container border border-outline-variant rounded-xl p-3.5 z-50 space-y-3">
                 <p className="text-xs font-bold text-white border-b border-outline-variant pb-1.5">
                   Parâmetros de Execução
                 </p>
@@ -522,26 +644,43 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
         </div>
       </div>
 
+      <FlowInstancesPanel
+        instances={availableInstances}
+        bound={instanceNames}
+        managerUrl={managerUrl}
+        loading={loadingInstances}
+        error={instanceError}
+        onToggle={toggleInstance}
+        onRefresh={() => void loadInstances()}
+      />
+
+      <FlowInboundStrip events={inboundEvents} />
+
       {error && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-crit/15 border border-crit/30 text-crit text-xs animate-in fade-in">
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-crit/15 border border-crit/30 text-crit text-xs">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
+      {publishWarnings.map((warning) => (
+        <div key={warning} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-warn/10 border border-warn/30 text-warn text-xs">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>{warning}</span>
+        </div>
+      ))}
+
       {flow && !flow.published && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-warn/10 border border-warn/30 text-warn text-xs">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span>
-            Rascunho: vincule a linha Evolution e clique em Publicar. Sem isso o WhatsApp não dispara o fluxo.
+            Rascunho: vincule uma linha conectada e clique em Publicar. Sem isso o WhatsApp não dispara o fluxo.
           </span>
         </div>
       )}
 
-      {/* 3-Column Editor Layout */}
       <div className="flex-1 grid grid-cols-[220px_1fr_340px] gap-2.5 min-h-0">
-        {/* Column 1: Palette */}
-        <aside className="bg-surface-container border border-outline-variant rounded-xl p-2.5 space-y-1.5 overflow-y-auto shadow-sm">
+        <aside className="bg-surface-container border border-outline-variant rounded-xl p-2.5 space-y-1.5 overflow-y-auto">
           <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant px-2 py-1">
             Blocos
           </p>
@@ -555,15 +694,13 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
                   onClick={() => addBlock(type)}
                   className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-surface-container-high transition-all group border border-transparent hover:border-outline-variant/60"
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${meta.bar}`} />
                     <span className="text-xs font-semibold text-white group-hover:text-primary transition-colors">
                       {meta.verb}
                     </span>
-                    <span className="text-[10px] text-on-surface-variant/70 font-mono">
-                      {meta.label}
-                    </span>
                   </div>
-                  <span className="block text-[10px] text-on-surface-variant line-clamp-1 mt-0.5">
+                  <span className="block text-[10px] text-on-surface-variant line-clamp-1 mt-0.5 pl-4">
                     {meta.hint}
                   </span>
                 </button>
@@ -572,25 +709,30 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
           </div>
         </aside>
 
-        {/* Column 2: Canvas */}
-        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden shadow-inner relative">
+        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden relative">
           <ReactFlow
-            nodes={nodes}
+            nodes={nodesWithActions}
             edges={edges}
             onNodesChange={(changes) => {
+              const structural = changes.some((change) => change.type === 'remove' || change.type === 'add');
+              if (structural) takeSnapshot();
               onNodesChange(changes);
               setIsDirty(true);
             }}
             onEdgesChange={(changes) => {
+              const structural = changes.some((change) => change.type === 'remove' || change.type === 'add');
+              if (structural) takeSnapshot();
               onEdgesChange(changes);
               setIsDirty(true);
             }}
             onConnect={onConnect}
             nodeTypes={nodeTypes}
+            deleteKeyCode={null}
+            onNodeDoubleClick={(_e, node) => inspectNode(node.id)}
+            onNodeDragStart={() => takeSnapshot()}
             onSelectionChange={({ nodes: selected }) => {
               if (selected[0]?.id) {
                 setSelectedId(selected[0].id);
-                setRightTab('preview');
               }
             }}
             fitView
@@ -603,16 +745,15 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
               pannable
               zoomable
               maskColor="rgba(8,14,27,0.75)"
-              nodeColor="#242a38"
+              nodeColor={(node) => BLOCK_META[(node.data as FlowBlockData).blockType]?.minimap || '#242a38'}
               className="!bg-surface-container !border !border-outline-variant !rounded-lg"
             />
           </ReactFlow>
         </div>
 
-        {/* Column 3: Phone Simulator & Inspector */}
         <aside className="h-full min-h-0">
           {rightTab === 'inspector' ? (
-            <div className="h-full bg-surface-container border border-outline-variant rounded-xl overflow-hidden flex flex-col shadow-sm">
+            <div className="h-full bg-surface-container border border-outline-variant rounded-xl overflow-hidden flex flex-col">
               <div className="flex items-center justify-between border-b border-outline-variant bg-surface-container-high px-3 py-2">
                 <span className="text-xs font-bold text-white">Configurar Bloco</span>
                 <button
@@ -644,7 +785,6 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
         </aside>
       </div>
 
-      {/* Validation Modal */}
       <FlowValidationModal
         isOpen={validationModalOpen}
         errors={validationErrors}

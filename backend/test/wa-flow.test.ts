@@ -11,6 +11,9 @@ import { waFlowRouter } from '../src/routes/wa-flow.routes.js';
 import { phoneHash } from '../src/utils/phone.js';
 import { WA_FLOW_TEMPLATES } from '../src/services/wa-flow-templates.js';
 import { providedWaWebhookSecret } from '../src/utils/wa-webhook-auth.js';
+import { assessBoundInstances } from '../src/utils/wa-publish-ready.js';
+import { evolutionSendFailed, evolutionManagerUrl } from '../src/utils/evolution.client.js';
+import { WaInboundStore } from '../src/utils/wa-inbound.store.js';
 
 function upsert(text: string, phone = '5511999999999', instance = 'clinic') {
   return {
@@ -82,6 +85,34 @@ test('parseEvolutionUpsert reads ephemeral, array and LID payloads', () => {
     },
   });
   assert.equal(lid?.phone, '5511777777777');
+});
+
+test('publish readiness refuses a disconnected instance', () => {
+  const closed = assessBoundInstances(
+    ['loja'],
+    [{ name: 'loja', connectionStatus: 'close', number: '5511999990000' }]
+  );
+  assert.equal(closed.ok, false);
+  assert.match(closed.error || '', /desconectada/i);
+
+  const missing = assessBoundInstances(['clinica'], [{ name: 'loja', connectionStatus: 'open' }]);
+  assert.equal(missing.ok, false);
+  assert.match(missing.error || '', /não existe/i);
+
+  const rival = assessBoundInstances(
+    ['loja'],
+    [{ name: 'loja', connectionStatus: 'open', competitors: ['Typebot'] }]
+  );
+  assert.equal(rival.ok, true);
+  assert.match(rival.warnings.join(' '), /Typebot/);
+});
+
+test('evolutionSendFailed ignores mocks and LOCAL_MODE skips', () => {
+  assert.equal(evolutionSendFailed(undefined), null);
+  assert.equal(evolutionSendFailed({ ok: true }), null);
+  assert.equal(evolutionSendFailed({ ok: false, skipped: 'local_mode' }), null);
+  assert.match(evolutionSendFailed({ ok: false, error: 'HTTP 400' }) || '', /HTTP 400/);
+  assert.match(evolutionManagerUrl('https://evo.selvamarketing.com'), /\/manager$/);
 });
 
 test('webhook secret ignores Evolution apikey and prefers the Aegis header', () => {
@@ -352,6 +383,35 @@ test('webhook refuses a missing secret', async () => {
 
   assert.equal(res.status, 401);
   assert.match(res.body.error, /segredo/i);
+});
+
+test('failed Evolution send is recorded and does not look like a handled reply', async () => {
+  dbStorage.saveWaFlow({
+    id: 'waflow-send-fail',
+    name: 'Falha de envio',
+    published: true,
+    instanceNames: ['clinic'],
+    priority: 0,
+    sessionTtlMinutes: 30,
+    aiBudgetTokensPerDay: 50_000,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    nodes: [
+      { id: 't1', type: 'trigger_message', position: { x: 0, y: 0 }, data: { match: 'contains', keyword: 'ajuda' } },
+      { id: 's1', type: 'send_text', position: { x: 0, y: 1 }, data: { text: 'menu real' } },
+    ],
+    edges: [{ id: 'e1', source: 't1', target: 's1' }],
+  });
+
+  const handled = await WaFlowEngine.handleInbound(upsert('Ajuda', '5511555555555', 'clinic'), {
+    sendText: async () => ({ ok: false, error: 'HTTP 400 botões recusados' }),
+    sendButtons: async () => ({ ok: false, error: 'HTTP 400 botões recusados' }),
+  });
+  assert.equal(handled, true);
+  const last = WaInboundStore.list(5).find((e) => e.phoneTail === '5555' || e.textExcerpt === 'Ajuda');
+  assert.ok(last);
+  assert.equal(last?.outcome, 'send_failed');
+  assert.match(last?.error || '', /400/);
 });
 
 test('suporte-handoff template fires on Ajuda and sends the menu', async () => {

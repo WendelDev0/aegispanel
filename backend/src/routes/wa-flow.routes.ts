@@ -14,6 +14,8 @@ import { HandoffManager, WaFlowEngine } from '../services/wa-flow-engine.js';
 import { WaLogStore } from '../utils/wa-log.store.js';
 import { WA_FLOW_TEMPLATES } from '../services/wa-flow-templates.js';
 import { providedWaWebhookSecret } from '../utils/wa-webhook-auth.js';
+import { WaInboundStore } from '../utils/wa-inbound.store.js';
+import { parseEvolutionUpsert } from '../utils/evolution.client.js';
 
 export const waFlowRouter = Router();
 
@@ -35,6 +37,14 @@ waFlowRouter.post('/webhook', async (req: Request, res: Response): Promise<void>
     const expected = WaFlowService.webhookSecret();
     const provided = webhookToken(req);
     if (!provided || !safeEqual(provided, expected)) {
+      const inbound = parseEvolutionUpsert(req.body);
+      WaInboundStore.record({
+        outcome: 'rejected_secret',
+        instance: inbound?.instance,
+        phoneTail: inbound?.phone ? inbound.phone.slice(-4) : undefined,
+        textExcerpt: inbound?.text,
+        error: 'Segredo do webhook recusado. Publique o fluxo de novo para gravar a URL certa.',
+      });
       res.status(401).json({ error: 'Webhook recusado: segredo inválido.' });
       return;
     }
@@ -57,6 +67,19 @@ waFlowRouter.get('/stats', (_req: Request, res: Response) => {
 
 waFlowRouter.get('/templates', (_req: Request, res: Response) => {
   res.json(WA_FLOW_TEMPLATES);
+});
+
+waFlowRouter.get('/inbound', (req: Request, res: Response) => {
+  const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 20;
+  res.json({ events: WaInboundStore.list(limit) });
+});
+
+waFlowRouter.get('/instances', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    res.json(await WaFlowService.listLiveInstances());
+  } catch (err: any) {
+    res.status(500).json({ ok: false, instances: [], managerUrl: null, error: err.message });
+  }
 });
 
 waFlowRouter.get('/:id', (req: Request, res: Response): void => {
@@ -99,6 +122,19 @@ waFlowRouter.delete('/:id', requireWrite, validateBody(emptyBodySchema), (req: R
     res.json({ ok: true });
   } catch (err: any) {
     res.status(err.message === 'Fluxo não encontrado' ? 404 : 400).json({ error: err.message });
+  }
+});
+
+waFlowRouter.get('/:id/readiness', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const flow = WaFlowService.get(req.params.id);
+    const validation = WaFlowService.validate(req.params.id);
+    const instances = await WaFlowService.listLiveInstances();
+    const publish = await WaFlowService.assessPublish(flow.instanceNames);
+    res.json({ validation, publish, instances });
+  } catch (err: any) {
+    const status = err.message === 'Fluxo não encontrado' ? 404 : 400;
+    res.status(status).json({ error: err.message });
   }
 });
 

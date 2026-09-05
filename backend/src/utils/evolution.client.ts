@@ -15,6 +15,25 @@ export interface EvolutionSendResult {
   error?: string;
 }
 
+/** Mocks and LOCAL_MODE skips are not failures. A real `{ ok: false }` is. */
+export function evolutionSendFailed(result: unknown): string | null {
+  if (!result || typeof result !== 'object') return null;
+  const parsed = result as EvolutionSendResult;
+  if (parsed.ok !== false) return null;
+  if (parsed.skipped === 'local_mode') return null;
+  if (parsed.skipped === 'missing') return 'Envio sem URL, chave, instância ou número.';
+  return parsed.error || 'Falha ao enviar no WhatsApp.';
+}
+
+export function evolutionManagerUrl(apiUrl: string): string {
+  try {
+    const url = new URL(apiUrl);
+    return `${url.origin}/manager`;
+  } catch {
+    return apiUrl.replace(/\/+$/, '') + '/manager';
+  }
+}
+
 /**
  * Blocks a laptop copy restored from production from paging real numbers.
  */
@@ -301,6 +320,68 @@ export interface EvolutionInstanceInfo {
   connectionStatus: 'open' | 'close' | 'connecting' | 'unknown';
   profileName?: string;
   profilePicUrl?: string;
+  number?: string;
+  competitors?: string[];
+}
+
+function ownerNumberFromInstance(item: Record<string, any>): string | undefined {
+  const raw =
+    item.ownerJid ||
+    item.owner ||
+    item.wuid ||
+    item.number ||
+    item.instance?.ownerJid ||
+    item.instance?.owner ||
+    item.instance?.wuid ||
+    item.instance?.number;
+  if (!raw) return undefined;
+  const digits = String(raw).replace(/@.*$/, '').replace(/\D/g, '');
+  return digits || undefined;
+}
+
+function integrationEnabled(text: string): boolean {
+  try {
+    const parsed = JSON.parse(text);
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    return rows.some((row) => row && (row.enabled === true || row.enable === true || row.status === 'enabled'));
+  } catch {
+    return false;
+  }
+}
+
+const COMPETITOR_PATHS: Array<{ path: string; label: string }> = [
+  { path: 'typebot/find', label: 'Typebot' },
+  { path: 'openai/find', label: 'OpenAI' },
+  { path: 'evolutionBot/find', label: 'Evolution Bot' },
+  { path: 'dify/find', label: 'Dify' },
+  { path: 'n8n/find', label: 'n8n' },
+];
+
+export async function evolutionInspectCompetitors(
+  creds: EvolutionCredentials
+): Promise<string[]> {
+  if (evolutionOutboundBlocked()) return [];
+  const apiKey = revealEvolutionKey(creds.apiKey);
+  const instance = creds.instance?.trim();
+  if (!creds.apiUrl || !apiKey || !instance) return [];
+
+  const found: string[] = [];
+  for (const item of COMPETITOR_PATHS) {
+    try {
+      const res = await requestJson(
+        creds.apiUrl,
+        apiKey,
+        'GET',
+        `/${item.path}/${encodeURIComponent(instance)}`
+      );
+      if (res.status >= 200 && res.status < 300 && integrationEnabled(res.text)) {
+        found.push(item.label);
+      }
+    } catch {
+      /* Evolution versions omit these routes; a 404 is not a competitor. */
+    }
+  }
+  return found;
 }
 
 export async function evolutionFetchInstances(creds: {
@@ -344,6 +425,7 @@ export async function evolutionFetchInstances(creds: {
           connectionStatus,
           profileName: item.profileName || item.instance?.profileName,
           profilePicUrl: item.profilePicUrl || item.instance?.profilePicUrl,
+          number: ownerNumberFromInstance(item),
         };
       })
       .filter((i) => Boolean(i.name));

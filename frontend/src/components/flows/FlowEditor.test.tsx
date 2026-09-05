@@ -20,16 +20,30 @@ import { api } from '../../services/api.js';
 
 describe('FlowEditor', () => {
   beforeEach(() => {
-    vi.mocked(api.get).mockResolvedValue({
-      data: {
-        id: 'waflow-1',
-        name: 'Boas-vindas',
-        published: false,
-        nodes: [],
-        edges: [],
-        createdAt: '2026-09-05T00:00:00.000Z',
-        updatedAt: '2026-09-05T00:00:00.000Z',
-      },
+    vi.mocked(api.get).mockImplementation(async (url: string) => {
+      if (String(url).includes('/inbound')) return { data: { events: [] } };
+      if (String(url).includes('/instances')) {
+        return {
+          data: {
+            ok: true,
+            managerUrl: 'https://evo.example.com/manager',
+            instances: [
+              { name: 'clinica', connectionStatus: 'open', number: '5511999990000', profileName: 'Clínica' },
+            ],
+          },
+        };
+      }
+      return {
+        data: {
+          id: 'waflow-1',
+          name: 'Boas-vindas',
+          published: false,
+          nodes: [],
+          edges: [],
+          createdAt: '2026-09-05T00:00:00.000Z',
+          updatedAt: '2026-09-05T00:00:00.000Z',
+        },
+      };
     });
   });
 
@@ -43,6 +57,9 @@ describe('FlowEditor', () => {
     expect(screen.getByText('Agente IA')).toBeTruthy();
     expect(screen.getByText('Transbordo humano')).toBeTruthy();
     expect(screen.getByText('Finalizar fluxo')).toBeTruthy();
-    expect(screen.getByText(/Rascunho: vincule a linha Evolution/)).toBeTruthy();
+    expect(screen.getByText(/Rascunho: vincule uma linha conectada/)).toBeTruthy();
+    expect(await screen.findByText('Linhas WhatsApp')).toBeTruthy();
+    expect(screen.getByText('Nova instância')).toBeTruthy();
+    expect(screen.getByText('clinica')).toBeTruthy();
   });
 });

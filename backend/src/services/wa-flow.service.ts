@@ -4,9 +4,16 @@ import { EncryptionService } from '../utils/crypto.js';
 import { getPublicBaseUrl } from '../utils/public-url.js';
 import {
   evolutionClearWebhook,
+  evolutionFetchInstances,
+  evolutionInspectCompetitors,
+  evolutionManagerUrl,
+  evolutionOutboundBlocked,
   evolutionSetWebhook,
   type EvolutionCredentials,
+  type EvolutionInstanceInfo,
 } from '../utils/evolution.client.js';
+import { assessBoundInstances } from '../utils/wa-publish-ready.js';
+import { CONFIG } from '../config.js';
 import { WaSessionStore } from '../utils/wa-session.store.js';
 import { validateFlowGraph, type ValidationResult } from './wa-flow-validator.js';
 import { WA_FLOW_TEMPLATES } from './wa-flow-templates.js';
@@ -232,6 +239,11 @@ export class WaFlowService {
         throw new Error('Vincule pelo menos uma instância ao fluxo antes de publicar.');
       }
 
+      const readiness = await this.assessPublish(flow.instanceNames);
+      if (!readiness.ok) {
+        throw new Error(readiness.error);
+      }
+
       // 1. Pure graph validation
       const validation = validateFlowGraph(flow.nodes, flow.edges);
       if (!validation.valid) {
@@ -268,6 +280,40 @@ export class WaFlowService {
       updatedAt: new Date().toISOString(),
     };
     return dbStorage.saveWaFlow(updated);
+  }
+
+  static async listLiveInstances(): Promise<{
+    ok: boolean;
+    instances: EvolutionInstanceInfo[];
+    managerUrl: string | null;
+    error?: string;
+  }> {
+    const creds = this.evolutionCreds();
+    const managerUrl = creds?.apiUrl ? evolutionManagerUrl(creds.apiUrl) : null;
+    if (!creds || !creds.apiUrl) {
+      return { ok: false, instances: [], managerUrl, error: 'Evolution API não configurada em Configurações.' };
+    }
+    const result = await evolutionFetchInstances(creds);
+    if (!result.ok) {
+      return { ok: false, instances: [], managerUrl, error: result.error };
+    }
+
+    const instances: EvolutionInstanceInfo[] = [];
+    for (const inst of result.instances) {
+      const competitors = await evolutionInspectCompetitors({ ...creds, instance: inst.name });
+      instances.push({ ...inst, competitors });
+    }
+    return { ok: true, instances, managerUrl };
+  }
+
+  static async assessPublish(instanceNames: string[]): Promise<{ ok: boolean; error?: string; warnings: string[] }> {
+    const skipLiveCheck = evolutionOutboundBlocked() || CONFIG.LOCAL_MODE;
+    let live: EvolutionInstanceInfo[] = [];
+    if (!skipLiveCheck) {
+      const listed = await this.listLiveInstances();
+      live = listed.instances;
+    }
+    return assessBoundInstances(instanceNames, live, { skipLiveCheck });
   }
 
   static markRun(id: string, details?: { aiTokens?: number; error?: boolean }): void {
