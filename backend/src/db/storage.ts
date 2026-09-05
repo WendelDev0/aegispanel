@@ -12,6 +12,14 @@ import {
   type ResourceLimits,
 } from '../utils/resource-limits.js';
 import type { AppHealth, HealthcheckConfig } from '../utils/health-probe.js';
+import type {
+  AppBuildConfig,
+  AppDeployConfig,
+  AppDeployKey,
+  AppPreviewRecord,
+  AppProcess,
+  GitProvider,
+} from '../utils/app-build.js';
 import {
   StateHistory,
   collectionDelta,
@@ -84,12 +92,34 @@ export interface DeploymentRecord {
   triggeredBy: 'webhook' | 'manual' | 'github_action';
   createdAt: string;
   finishedAt?: string;
+  slot?: 'blue' | 'green';
+  processes?: Array<{ name: string; containerId?: string }>;
+  previewOf?: number;
+  tag?: string;
+  recipeHash?: string;
+  cacheHit?: boolean;
+  downtimeMs?: number;
 }
 
 export interface AppRecord {
   id: string;
   name: string;
-  sourceType: 'git' | 'dockerfile' | 'image';
+  sourceType: 'git' | 'dockerfile' | 'image' | 'compose';
+  composeYaml?: string;
+  buildConfig?: AppBuildConfig;
+  processes?: AppProcess[];
+  deploy?: AppDeployConfig;
+  gitProvider?: GitProvider;
+  deployKey?: AppDeployKey;
+  /** Caddy upstream after a blue/green swap. Absent = canonical name. */
+  activeContainerName?: string;
+  lastInspection?: {
+    type: string;
+    frameworkName: string;
+    packageManager?: string;
+    outputDir?: string;
+    hasDockerfile?: boolean;
+  };
   gitUrl?: string;
   branch?: string;
   imageName?: string;
@@ -445,6 +475,8 @@ export interface PanelSettings {
     redisUrl?: string;
     postgresUrl?: string;
   };
+  /** Base host for PR preview domains (`pr-12.{base}`). */
+  previewBaseDomain?: string;
 }
 
 export interface DatabaseSchema {
@@ -461,6 +493,7 @@ export interface DatabaseSchema {
   alertHistory: AlertHistoryRecord[];
   sessions: SessionRecord[];
   waFlows: WaFlowRecord[];
+  appPreviews: AppPreviewRecord[];
   settings: PanelSettings;
 }
 
@@ -473,6 +506,7 @@ const DEFAULT_DATA: DatabaseSchema = {
   alertHistory: [],
   sessions: [],
   waFlows: [],
+  appPreviews: [],
   cronJobs: [
     {
       id: 'cron-daily-backup',
@@ -1097,6 +1131,7 @@ export class JsonStorage {
       DeployLogStore.removeApp(id);
       AppLogStore.removeApp(id);
       this.data.alertHistory = (this.data.alertHistory || []).filter((a) => a.appId !== id);
+      this.data.appPreviews = (this.data.appPreviews || []).filter((p) => p.appId !== id);
       this.save();
       return true;
     }
@@ -1156,6 +1191,38 @@ export class JsonStorage {
     }
     this.save();
     return { ...stored, buildLogs: dep.buildLogs };
+  }
+
+  getAppPreviews(appId?: string): AppPreviewRecord[] {
+    if (!this.data.appPreviews) this.data.appPreviews = [];
+    return appId ? this.data.appPreviews.filter((p) => p.appId === appId) : this.data.appPreviews;
+  }
+
+  getAppPreview(appId: string, prNumber: number): AppPreviewRecord | undefined {
+    if (!this.data.appPreviews) this.data.appPreviews = [];
+    return this.data.appPreviews.find((p) => p.appId === appId && p.prNumber === prNumber);
+  }
+
+  saveAppPreview(preview: AppPreviewRecord): AppPreviewRecord {
+    if (!this.data.appPreviews) this.data.appPreviews = [];
+    const idx = this.data.appPreviews.findIndex(
+      (p) => p.appId === preview.appId && p.prNumber === preview.prNumber
+    );
+    if (idx >= 0) this.data.appPreviews[idx] = preview;
+    else this.data.appPreviews.push(preview);
+    this.save();
+    return preview;
+  }
+
+  removeAppPreview(appId: string, prNumber: number): boolean {
+    if (!this.data.appPreviews) this.data.appPreviews = [];
+    const before = this.data.appPreviews.length;
+    this.data.appPreviews = this.data.appPreviews.filter(
+      (p) => !(p.appId === appId && p.prNumber === prNumber)
+    );
+    if (this.data.appPreviews.length === before) return false;
+    this.save();
+    return true;
   }
 
   // Cron Jobs

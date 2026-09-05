@@ -8,6 +8,18 @@ import { PortService } from './port.service.js';
 import { NodeService, LOCAL_NODE_ID } from './node.service.js';
 import { isRemoteTarget } from '../utils/app-upstream.js';
 import { containerNameForApp, normalizeDomain } from '../utils/naming.js';
+import {
+  assertRuntimeVersion,
+  defaultDeployConfig,
+  normalizeProcess,
+  type AppBuildConfig,
+  type AppDeployConfig,
+  type AppProcess,
+  type GitProvider,
+} from '../utils/app-build.js';
+import { generateDeployKey } from '../utils/app-deploy-key.js';
+import { validateCompose } from '../utils/app-compose.js';
+import path from 'path';
 import { CONFIG } from '../config.js';
 import { AppLogStore } from '../utils/app-log.store.js';
 import { normalizeHealthcheck, type HealthcheckConfig } from '../utils/health-probe.js';
@@ -25,10 +37,11 @@ export { containerNameForApp, normalizeDomain };
 
 export interface CreateAppDTO {
   name: string;
-  sourceType: 'git' | 'dockerfile' | 'image';
+  sourceType: 'git' | 'dockerfile' | 'image' | 'compose';
   gitUrl?: string;
   branch?: string;
   imageName?: string;
+  composeYaml?: string;
   /** Omit to have a free host port assigned automatically. */
   port?: number;
   internalPort?: number;
@@ -43,6 +56,9 @@ export interface CreateAppDTO {
   limits?: ResourceLimits;
   /** Opting in also enables Docker's in-container probe. */
   healthcheck?: HealthcheckConfig;
+  buildConfig?: AppBuildConfig;
+  processes?: AppProcess[];
+  gitProvider?: GitProvider;
 }
 
 export interface AppMetricsSnapshot {
@@ -192,17 +208,23 @@ export class AppService {
    * The GitHub token and the webhook secret are write-only: they are set
    * through dedicated endpoints and never echoed back in a list response.
    */
-  static toPublic(app: AppRecord): Omit<AppRecord, 'githubToken' | 'webhookSecret'> & {
+  static toPublic(app: AppRecord): Omit<AppRecord, 'githubToken' | 'webhookSecret' | 'deployKey'> & {
     hasGithubToken: boolean;
     hasWebhookSecret: boolean;
+    hasDeployKey: boolean;
+    deployKey?: { publicKey: string; fingerprint: string };
   } {
-    const { githubToken, webhookSecret, env, ...rest } = app;
+    const { githubToken, webhookSecret, deployKey, env, ...rest } = app;
     const maskedEnv = Object.fromEntries(Object.keys(env || {}).map((key) => [key, '••••••••']));
     return {
       ...rest,
       env: maskedEnv,
       hasGithubToken: Boolean(githubToken),
       hasWebhookSecret: Boolean(webhookSecret),
+      hasDeployKey: Boolean(deployKey?.privateKey || deployKey?.publicKey),
+      deployKey: deployKey
+        ? { publicKey: deployKey.publicKey, fingerprint: deployKey.fingerprint }
+        : undefined,
     };
   }
 
@@ -275,6 +297,14 @@ export class AppService {
     const envRecord = this.validateEnv(dto.env || {});
     const envList = Object.entries(envRecord).map(([k, v]) => `${k}=${v}`);
 
+    if (dto.sourceType === 'compose' && dto.composeYaml) {
+      const allowed = path.join(CONFIG.DATA_DIR, 'apps', id, 'volumes');
+      const plan = validateCompose(dto.composeYaml, allowed);
+      if (!plan.ok) {
+        throw new Error(plan.blocked.map((b) => b.message).join(' '));
+      }
+    }
+
     const image = dto.imageName || 'node:20-alpine';
     let containerId: string | undefined;
     let status: AppRecord['status'] = 'stopped';
@@ -283,6 +313,9 @@ export class AppService {
     const cleanDomain = normalizeDomain(dto.domain);
 
     try {
+      if (dto.sourceType === 'compose') {
+        throw new Error('compose-deferred');
+      }
       containerId = await dockerService.createAndStartContainer({
         name: containerName,
         image,
@@ -300,8 +333,10 @@ export class AppService {
         },
       });
       status = 'running';
-    } catch (err) {
-      console.error('Could not start app container directly:', err);
+    } catch (err: any) {
+      if (err?.message !== 'compose-deferred') {
+        console.error('Could not start app container directly:', err);
+      }
       status = 'stopped';
     }
 
@@ -329,6 +364,13 @@ export class AppService {
       autoDeploy: dto.autoDeploy ?? true,
       deployBranch: dto.deployBranch || dto.branch || 'main',
       nodeId,
+      composeYaml: dto.composeYaml,
+      buildConfig: dto.buildConfig
+        ? { ...dto.buildConfig, source: dto.buildConfig.source || 'manual' }
+        : undefined,
+      processes: dto.processes?.map(normalizeProcess),
+      deploy: defaultDeployConfig(),
+      gitProvider: dto.gitProvider,
       status,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -425,5 +467,79 @@ export class AppService {
     const removed = dbStorage.removeApp(id);
     await CaddyService.syncCaddyfile();
     return removed;
+  }
+
+  static updateBuildConfig(appId: string, config: AppBuildConfig): AppRecord {
+    const app = dbStorage.getAppById(appId);
+    if (!app) throw new Error('App não encontrado');
+    if (config.version) assertRuntimeVersion(config.runtime, config.version);
+    app.buildConfig = { ...config, source: 'manual' };
+    app.updatedAt = new Date().toISOString();
+    return dbStorage.saveApp(app);
+  }
+
+  static updateProcesses(appId: string, processes: AppProcess[]): AppRecord {
+    const app = dbStorage.getAppById(appId);
+    if (!app) throw new Error('App não encontrado');
+    app.processes = processes.map(normalizeProcess);
+    app.updatedAt = new Date().toISOString();
+    return dbStorage.saveApp(app);
+  }
+
+  static updateDeployConfig(appId: string, deploy: AppDeployConfig): AppRecord {
+    const app = dbStorage.getAppById(appId);
+    if (!app) throw new Error('App não encontrado');
+    app.deploy = deploy;
+    app.updatedAt = new Date().toISOString();
+    return dbStorage.saveApp(app);
+  }
+
+  static createDeployKey(appId: string): { publicKey: string; fingerprint: string } {
+    const app = dbStorage.getAppById(appId);
+    if (!app) throw new Error('App não encontrado');
+    const key = generateDeployKey(`aegis-${app.name}`);
+    app.deployKey = {
+      publicKey: key.publicKey,
+      privateKey: EncryptionService.encrypt(key.privateKey),
+      fingerprint: key.fingerprint,
+    };
+    app.updatedAt = new Date().toISOString();
+    dbStorage.saveApp(app);
+    return { publicKey: key.publicKey, fingerprint: key.fingerprint };
+  }
+
+  static deleteDeployKey(appId: string): AppRecord {
+    const app = dbStorage.getAppById(appId);
+    if (!app) throw new Error('App não encontrado');
+    delete app.deployKey;
+    app.updatedAt = new Date().toISOString();
+    return dbStorage.saveApp(app);
+  }
+
+  static getDeployKeyPrivate(app: AppRecord): string | undefined {
+    if (!app.deployKey?.privateKey) return undefined;
+    return EncryptionService.tryDecrypt(app.deployKey.privateKey) ?? undefined;
+  }
+
+  static stats() {
+    const now = Date.now();
+    const dayAgo = now - 24 * 3600 * 1000;
+    const deployments = dbStorage.getDeployments();
+    const today = deployments.filter((d) => new Date(d.createdAt).getTime() >= dayAgo);
+    const success = today.filter((d) => d.status === 'success');
+    const withCache = success.filter((d) => d.cacheHit);
+    const downtime = success
+      .map((d) => d.downtimeMs)
+      .filter((n): n is number => typeof n === 'number');
+    const previews = dbStorage.getAppPreviews().filter((p) => p.status === 'running' || p.status === 'building');
+    return {
+      deploysToday: today.length,
+      successToday: success.length,
+      cacheHitRate: success.length ? Math.round((withCache.length / success.length) * 100) : 0,
+      avgDowntimeMs: downtime.length
+        ? Math.round(downtime.reduce((a, b) => a + b, 0) / downtime.length)
+        : null,
+      activePreviews: previews.length,
+    };
   }
 }

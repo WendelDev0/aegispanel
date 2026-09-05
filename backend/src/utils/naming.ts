@@ -13,6 +13,16 @@ export function containerNameForApp(appName: string): string {
   return `aegis-app-${appName.toLowerCase().replace(/[^a-z0-9_-]/g, '')}`;
 }
 
+export function containerNameForAppProcess(appName: string, processName: string): string {
+  const proc = processName.toLowerCase().replace(/[^a-z0-9-]/g, '') || 'proc';
+  return `${containerNameForApp(appName)}-${proc}`;
+}
+
+export function containerNameForAppSlot(appName: string, deploymentId: string): string {
+  const slot = deploymentId.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(-12) || 'slot';
+  return `${containerNameForApp(appName)}--${slot}`;
+}
+
 export function normalizeDomain(domain?: string): string | undefined {
   if (!domain) return undefined;
   const clean = domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');

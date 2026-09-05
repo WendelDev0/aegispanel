@@ -10,7 +10,7 @@ import type { AppRecord, ServerNode } from '../db/storage.js';
  * cannot resolve container names on another machine.
  */
 export function resolveAppUpstream(
-  app: Pick<AppRecord, 'name' | 'nodeId' | 'port' | 'internalPort'>,
+  app: Pick<AppRecord, 'name' | 'nodeId' | 'port' | 'internalPort' | 'activeContainerName'>,
   node?: ServerNode | null
 ): string {
   const isRemote =
@@ -28,7 +28,7 @@ export function resolveAppUpstream(
     return `${authority}:${app.port}`;
   }
 
-  return `${containerNameForApp(app.name)}:${app.internalPort || 3000}`;
+  return `${app.activeContainerName || containerNameForApp(app.name)}:${app.internalPort || 3000}`;
 }
 
 export function isRemoteTarget(nodeId: string | undefined, node?: ServerNode | null): boolean {

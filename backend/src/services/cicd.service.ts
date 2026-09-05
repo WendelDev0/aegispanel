@@ -11,7 +11,19 @@ import { AlertService } from './alert.service.js';
 import { AppService } from './app.service.js';
 import { PortService } from './port.service.js';
 import { NodeService } from './node.service.js';
-import { containerNameForApp } from '../utils/naming.js';
+import { containerNameForApp, containerNameForAppProcess, containerNameForAppSlot } from '../utils/naming.js';
+import { cacheImageName, recipeHash, matchTagGlob, type AppProcess } from '../utils/app-build.js';
+import { planDeployStrategy } from '../utils/app-deploy-plan.js';
+import { PROVIDER_KNOWN_HOSTS } from '../utils/app-deploy-key.js';
+import {
+  applyRecipeToDir,
+  mergeResolvedConfig,
+  mergeResolvedProcesses,
+  readAegisTomlFile,
+  recipeFromResolved,
+  resolveWorkDir,
+} from '../utils/app-deploy-build.js';
+import { validateCompose } from '../utils/app-compose.js';
 import { emit } from '../realtime.js';
 import { CONFIG } from '../config.js';
 import { assertSafeGitUrl, SafeGitTarget } from '../utils/url-security.js';
@@ -175,13 +187,22 @@ export class CicdService {
   }
 
   /** Keeps credentials out of git's argv and out of process listings. */
-  private static gitAuthEnv(gitUrl: string, token?: string): NodeJS.ProcessEnv | undefined {
-    if (!token || !gitUrl.trim().startsWith('https://github.com/')) return undefined;
+  private static gitAuthEnv(
+    gitUrl: string,
+    token?: string,
+    ssh?: { keyPath: string; knownHostsPath: string }
+  ): NodeJS.ProcessEnv | undefined {
+    if (ssh) {
+      return {
+        GIT_SSH_COMMAND: `ssh -i ${ssh.keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${ssh.knownHostsPath}`,
+      };
+    }
+    if (!token || !gitUrl.trim().startsWith('https://')) return undefined;
 
-    // GitHub accepts `x-access-token` as the username with a PAT as the
-    // header through GIT_CONFIG_* keeps it out of `ps`/Task Manager, unlike
-    // https://TOKEN@github.com/... in the clone argument.
-    const basic = Buffer.from(`x-access-token:${token}`, 'utf-8').toString('base64');
+    // Token stays in GIT_CONFIG_* so it never appears in `ps`. GitHub wants
+    // x-access-token; GitLab/Gitea accept oauth2.
+    const user = /github\.com/i.test(gitUrl) ? 'x-access-token' : 'oauth2';
+    const basic = Buffer.from(`${user}:${token}`, 'utf-8').toString('base64');
     return {
       GIT_CONFIG_COUNT: '1',
       GIT_CONFIG_KEY_0: 'http.extraheader',
@@ -228,6 +249,10 @@ export class CicdService {
     success: boolean;
     inspection: ProjectInspectionResult;
     commit?: { hash: string; message: string; author: string; date: string };
+    toml?: { found: boolean; error?: string };
+    proposedBuildConfig?: ReturnType<typeof mergeResolvedConfig>['resolved'];
+    proposedProcesses?: AppProcess[];
+    recipe?: { dockerfile: string; dockerignore: string; warnings: string[] };
   }> {
     const safeGitTarget = await assertSafeGitUrl(options.gitUrl);
     const tempDir = path.join(
@@ -275,7 +300,21 @@ export class CicdService {
         };
       }
 
-      return { success: true, inspection: ProjectDetector.inspect(tempDir), commit };
+      const { toml, error: tomlError } = readAegisTomlFile(tempDir);
+      const workDir = resolveWorkDir(tempDir, toml?.build?.rootDir);
+      const inspection = ProjectDetector.inspect(workDir);
+      const { resolved } = mergeResolvedConfig(undefined, toml, inspection.proposedBuildConfig);
+      const processes = mergeResolvedProcesses(undefined, toml, inspection.suggestedProcesses);
+      const recipe = recipeFromResolved(inspection.type, resolved, inspection.recommendedInternalPort);
+      return {
+        success: true,
+        inspection,
+        commit,
+        toml: { found: Boolean(toml), error: tomlError },
+        proposedBuildConfig: resolved,
+        proposedProcesses: processes,
+        recipe: { dockerfile: recipe.dockerfile, dockerignore: recipe.dockerignore, warnings: recipe.warnings },
+      };
     } finally {
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -296,6 +335,9 @@ export class CicdService {
       authorName?: string;
       branch?: string;
       triggeredBy: 'webhook' | 'manual' | 'github_action';
+      noCache?: boolean;
+      tag?: string;
+      preview?: { prNumber: number; branch: string; headSha: string };
     }
   ): Promise<DeploymentRecord> {
     /**
@@ -321,7 +363,15 @@ export class CicdService {
    */
   private static createQueuedDeployment(
     app: AppRecord,
-    options: { commitHash?: string; commitMessage?: string; authorName?: string; branch?: string; triggeredBy: 'webhook' | 'manual' | 'github_action' }
+    options: {
+      commitHash?: string;
+      commitMessage?: string;
+      authorName?: string;
+      branch?: string;
+      triggeredBy: 'webhook' | 'manual' | 'github_action';
+      tag?: string;
+      preview?: { prNumber: number; branch: string; headSha: string };
+    }
   ): DeploymentRecord {
     const deployment: DeploymentRecord = {
       id: `dep-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
@@ -336,6 +386,8 @@ export class CicdService {
       durationSeconds: 0,
       triggeredBy: options.triggeredBy,
       createdAt: new Date().toISOString(),
+      previewOf: (options as { preview?: { prNumber: number } }).preview?.prNumber,
+      tag: (options as { tag?: string }).tag,
     };
     dbStorage.saveDeployment(deployment);
     return deployment;
@@ -350,17 +402,22 @@ export class CicdService {
       authorName?: string;
       branch?: string;
       triggeredBy: 'webhook' | 'manual' | 'github_action';
+      noCache?: boolean;
+      tag?: string;
+      preview?: { prNumber: number; branch: string; headSha: string };
     },
     deploymentId: string
   ): Promise<DeploymentRecord> {
-    if (activeDeployments.has(app.id)) {
+    const lane = options.preview ? `preview-${options.preview.prNumber}` : 'production';
+    const lockKey = `${app.id}::${lane}`;
+    if (activeDeployments.has(lockKey)) {
       throw new Error(`Já existe um deploy em execução para a aplicação "${app.name}".`);
     }
-    activeDeployments.add(app.id);
+    activeDeployments.add(lockKey);
     try {
       return await this.executeDeployUnlocked(app, options, deploymentId);
     } finally {
-      activeDeployments.delete(app.id);
+      activeDeployments.delete(lockKey);
     }
   }
 
@@ -396,6 +453,9 @@ export class CicdService {
       authorName?: string;
       branch?: string;
       triggeredBy: 'webhook' | 'manual' | 'github_action';
+      noCache?: boolean;
+      tag?: string;
+      preview?: { prNumber: number; branch: string; headSha: string };
     },
     queuedDeploymentId?: string
   ): Promise<DeploymentRecord> {
@@ -578,9 +638,12 @@ export class CicdService {
 
           const token = AppService.getGithubToken(app);
           const safeGitTarget = await assertSafeGitUrl(app.gitUrl);
-          const cloneUrl = this.buildCloneUrl(app.gitUrl);
-          const gitEnv = this.gitAuthEnv(app.gitUrl, token);
-          const gitNetworkArgs = this.gitNetworkArgs(safeGitTarget);
+          const gitAuth = this.prepareGitAuth(app, token);
+          const cloneUrl = gitAuth.cloneUrl;
+          const gitEnv = gitAuth.env;
+          const gitNetworkArgs = gitAuth.ssh
+            ? []
+            : this.gitNetworkArgs(safeGitTarget);
 
           log(
             token
@@ -670,38 +733,73 @@ export class CicdService {
           }
 
           // Step 3: Dockerfile resolution
-          const dockerfilePath = path.join(buildsDir, 'Dockerfile');
+          const { toml, error: tomlError } = readAegisTomlFile(buildsDir);
+          if (tomlError) log(`[${new Date().toISOString()}] ⚠️ aegis.toml: ${tomlError}\n`);
+          const workDir = resolveWorkDir(buildsDir, app.buildConfig?.rootDir || toml?.build?.rootDir);
+          const dockerfilePath = path.join(workDir, app.buildConfig?.dockerfilePath || 'Dockerfile');
           const internalPort = app.internalPort || 3000;
 
           let hasGitCommittedDockerfile = false;
           if (fs.existsSync(dockerfilePath)) {
-            const tracked = await run('git', ['ls-files', '--error-unmatch', 'Dockerfile'], { cwd: buildsDir });
+            const tracked = await run('git', ['ls-files', '--error-unmatch', path.relative(buildsDir, dockerfilePath) || 'Dockerfile'], { cwd: buildsDir });
             hasGitCommittedDockerfile = tracked.exitCode === 0;
           }
 
-          if (!hasGitCommittedDockerfile) {
-            if (fs.existsSync(dockerfilePath)) {
+          const detection = ProjectDetector.inspect(workDir, internalPort);
+          const { resolved, diffs } = mergeResolvedConfig(
+            app.buildConfig,
+            toml,
+            detection.proposedBuildConfig,
+            app.buildConfig
+          );
+          const processes = mergeResolvedProcesses(app.processes, toml, detection.suggestedProcesses);
+          app.lastInspection = {
+            type: detection.type,
+            frameworkName: detection.frameworkName,
+            packageManager: detection.packageManager,
+            outputDir: detection.outputDir,
+            hasDockerfile: detection.hasDockerfile,
+          };
+          if (!app.buildConfig || app.buildConfig.source !== 'manual') {
+            app.buildConfig = { ...resolved, source: resolved.source };
+          }
+          if (!app.processes?.length && processes.length) app.processes = processes;
+          dbStorage.saveApp(app);
+          for (const line of diffs) {
+            log(`[${new Date().toISOString()}] 🔧 buildConfig ${line}\n`);
+          }
+
+          const useNative = hasGitCommittedDockerfile && resolved.runtime === 'docker';
+          if (!useNative) {
+            if (fs.existsSync(dockerfilePath) && !hasGitCommittedDockerfile) {
               fs.rmSync(dockerfilePath, { force: true });
             }
 
-            const detection = ProjectDetector.inspect(buildsDir, internalPort);
+            const recipe = recipeFromResolved(
+              detection.type,
+              resolved,
+              detection.recommendedInternalPort || internalPort,
+              AppService.resolveLimits(app).cpus
+            );
             log(
               `[${new Date().toISOString()}] ${detection.log}\n` +
-                `[${new Date().toISOString()}] 📦 [Step 3/5] Framework: ${detection.frameworkName} | Gerenciador: ${detection.packageManager.toUpperCase()} | Porta Interna: :${internalPort}\n`,
-              { step: 3, stepName: `Detectado: ${detection.frameworkName}`, percentage: 50 }
+                `[${new Date().toISOString()}] 📦 [Step 3/5] Runtime: ${resolved.runtime} ${resolved.version} | ${detection.frameworkName} | Porta :${recipe.internalPort}\n`,
+              { step: 3, stepName: `Receita: ${detection.frameworkName}`, percentage: 50 }
             );
+            for (const warning of recipe.warnings) log(`[${new Date().toISOString()}] ⚠️ ${warning}\n`);
 
             if (detection.type === 'static-html') {
               delete ports[`${internalPort}/tcp`];
               ports['80/tcp'] = app.port;
-            } else if (detection.recommendedInternalPort && detection.recommendedInternalPort !== internalPort && (!app.internalPort || app.internalPort === 3000)) {
+            } else if (recipe.internalPort && recipe.internalPort !== internalPort && (!app.internalPort || app.internalPort === 3000)) {
               delete ports[`${internalPort}/tcp`];
-              ports[`${detection.recommendedInternalPort}/tcp`] = app.port;
-              app.internalPort = detection.recommendedInternalPort;
+              ports[`${recipe.internalPort}/tcp`] = app.port;
+              app.internalPort = recipe.internalPort;
               dbStorage.saveApp(app);
             }
 
-            fs.writeFileSync(dockerfilePath, injectPublicBuildArgs(detection.dockerfile, app.env || {}), 'utf-8');
+            applyRecipeToDir(workDir, recipe.dockerfile, recipe.dockerignore, app.env || {}, injectPublicBuildArgs);
+            deployment.recipeHash = recipeHash(recipe.dockerfile);
           } else {
             try {
               const dockerContent = fs.readFileSync(dockerfilePath, 'utf8');
@@ -732,59 +830,33 @@ export class CicdService {
             percentage: 65,
           });
 
-          // Only intentionally public variables may enter the image build. All
-          // other application variables are injected into the runtime container
-          // below and never become Docker build arguments or build-context files.
-          if (isRemote) {
-            log(
-              `[${new Date().toISOString()}] 📤 Contexto enviado ao Docker do nó (o socket do painel não recebe o build nem o start).\n`
-            );
-            await dockerService.buildImage({
-              contextDir: buildsDir,
-              tags: [buildImageTag, versionedTag],
-              buildArgs: publicBuildArgMap(app.env || {}),
-              client: dockerClient,
-              timeoutMs: BUILD_TIMEOUT_MS,
-              onOutput: (chunk) => log(this.redactSecrets(chunk)),
-            });
-          } else {
-            const buildArgs = publicBuildArgs(app.env || {});
-            const build = await run('docker', ['build', ...buildArgs, '-t', buildImageTag, '-t', versionedTag, '.'], {
-              cwd: buildsDir,
-              timeoutMs: BUILD_TIMEOUT_MS,
-              onOutput: (chunk) => log(this.redactSecrets(chunk)),
-            });
-
-            if (build.exitCode !== 0) {
-              throw new Error(
-                `Erro ao compilar imagem Docker (código ${build.exitCode}). Verifique os logs de build acima.`
-              );
-            }
-          }
+          const cacheHit = await this.buildAppImage({
+            app,
+            contextDir: workDir,
+            buildImageTag,
+            versionedTag,
+            isRemote,
+            dockerClient,
+            noCache: Boolean((options as { noCache?: boolean }).noCache),
+            log,
+          });
+          deployment.cacheHit = cacheHit;
 
         }
 
-        // Step 5: start the container
-        log(`[${new Date().toISOString()}] 🚀 [Step 5/5] Iniciando contêiner na porta host :${app.port}...\n`, {
-          step: 5,
-          stepName: 'Iniciando Contêiner',
-          percentage: 85,
-        });
-
-        const placement = remoteWorkloadPlacement(isRemote);
-        app.containerId = await dockerService.createAndStartContainer({
-          name: containerName,
-          image: buildImageTag,
-          env: envList,
+        await this.startRelease({
+          app,
+          deployment,
+          containerName,
+          buildImageTag,
+          envList,
           ports,
-          bindIp: placement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
-          client: placement.useRemoteDocker ? dockerClient : undefined,
-          limits: AppService.resolveLimits(app),
-          healthcheck: AppService.dockerHealthcheck(app),
-          joinPanelNetwork: placement.joinPanelNetwork,
-          labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
+          isRemote,
+          dockerClient,
+          log,
         });
-        logs += `[${new Date().toISOString()}] 🚀 Container online com ID: ${app.containerId.substring(0, 12)}\n`;
+      } else if (app.sourceType === 'compose') {
+        await this.deployCompose(app, log);
       } else if (app.sourceType === 'dockerfile') {
         const buildsDir = path.join(CONFIG.DATA_DIR, 'builds', app.id);
         const dockerfilePath = path.join(buildsDir, 'Dockerfile');
@@ -820,25 +892,17 @@ export class CicdService {
             );
           }
         }
-        log(`[${new Date().toISOString()}] 🚀 [Step 5/5] Iniciando contêiner na porta host :${app.port}...\n`, {
-          step: 5,
-          stepName: 'Iniciando Contêiner',
-          percentage: 85,
-        });
-        const dockerfilePlacement = remoteWorkloadPlacement(isRemote);
-        app.containerId = await dockerService.createAndStartContainer({
-          name: containerName,
-          image: buildImageTag,
-          env: envList,
+        await this.startRelease({
+          app,
+          deployment,
+          containerName,
+          buildImageTag,
+          envList,
           ports,
-          bindIp: dockerfilePlacement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
-          client: dockerfilePlacement.useRemoteDocker ? dockerClient : undefined,
-          limits: AppService.resolveLimits(app),
-          healthcheck: AppService.dockerHealthcheck(app),
-          joinPanelNetwork: dockerfilePlacement.joinPanelNetwork,
-          labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
+          isRemote,
+          dockerClient,
+          log,
         });
-        logs += `[${new Date().toISOString()}] 🚀 Container online com ID: ${app.containerId.substring(0, 12)}\n`;
       } else {
         const image = app.imageName || 'nginx:alpine';
         log(`[${new Date().toISOString()}] 🐳 [Step 4/5] Preparando contêiner a partir da imagem ${image}...\n`, {
@@ -847,22 +911,17 @@ export class CicdService {
           percentage: 60,
         });
 
-        // Remote image deploys publish on 0.0.0.0 so panel Caddy can reach the
-        // node's host port; local apps stay on APP_BIND_IP (usually loopback).
-        const placement = remoteWorkloadPlacement(isRemote);
-        app.containerId = await dockerService.createAndStartContainer({
-          name: containerName,
-          image,
-          env: envList,
+        await this.startRelease({
+          app,
+          deployment,
+          containerName,
+          buildImageTag: image,
+          envList,
           ports,
-          bindIp: placement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
-          client: placement.useRemoteDocker ? dockerClient : undefined,
-          limits: AppService.resolveLimits(app),
-          healthcheck: AppService.dockerHealthcheck(app),
-          joinPanelNetwork: placement.joinPanelNetwork,
-          labels: { 'aegis.type': 'app', 'aegis.app.name': app.name },
+          isRemote,
+          dockerClient,
+          log,
         });
-        logs += `[${new Date().toISOString()}] 🚀 Container criado com ID: ${app.containerId.substring(0, 12)}\n`;
       }
 
       /**
@@ -1281,6 +1340,308 @@ export class CicdService {
     return { success: true, message: `Aplicação revertida para a versão #${targetDeployment.commitHash}.` };
   }
 
+  private static prepareGitAuth(
+    app: AppRecord,
+    token?: string
+  ): { cloneUrl: string; env?: NodeJS.ProcessEnv; ssh: boolean } {
+    const privateKey = AppService.getDeployKeyPrivate(app);
+    if (privateKey && app.gitUrl) {
+      const dir = path.join(CONFIG.DATA_DIR, 'tmp', `gitkey-${app.id}`);
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const keyPath = path.join(dir, 'id_ed25519');
+      const knownHostsPath = path.join(dir, 'known_hosts');
+      fs.writeFileSync(keyPath, privateKey.endsWith('\n') ? privateKey : `${privateKey}\n`, { mode: 0o600 });
+      fs.writeFileSync(knownHostsPath, PROVIDER_KNOWN_HOSTS, { mode: 0o600 });
+      const sshUrl = httpsToSshUrl(app.gitUrl);
+      return {
+        cloneUrl: sshUrl || this.buildCloneUrl(app.gitUrl),
+        env: this.gitAuthEnv(app.gitUrl, undefined, { keyPath, knownHostsPath }),
+        ssh: Boolean(sshUrl),
+      };
+    }
+    return { cloneUrl: this.buildCloneUrl(app.gitUrl || ''), env: this.gitAuthEnv(app.gitUrl || '', token), ssh: false };
+  }
+
+  private static async buildAppImage(opts: {
+    app: AppRecord;
+    contextDir: string;
+    buildImageTag: string;
+    versionedTag: string;
+    isRemote: boolean;
+    dockerClient: Docker;
+    noCache: boolean;
+    log: (line: string, progress?: { step: number; stepName: string; percentage: number }) => void;
+  }): Promise<boolean> {
+    const cacheTag = cacheImageName(opts.app.name);
+    const useCache = opts.app.deploy?.cache !== false && !opts.noCache;
+    const buildArgs = publicBuildArgs(opts.app.env || {});
+    const cacheArgs = useCache ? ['--cache-from', cacheTag, '--build-arg', 'BUILDKIT_INLINE_CACHE=1'] : [];
+
+    const attempt = async (noCache: boolean): Promise<boolean> => {
+      if (opts.isRemote) {
+        await dockerService.buildImage({
+          contextDir: opts.contextDir,
+          tags: [opts.buildImageTag, opts.versionedTag],
+          buildArgs: publicBuildArgMap(opts.app.env || {}),
+          cacheFrom: !noCache && useCache ? [cacheTag] : undefined,
+          nocache: noCache,
+          client: opts.dockerClient,
+          timeoutMs: BUILD_TIMEOUT_MS,
+          onOutput: (chunk) => opts.log(this.redactSecrets(chunk)),
+        });
+        return true;
+      }
+      const args = [
+        'build',
+        ...(noCache ? ['--no-cache'] : cacheArgs),
+        ...buildArgs,
+        '-t',
+        opts.buildImageTag,
+        '-t',
+        opts.versionedTag,
+        '.',
+      ];
+      const build = await run('docker', args, {
+        cwd: opts.contextDir,
+        timeoutMs: BUILD_TIMEOUT_MS,
+        onOutput: (chunk) => opts.log(this.redactSecrets(chunk)),
+      });
+      if (build.exitCode !== 0) return false;
+      return true;
+    };
+
+    let ok = await attempt(!useCache);
+    let cacheHit = useCache;
+    if (!ok && useCache) {
+      opts.log(`[${new Date().toISOString()}] ⚠️ Cache de build falhou; repetindo sem cache.\n`);
+      ok = await attempt(true);
+      cacheHit = false;
+    }
+    if (!ok) {
+      throw new Error('Erro ao compilar imagem Docker. Verifique os logs de build acima.');
+    }
+    try {
+      if (opts.isRemote) await dockerService.tagImage(opts.buildImageTag, cacheTag, opts.dockerClient);
+      else await run('docker', ['tag', opts.buildImageTag, cacheTag]);
+    } catch {
+      cacheHit = false;
+    }
+    return cacheHit;
+  }
+
+  private static async startRelease(opts: {
+    app: AppRecord;
+    deployment: DeploymentRecord;
+    containerName: string;
+    buildImageTag: string;
+    envList: string[];
+    ports: { [k: string]: number };
+    isRemote: boolean;
+    dockerClient: Docker;
+    log: (line: string, progress?: { step: number; stepName: string; percentage: number }) => void;
+  }): Promise<void> {
+    const { app, deployment, containerName, buildImageTag, envList, ports, isRemote, dockerClient, log } = opts;
+    const placement = remoteWorkloadPlacement(isRemote);
+    const client = placement.useRemoteDocker ? dockerClient : undefined;
+    const limits = AppService.resolveLimits(app);
+
+    const release = (app.processes || []).find((p) => p.type === 'release');
+    const hookPre = app.deploy?.hooks?.preDeploy;
+    const hookPost = app.deploy?.hooks?.postDeploy;
+
+    const runHook = async (name: string, command: string) => {
+      log(`[${new Date().toISOString()}] 🧪 ${name}: ${command}\n`, {
+        step: 5,
+        stepName: name,
+        percentage: 80,
+      });
+      const result = await dockerService.runOnce({
+        name: `${containerName}-${name}-${deployment.id}`.slice(0, 60),
+        image: buildImageTag,
+        cmd: ['sh', '-c', command],
+        env: envList,
+        client,
+        joinPanelNetwork: placement.joinPanelNetwork,
+        limits,
+        onOutput: (chunk) => log(this.redactSecrets(chunk)),
+      });
+      if (result.exitCode !== 0) {
+        throw new Error(`${name} falhou (código ${result.exitCode}). O tráfego não foi trocado.`);
+      }
+    };
+
+    if (hookPre) await runHook('pre_deploy', hookPre);
+    if (release) await runHook('release', release.command);
+
+    const plan = planDeployStrategy({
+      requested: app.deploy?.strategy,
+      hasHealthcheck: Boolean(app.healthcheck),
+      hasDomain: Boolean(app.domain),
+      remoteExplicitPort: isRemote && app.autoPort === false,
+    });
+    for (const warning of plan.warnings) log(`[${new Date().toISOString()}] ⚠️ ${warning}\n`);
+
+    const preview = (deployment as DeploymentRecord).previewOf;
+    const webName = preview
+      ? containerNameForAppSlot(app.name, `pr${preview}`)
+      : plan.strategy === 'blue-green'
+        ? containerNameForAppSlot(app.name, deployment.id)
+        : containerName;
+
+    log(`[${new Date().toISOString()}] 🚀 [Step 5/5] Iniciando ${plan.strategy} em ${webName}...\n`, {
+      step: 5,
+      stepName: plan.strategy === 'blue-green' ? 'Slot verde' : 'Iniciando Contêiner',
+      percentage: 85,
+    });
+
+    const started = await dockerService.createAndStartContainer({
+      name: webName,
+      image: buildImageTag,
+      env: envList,
+      ports,
+      bindIp: placement.publishOnAllInterfaces ? '0.0.0.0' : CONFIG.APP_BIND_IP,
+      client,
+      limits,
+      healthcheck: AppService.dockerHealthcheck(app),
+      joinPanelNetwork: placement.joinPanelNetwork,
+      replaceExisting: plan.strategy !== 'blue-green',
+      labels: { 'aegis.type': 'app', 'aegis.app.name': app.name, 'aegis.slot': plan.strategy === 'blue-green' ? 'green' : 'web' },
+    });
+
+    if (plan.strategy === 'blue-green') {
+      const previousName = app.activeContainerName || containerName;
+      app.activeContainerName = webName;
+      app.containerId = started;
+      dbStorage.saveApp(app);
+      try {
+        await CaddyService.syncCaddyfile();
+      } catch (err: any) {
+        log(`[${new Date().toISOString()}] ⚠️ Caddy swap: ${err.message}\n`);
+      }
+      if (previousName && previousName !== webName) {
+        try {
+          await dockerService.removeContainerByName(previousName, true, client);
+        } catch {
+          // drain best-effort
+        }
+      }
+      deployment.slot = 'green';
+      deployment.downtimeMs = 0;
+    } else {
+      app.activeContainerName = undefined;
+      app.containerId = started;
+      deployment.slot = 'blue';
+    }
+
+    const workers = (app.processes || []).filter((p) => p.type === 'worker');
+    const processIds: Array<{ name: string; containerId?: string }> = [{ name: 'web', containerId: started }];
+    for (const worker of workers) {
+      const replicas = worker.replicas || 1;
+      for (let i = 1; i <= replicas; i++) {
+        const name = containerNameForAppProcess(app.name, replicas > 1 ? `${worker.name}-${i}` : worker.name);
+        const id = await dockerService.createAndStartContainer({
+          name,
+          image: buildImageTag,
+          cmd: ['sh', '-c', worker.command],
+          env: envList,
+          client,
+          limits: worker.limits || limits,
+          joinPanelNetwork: placement.joinPanelNetwork,
+          labels: { 'aegis.type': 'app', 'aegis.app.name': app.name, 'aegis.process': worker.name },
+        });
+        processIds.push({ name: worker.name, containerId: id });
+      }
+    }
+    deployment.processes = processIds;
+    if (hookPost) await runHook('post_deploy', hookPost);
+    log(`[${new Date().toISOString()}] 🚀 Container online com ID: ${started.substring(0, 12)}\n`);
+  }
+
+  private static async deployCompose(
+    app: AppRecord,
+    log: (line: string) => void
+  ): Promise<void> {
+    if (!app.composeYaml) throw new Error('Esta aplicação não tem um arquivo compose.');
+    const root = path.join(CONFIG.DATA_DIR, 'apps', app.id);
+    const volumes = path.join(root, 'volumes');
+    fs.mkdirSync(volumes, { recursive: true, mode: 0o700 });
+    const plan = validateCompose(app.composeYaml, volumes);
+    if (!plan.ok) {
+      throw new Error(plan.blocked.map((b) => b.message).join(' '));
+    }
+    const composePath = path.join(root, 'docker-compose.yml');
+    fs.writeFileSync(composePath, app.composeYaml, 'utf8');
+    const project = containerNameForApp(app.name);
+    log(`[${new Date().toISOString()}] 🐳 docker compose up (${project})\n`);
+    const up = await run('docker', ['compose', '-p', project, '-f', composePath, 'up', '-d', '--remove-orphans'], {
+      cwd: root,
+      timeoutMs: BUILD_TIMEOUT_MS,
+      onOutput: (chunk) => log(this.redactSecrets(chunk)),
+    });
+    if (up.exitCode !== 0) throw new Error('docker compose up falhou. Veja os logs.');
+  }
+
+  static async recipeForApp(app: AppRecord): Promise<{
+    dockerfile: string;
+    dockerignore: string;
+    sourceByField?: Record<string, string>;
+    warnings: string[];
+    usedNativeDockerfile: boolean;
+  }> {
+    const buildsDir = path.join(CONFIG.DATA_DIR, 'builds', app.id);
+    if (fs.existsSync(buildsDir)) {
+      const { toml } = readAegisTomlFile(buildsDir);
+      const workDir = resolveWorkDir(buildsDir, app.buildConfig?.rootDir || toml?.build?.rootDir);
+      const inspection = ProjectDetector.inspect(workDir, app.internalPort);
+      const { resolved } = mergeResolvedConfig(app.buildConfig, toml, inspection.proposedBuildConfig);
+      if (inspection.hasDockerfile && resolved.runtime === 'docker') {
+        return {
+          dockerfile: inspection.dockerfile,
+          dockerignore: inspection.dockerignore,
+          sourceByField: resolved.sourceByField,
+          warnings: [],
+          usedNativeDockerfile: true,
+        };
+      }
+      const recipe = recipeFromResolved(inspection.type, resolved, app.internalPort || inspection.recommendedInternalPort);
+      return {
+        dockerfile: recipe.dockerfile,
+        dockerignore: recipe.dockerignore,
+        sourceByField: resolved.sourceByField,
+        warnings: recipe.warnings,
+        usedNativeDockerfile: false,
+      };
+    }
+    if (app.buildConfig) {
+      const type = (app.lastInspection?.type || 'generic-node') as Parameters<typeof recipeFromResolved>[0];
+      const { resolved } = mergeResolvedConfig(app.buildConfig, undefined, app.buildConfig);
+      const recipe = recipeFromResolved(type, resolved, app.internalPort || 3000);
+      return {
+        dockerfile: recipe.dockerfile,
+        dockerignore: recipe.dockerignore,
+        sourceByField: resolved.sourceByField,
+        warnings: recipe.warnings,
+        usedNativeDockerfile: false,
+      };
+    }
+    throw new Error('Ainda não há receita. Faça um inspect ou o primeiro deploy.');
+  }
+
+  static async runOneOff(app: AppRecord, command: string): Promise<{ exitCode: number; logs: string }> {
+    if (!app.imageName && !app.lastDeployAt) {
+      throw new Error('Faça um deploy antes de executar um comando.');
+    }
+    const image = `aegis-app-${app.name.toLowerCase().replace(/[^a-z0-9_-]/g, '')}:latest`;
+    const envList = Object.entries(app.env || {}).map(([k, v]) => `${k}=${v}`);
+    return dockerService.runOnce({
+      name: `${containerNameForApp(app.name)}-run-${Date.now().toString(36)}`.slice(0, 60),
+      image,
+      cmd: ['sh', '-c', command],
+      env: envList,
+      limits: AppService.resolveLimits(app),
+    });
+  }
+
   static generateGitHubWorkflow(app: AppRecord, hostUrl: string): string {
     const webhookUrl = `${hostUrl}/api/webhooks/deploy/${app.id}`;
 
@@ -1330,3 +1691,15 @@ jobs:
 DeployQueueService.setRunner((app, request, deploymentId) =>
   CicdService.runQueuedDeploy(app, request, deploymentId)
 );
+
+function httpsToSshUrl(httpsUrl: string): string | null {
+  try {
+    const url = new URL(httpsUrl.trim());
+    const host = url.hostname.toLowerCase();
+    if (!['github.com', 'gitlab.com', 'bitbucket.org'].includes(host)) return null;
+    const repo = url.pathname.replace(/^\//, '');
+    return `git@${host}:${repo}`;
+  } catch {
+    return null;
+  }
+}

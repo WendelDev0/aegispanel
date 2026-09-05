@@ -78,12 +78,88 @@ export const createUserBodySchema = z.object({
   role: z.enum(['admin', 'developer', 'viewer']).optional(),
 });
 
+const appRuntime = z.enum([
+  'node',
+  'python',
+  'static',
+  'go',
+  'rust',
+  'php',
+  'java',
+  'ruby',
+  'bun',
+  'deno',
+  'docker',
+]);
+
+const packageManager = z.enum([
+  'npm',
+  'pnpm',
+  'yarn',
+  'bun',
+  'pip',
+  'poetry',
+  'uv',
+  'pipenv',
+  'go',
+  'cargo',
+  'composer',
+  'maven',
+  'gradle',
+  'bundler',
+  'deno',
+  'docker',
+]);
+
+export const appBuildConfigSchema = z.object({
+  runtime: appRuntime,
+  version: z.string().max(32).optional(),
+  rootDir: z.string().max(200).optional(),
+  dockerfilePath: z.string().max(200).optional(),
+  outputDir: z.string().max(200).optional(),
+  installCommand: z.string().max(400).optional(),
+  buildCommand: z.string().max(400).optional(),
+  startCommand: z.string().max(400).optional(),
+  packageManager: packageManager.optional(),
+  source: z.enum(['detected', 'toml', 'manual']).optional(),
+});
+
+export const appProcessSchema = z.object({
+  name: z.string().regex(/^[a-z][a-z0-9-]{0,23}$/),
+  type: z.enum(['web', 'worker', 'cron', 'release']),
+  command: z.string().min(1).max(500),
+  schedule: z.string().max(120).optional(),
+  replicas: z.number().int().min(1).max(4).optional(),
+  limits: resourceLimits.optional(),
+});
+
+export const appDeployConfigSchema = z.object({
+  strategy: z.enum(['blue-green', 'recreate']),
+  onTag: z.string().max(80).optional(),
+  cache: z.boolean(),
+  hooks: z
+    .object({
+      preDeploy: z.string().max(500).optional(),
+      postDeploy: z.string().max(500).optional(),
+    })
+    .optional(),
+  previews: z
+    .object({
+      enabled: z.boolean(),
+      maxConcurrent: z.number().int().min(1).max(20),
+      ttlHours: z.number().int().min(1).max(24 * 30),
+      domainPattern: z.string().max(200),
+    })
+    .optional(),
+});
+
 export const createAppBodySchema = z.object({
   name: z.string().min(1).max(64),
-  sourceType: z.enum(['git', 'dockerfile', 'image']).optional(),
+  sourceType: z.enum(['git', 'dockerfile', 'image', 'compose']).optional(),
   gitUrl: z.string().optional(),
   branch: z.string().max(200).optional(),
   imageName: z.string().optional(),
+  composeYaml: z.string().max(200_000).optional(),
   port: z.union([z.number(), z.string()]).optional().nullable(),
   internalPort: z.union([z.number(), z.string()]).optional().nullable(),
   env: z.record(z.string()).optional(),
@@ -94,6 +170,9 @@ export const createAppBodySchema = z.object({
   nodeId: z.string().optional(),
   limits: resourceLimits.optional(),
   healthcheck: healthcheckConfig.optional(),
+  buildConfig: appBuildConfigSchema.optional(),
+  processes: z.array(appProcessSchema).max(16).optional(),
+  gitProvider: z.enum(['github', 'gitlab', 'gitea', 'bitbucket', 'generic']).optional(),
 });
 
 export const updateAppBodySchema = z.object({
@@ -130,6 +209,23 @@ export const updateDomainBodySchema = z.object({
 
 export const deployAppBodySchema = z.object({
   commitMessage: z.string().max(500).optional(),
+  noCache: z.boolean().optional(),
+});
+
+export const updateBuildConfigBodySchema = appBuildConfigSchema;
+
+export const updateProcessesBodySchema = z.object({
+  processes: z.array(appProcessSchema).max(16),
+});
+
+export const updateDeployConfigBodySchema = appDeployConfigSchema;
+
+export const runAppCommandBodySchema = z.object({
+  command: z.string().min(1).max(500),
+});
+
+export const composePlanBodySchema = z.object({
+  yaml: z.string().min(1).max(200_000).optional(),
 });
 
 export const fileContentBodySchema = z.object({

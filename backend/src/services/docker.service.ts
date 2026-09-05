@@ -737,6 +737,8 @@ class DockerManager {
     contextDir: string;
     tags: string[];
     buildArgs?: Record<string, string>;
+    cacheFrom?: string[];
+    nocache?: boolean;
     client?: Docker;
     onOutput?: (chunk: string) => void;
     timeoutMs?: number;
@@ -753,6 +755,9 @@ class DockerManager {
         t: primaryTag,
         dockerfile: 'Dockerfile',
         buildargs: options.buildArgs && Object.keys(options.buildArgs).length ? options.buildArgs : undefined,
+        // dockerode types this as a string; the Engine API takes an array.
+        cachefrom: options.cacheFrom?.length ? (options.cacheFrom as unknown as string) : undefined,
+        nocache: options.nocache || undefined,
       }
     );
 
@@ -791,6 +796,11 @@ class DockerManager {
      * Must stay false on remote nodes — that network does not exist there.
      */
     joinPanelNetwork?: boolean;
+    /**
+     * When false the existing container is left running so a green slot can
+     * come up beside it. Default true keeps the recreate path.
+     */
+    replaceExisting?: boolean;
   }): Promise<string> {
     const docker = options.client || this.docker;
     // Remote daemons have no panel aegis-net; attaching would fail the create.
@@ -823,9 +833,16 @@ class DockerManager {
     // deploy makes the port permanently unavailable.
     await this.removeStaleBackups(options.name, docker);
 
+    const replaceExisting = options.replaceExisting !== false;
     const backupName = `${options.name}-prev-${Date.now().toString(36)}`;
     let renamedOld = false;
     let created: Docker.Container | null = null;
+
+    if (!replaceExisting) {
+      created = await docker.createContainer(createOptions);
+      await created.start();
+      return created.id;
+    }
 
     try {
       const existing = docker.getContainer(options.name);
@@ -903,6 +920,77 @@ class DockerManager {
       throw err;
     }
   }
+
+  async tagImage(source: string, target: string, client?: Docker): Promise<void> {
+    const docker = client || this.docker;
+    const [repo, tag] = target.includes(':') ? (target.split(':') as [string, string]) : [target, 'latest'];
+    await docker.getImage(source).tag({ repo, tag });
+  }
+
+  /**
+   * Runs a command in a throwaway container of an existing image.
+   *
+   * Release hooks and one-off tasks used to be appended to CMD, so a failed
+   * migrate took the running app down on the next restart. This stays off the
+   * host shell and off the live web container.
+   */
+  async runOnce(options: {
+    name: string;
+    image: string;
+    cmd: string[];
+    env?: string[];
+    timeoutMs?: number;
+    client?: Docker;
+    joinPanelNetwork?: boolean;
+    limits?: ResourceLimits;
+    onOutput?: (chunk: string) => void;
+  }): Promise<{ exitCode: number; logs: string }> {
+    const docker = options.client || this.docker;
+    const timeoutMs = options.timeoutMs ?? 10 * 60 * 1000;
+    const joinNetwork = options.joinPanelNetwork !== false && !options.client;
+    const networkName = joinNetwork ? await this.findAegisNetworkName() : undefined;
+
+    const created = await docker.createContainer({
+      Image: options.image,
+      name: options.name,
+      Cmd: options.cmd,
+      Env: options.env,
+      Labels: { 'aegis.managed': 'true', 'aegis.role': 'one-off' },
+      HostConfig: {
+        AutoRemove: false,
+        NetworkMode: networkName,
+        Memory: options.limits ? options.limits.memoryMb * 1024 * 1024 : undefined,
+        NanoCpus: options.limits ? Math.round(options.limits.cpus * 1e9) : undefined,
+      },
+    });
+
+    try {
+      await created.start();
+      const wait = created.wait();
+      const timed = await Promise.race([
+        wait,
+        new Promise<{ StatusCode: number }>((_, reject) => {
+          setTimeout(() => reject(new Error('Comando excedeu o tempo limite de 10 minutos.')), timeoutMs);
+        }),
+      ]);
+      const raw = await created.logs({ stdout: true, stderr: true, timestamps: false });
+      const logs = stripDockerLog(raw.toString());
+      if (options.onOutput && logs) options.onOutput(logs);
+      return { exitCode: timed.StatusCode ?? 1, logs };
+    } finally {
+      try {
+        await created.remove({ force: true });
+      } catch {
+        // already gone
+      }
+    }
+  }
+}
+
+function stripDockerLog(raw: string): string {
+  // dockerode multiplexed logs prefix each frame with 8 header bytes
+  if (!raw) return '';
+  return raw.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '');
 }
 
 export const dockerService = new DockerManager();

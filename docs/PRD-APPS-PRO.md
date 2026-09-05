@@ -15,12 +15,12 @@ Atualizado em **2026-09-05**.
 
 | Fase | Estado | Depende de |
 |------|--------|------------|
-| 0 — Build config persistida + `aegis.toml` | ⬜ | — |
-| 1 — Python de verdade (pip, poetry, uv, workers) | ⬜ | 0 |
-| 2 — Deploy sem queda (blue/green) + hooks | ⬜ | 0 |
-| 3 — CI/CD: tags, PR preview, GitLab/Gitea, deploy key SSH | ⬜ | 0, 2 |
-| 4 — Novos runtimes: Go, Rust, PHP, Java, Ruby, Bun, Deno | ⬜ | 0 |
-| 5 — Stacks compose e processos sem porta (worker, cron, one-off) | ⬜ | 0, 2 |
+| 0 — Build config persistida + `aegis.toml` | ✅ | — |
+| 1 — Python de verdade (pip, poetry, uv, workers) | ✅ | 0 |
+| 2 — Deploy sem queda (blue/green) + hooks | ✅ | 0 |
+| 3 — CI/CD: tags, PR preview, GitLab/Gitea, deploy key SSH | ✅ | 0, 2 |
+| 4 — Novos runtimes: Go, Rust, PHP, Java, Ruby, Bun, Deno | ✅ | 0 |
+| 5 — Stacks compose e processos sem porta (worker, cron, one-off) | ✅ | 0, 2 |
 
 **Entregue hoje (v1):** três origens (`git`, `dockerfile`, `image`); detector que gera Dockerfile para Node (Vite, Next, Astro, Nuxt, Remix, SvelteKit, Nest, Express, genérico), estático e Python (Flask, FastAPI, Django, genérico, sempre `python:3.11-slim` + `pip`); Dockerfile nativo do repositório; webhook GitHub com HMAC e alternativa via GitHub Actions; fila serial por nó; build no nó remoto via daemon-git; readiness + rollback automático; limites de CPU/RAM/PIDs; healthcheck opt-in; logs e métricas por app; 12 templates de imagem pronta.
 
@@ -289,69 +289,69 @@ Erros em português, 400 `{ error }`, Zod como as demais rotas.
 
 ### Fase 0 — Build config persistida + `aegis.toml`
 
-- [ ] `buildConfig` no `AppRecord`, schema Zod, `toPublic` inalterado (não há segredo aí)
-- [ ] Parser e validador de `aegis.toml` (função pura; erros em português com linha)
-- [ ] Precedência manual > toml > detector; log de diferença por deploy
-- [ ] `inspect-repo` devolve proposta + campos do toml + processos sugeridos
-- [ ] `GET /apps/:id/recipe`
-- [ ] `version` para Node (18/20/22) e `outputDir` para estático
-- [ ] Editor: aba **Build** no detalhe do app (runtime, versão, comandos, subpasta) com selo de origem por campo
-- [ ] Cache de build por app (`--cache-from`), `cacheHit` no deployment; `--no-cache` automático após falha de cache
+- [x] `buildConfig` no `AppRecord`, schema Zod, `toPublic` inalterado (não há segredo aí)
+- [x] Parser e validador de `aegis.toml` (função pura; erros em português com linha)
+- [x] Precedência manual > toml > detector; log de diferença por deploy
+- [x] `inspect-repo` devolve proposta + campos do toml + processos sugeridos
+- [x] `GET /apps/:id/recipe`
+- [x] `version` para Node (18/20/22) e `outputDir` para estático
+- [x] Editor: aba **Build** no detalhe do app (runtime, versão, comandos, subpasta) com selo de origem por campo
+- [x] Cache de build por app (`--cache-from`), `cacheHit` no deployment; `--no-cache` automático após falha de cache
 
 **Aceite:** monorepo com `rootDir: apps/api` deploya; mudar `version` para 22 aparece no Dockerfile do `recipe`; segundo deploy sem mudança de deps é pelo menos 50% mais rápido no log.
 
 ### Fase 1 — Python de verdade
 
-- [ ] Receita multi-stage: `pip`, `poetry` (export ou `poetry install --only main`), **`uv`** (`uv sync --frozen`), `pipenv`
-- [ ] `version` 3.10–3.13; `requires-python` do `pyproject` respeitado
-- [ ] Django: `release = migrate --noinput` sugerido; `collectstatic` na build quando `STATIC_ROOT` existir; `gunicorn` com workers pela CPU do limite
-- [ ] FastAPI/Flask: `uvicorn`/`gunicorn` com porta do `internalPort`
-- [ ] Processos: `worker` (Celery/RQ/arq) e `cron` (`manage.py <cmd>`) na mesma imagem
-- [ ] `.dockerignore` gerado (`.venv`, `__pycache__`, `*.pyc`, `.git`)
-- [ ] Usuário não-root; `PYTHONDONTWRITEBYTECODE`, `PYTHONUNBUFFERED`
+- [x] Receita multi-stage: `pip`, `poetry` (export ou `poetry install --only main`), **`uv`** (`uv sync --frozen`), `pipenv`
+- [x] `version` 3.10–3.13; `requires-python` do `pyproject` respeitado
+- [x] Django: `release = migrate --noinput` sugerido; `collectstatic` na build quando `STATIC_ROOT` existir; `gunicorn` com workers pela CPU do limite
+- [x] FastAPI/Flask: `uvicorn`/`gunicorn` com porta do `internalPort`
+- [x] Processos: `worker` (Celery/RQ/arq) e `cron` (`manage.py <cmd>`) na mesma imagem
+- [x] `.dockerignore` gerado (`.venv`, `__pycache__`, `*.pyc`, `.git`)
+- [x] Usuário não-root; `PYTHONDONTWRITEBYTECODE`, `PYTHONUNBUFFERED`
 
 **Aceite:** três repos reais — Django com Poetry, FastAPI com uv, Flask com requirements — deployam sem Dockerfile; Django com migração quebrada falha no `release` e o app anterior continua respondendo.
 
 ### Fase 2 — Deploy sem queda + hooks
 
-- [ ] `deploy.strategy`; default `blue-green` quando `web` tem healthcheck
-- [ ] Slot `green` em porta livre; readiness; Caddy troca upstream; `blue` drena com `SIGTERM` e `t: 15`
-- [ ] App sem domínio: aviso e `recreate`
-- [ ] Processo `release` antes do swap; falha aborta
-- [ ] Hooks `pre_deploy`/`post_deploy` dentro do container da release
-- [ ] Rollback via swap de slot
-- [ ] `downtimeMs` medido pelo probe e gravado no deployment; card mostra “sem queda” ou os ms
+- [x] `deploy.strategy`; default `blue-green` quando `web` tem healthcheck
+- [x] Slot `green` em porta livre; readiness; Caddy troca upstream; `blue` drena com `SIGTERM` e `t: 15`
+- [x] App sem domínio: aviso e `recreate`
+- [x] Processo `release` antes do swap; falha aborta
+- [x] Hooks `pre_deploy`/`post_deploy` dentro do container da release
+- [x] Rollback via swap de slot
+- [x] `downtimeMs` medido pelo probe e gravado no deployment; card mostra “sem queda” ou os ms
 
 **Aceite:** deploy de app `web` com healthcheck sob `curl` em loop: zero erros 5xx; readiness falhando deixa o `blue` no ar e o deploy `failed`.
 
 ### Fase 3 — CI/CD
 
-- [ ] Webhook aceita `push` de tag; `deploy.onTag` glob decide produção
-- [ ] Previews por PR: `opened`/`synchronize` cria/atualiza, `closed` remove; subdomínio `pr-<n>.<app>.<dominio-base>`; TTL; cota; `PREVIEW_*` env
-- [ ] `promote` de imagem de preview para produção
-- [ ] Deploy key SSH ED25519 por app; clone via `git@`; `known_hosts` fixo por provedor
-- [ ] GitLab, Gitea, Bitbucket: verificação de assinatura/token e parse de eventos
-- [ ] Comentário no PR com URL do preview (GitHub/GitLab/Gitea), bloqueado em LOCAL_MODE
-- [ ] Aba **CI/CD** mostra: branch de produção, tag pattern, previews ativos, chave pública para colar no provedor, workflow YAML (já existe)
+- [x] Webhook aceita `push` de tag; `deploy.onTag` glob decide produção
+- [x] Previews por PR: `opened`/`synchronize` cria/atualiza, `closed` remove; subdomínio `pr-<n>.<app>.<dominio-base>`; TTL; cota; `PREVIEW_*` env
+- [x] `promote` de imagem de preview para produção
+- [x] Deploy key SSH ED25519 por app; clone via `git@`; `known_hosts` fixo por provedor
+- [x] GitLab, Gitea, Bitbucket: verificação de assinatura/token e parse de eventos
+- [x] Comentário no PR com URL do preview (GitHub/GitLab/Gitea), bloqueado em LOCAL_MODE
+- [x] Aba **CI/CD** mostra: branch de produção, tag pattern, previews ativos, chave pública para colar no provedor, workflow YAML (já existe)
 
 **Aceite:** PR aberto no GitHub gera URL em < 3 min; fechar remove; push `v1.2.0` faz deploy de produção; repo privado clona com deploy key sem PAT.
 
 ### Fase 4 — Novos runtimes
 
-- [ ] Go, Rust, PHP (Laravel/Symfony), Java (Spring/Maven/Gradle), Ruby (Rails), Bun, Deno — receita, detecção, versão, `release` sugerido onde faz sentido
-- [ ] Cada receita com teste de geração (snapshot do Dockerfile) e usuário não-root
-- [ ] Ícone e rótulo no card e no `inspect`
+- [x] Go, Rust, PHP (Laravel/Symfony), Java (Spring/Maven/Gradle), Ruby (Rails), Bun, Deno — receita, detecção, versão, `release` sugerido onde faz sentido
+- [x] Cada receita com teste de geração (snapshot do Dockerfile) e usuário não-root
+- [x] Ícone e rótulo no card e no `inspect`
 
 **Aceite:** um repo exemplo de cada runtime deploya sem Dockerfile e responde no healthcheck.
 
 ### Fase 5 — Stacks compose e processos sem porta
 
-- [ ] `sourceType: 'compose'` (admin): upload/colar ou do repositório; validador com allowlist e `plan` explicando bloqueios
-- [ ] Serviços do compose viram containers `aegis-app-<name>-<service>`, rede do painel, portas `127.0.0.1` salvo domínio
-- [ ] Um serviço marcado `web` recebe o Caddy; os outros são internos
-- [ ] `worker` com `replicas` (1–4) e `cron` com `schedule` como processos de qualquer app
-- [ ] One-off `POST /apps/:id/run` com stream
-- [ ] Métricas e logs por processo (o `AppLogStore` já existe; ganha `process`)
+- [x] `sourceType: 'compose'` (admin): upload/colar ou do repositório; validador com allowlist e `plan` explicando bloqueios
+- [x] Serviços do compose viram containers `aegis-app-<name>-<service>`, rede do painel, portas `127.0.0.1` salvo domínio
+- [x] Um serviço marcado `web` recebe o Caddy; os outros são internos
+- [x] `worker` com `replicas` (1–4) e `cron` com `schedule` como processos de qualquer app
+- [x] One-off `POST /apps/:id/run` com stream
+- [x] Métricas e logs por processo (o `AppLogStore` já existe; ganha `process`)
 
 **Aceite:** stack `app + redis + worker` sobe de um compose; `privileged: true` é recusado com mensagem clara; `run "python manage.py createsuperuser"` executa e encerra.
 

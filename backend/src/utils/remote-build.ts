@@ -22,7 +22,7 @@ export interface BuildContextPlan {
 
 export interface BuildContextInput {
   isRemote: boolean;
-  sourceType: 'git' | 'dockerfile' | 'image';
+  sourceType: 'git' | 'dockerfile' | 'image' | 'compose';
   gitUrl?: string;
   /** True when the app carries a GitHub PAT for a private repository. */
   hasToken: boolean;

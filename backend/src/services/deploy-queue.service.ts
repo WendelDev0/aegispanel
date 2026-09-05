@@ -26,6 +26,9 @@ export interface DeployRequest {
   authorName?: string;
   branch?: string;
   triggeredBy: 'webhook' | 'manual' | 'github_action';
+  noCache?: boolean;
+  tag?: string;
+  preview?: { prNumber: number; branch: string; headSha: string };
 }
 
 interface QueuedPayload {
@@ -144,6 +147,7 @@ export class DeployQueueService {
         id: deployment.id,
         appId: app.id,
         nodeId: app.nodeId || LOCAL_NODE_ID,
+        lane: request.preview ? `preview-${request.preview.prNumber}` : 'production',
         enqueuedAtMs: Date.now(),
         payload: { app, request, resolve, reject },
       };

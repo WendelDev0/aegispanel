@@ -78,6 +78,70 @@ export interface DeploymentRecord {
   triggeredBy: 'webhook' | 'manual' | 'github_action';
   createdAt: string;
   finishedAt?: string;
+  slot?: 'blue' | 'green';
+  previewOf?: number;
+  tag?: string;
+  recipeHash?: string;
+  cacheHit?: boolean;
+  downtimeMs?: number;
+}
+
+export type AppRuntime =
+  | 'node'
+  | 'python'
+  | 'static'
+  | 'go'
+  | 'rust'
+  | 'php'
+  | 'java'
+  | 'ruby'
+  | 'bun'
+  | 'deno'
+  | 'docker';
+
+export interface AppBuildConfig {
+  runtime: AppRuntime;
+  version?: string;
+  rootDir?: string;
+  dockerfilePath?: string;
+  outputDir?: string;
+  installCommand?: string;
+  buildCommand?: string;
+  startCommand?: string;
+  packageManager?: string;
+  source: 'detected' | 'toml' | 'manual';
+}
+
+export interface AppProcess {
+  name: string;
+  type: 'web' | 'worker' | 'cron' | 'release';
+  command: string;
+  schedule?: string;
+  replicas?: number;
+}
+
+export interface AppDeployConfig {
+  strategy: 'blue-green' | 'recreate';
+  onTag?: string;
+  cache: boolean;
+  hooks?: { preDeploy?: string; postDeploy?: string };
+  previews?: {
+    enabled: boolean;
+    maxConcurrent: number;
+    ttlHours: number;
+    domainPattern: string;
+  };
+}
+
+export interface AppPreviewRecord {
+  id: string;
+  appId: string;
+  prNumber: number;
+  branch: string;
+  headSha: string;
+  domain?: string;
+  status: 'building' | 'running' | 'error' | 'expired';
+  expiresAt: string;
 }
 
 /**
@@ -102,7 +166,13 @@ export interface ResourceLimits {
 export interface AppRecord {
   id: string;
   name: string;
-  sourceType: 'git' | 'dockerfile' | 'image';
+  sourceType: 'git' | 'dockerfile' | 'image' | 'compose';
+  buildConfig?: AppBuildConfig;
+  processes?: AppProcess[];
+  deploy?: AppDeployConfig;
+  hasDeployKey?: boolean;
+  deployKey?: { publicKey: string; fingerprint: string };
+  lastInspection?: { type: string; frameworkName: string; packageManager?: string };
   gitUrl?: string;
   branch?: string;
   imageName?: string;

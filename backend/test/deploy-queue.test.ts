@@ -81,6 +81,16 @@ test('a second request for a waiting app supersedes it', () => {
   assert.equal(decision.supersededId, 'd1');
 });
 
+test('a preview does not supersede production of the same app', () => {
+  const queue = [{ ...entry('d1', 'app-a', 'node-local', 100), lane: 'production' }];
+  const decision = admit(queue, new Set(), {
+    ...entry('d2', 'app-a', 'node-local', 200),
+    lane: 'preview-12',
+  });
+  assert.equal(decision.admitted, true);
+  assert.equal(decision.supersededId, undefined);
+});
+
 test('a request for a different app supersedes nothing', () => {
   const queue = [entry('d1', 'app-a', 'node-local', 100)];
   const decision = admit(queue, new Set(), entry('d2', 'app-b', 'node-local', 200));

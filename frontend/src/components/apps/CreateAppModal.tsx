@@ -57,6 +57,8 @@ export const CreateAppModal: React.FC<CreateAppModalProps> = ({ onCreated, onCan
       author: string;
       date: string;
     };
+    proposedBuildConfig?: { runtime: string; version?: string; source: string };
+    proposedProcesses?: Array<{ name: string; type: string; command: string }>;
   } | null>(null);
 
   useEffect(() => {
@@ -158,6 +160,8 @@ export const CreateAppModal: React.FC<CreateAppModalProps> = ({ onCreated, onCan
         domain: createDomain.trim() || undefined,
         env: envObj,
         nodeId,
+        buildConfig: inspectionResult?.proposedBuildConfig,
+        processes: inspectionResult?.proposedProcesses,
       });
 
       onCreated(res.data);

@@ -679,6 +679,12 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                               Docker
                             </span>
                           )}
+                          {app.buildConfig?.runtime && (
+                            <span className="text-[10px] font-mono text-on-surface bg-surface-container-high px-2 py-0.5 rounded border border-outline-variant">
+                              {app.buildConfig.runtime}
+                              {app.buildConfig.version ? ` ${app.buildConfig.version}` : ''}
+                            </span>
+                          )}
                         </div>
 
                         <p className="text-[11px] font-mono text-on-surface-variant truncate mt-0.5 max-w-sm">

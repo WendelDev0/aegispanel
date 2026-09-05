@@ -1,9 +1,21 @@
 import { Router, Request, Response } from 'express';
-import crypto from 'crypto';
 import { dbStorage } from '../db/storage.js';
 import { CicdService } from '../services/cicd.service.js';
 import { AppService } from '../services/app.service.js';
 import { AuditStore } from '../utils/audit.store.js';
+import {
+  authorizeWebhook,
+  parseWebhookEvent,
+  type WebhookHeaders,
+} from '../utils/git-webhook.js';
+import { matchTagGlob } from '../utils/app-build.js';
+import {
+  decidePreviewAction,
+  defaultPreviewConfig,
+  previewDomain,
+  previewExpiresAt,
+} from '../utils/app-preview.js';
+import { CONFIG } from '../config.js';
 
 export const webhookRouter = Router();
 
@@ -11,25 +23,19 @@ interface RawBodyRequest extends Request {
   rawBody?: string;
 }
 
-/**
- * The raw payload is needed to verify GitHub's HMAC signature, which is
- * computed over the exact bytes sent. Re-serialising the parsed object would
- * produce a different string and fail verification.
- */
-/** Length-safe constant-time string comparison. */
-function safeEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  return bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
-}
-
 function webhookIp(req: Request): string | undefined {
   const ip = req.ip || req.socket.remoteAddress;
   return ip?.replace(/^::ffff:/, '') || undefined;
 }
 
-// Simple per-app throttle so a leaked URL cannot be used to spin the build
-// queue continuously.
+function headerMap(req: Request): WebhookHeaders {
+  const headers: WebhookHeaders = {};
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (typeof value === 'string') headers[key.toLowerCase()] = value;
+  }
+  return headers;
+}
+
 const lastTrigger = new Map<string, number>();
 const MIN_INTERVAL_MS = 5000;
 
@@ -42,15 +48,6 @@ webhookRouter.post('/deploy/:appId', async (req: RawBodyRequest, res: Response):
       return;
     }
 
-    /**
-     * Authentication is mandatory.
-     *
-     * The previous check was `if (app.webhookSecret && secret && ...)`, and
-     * webhookSecret was never assigned anywhere, so the condition was always
-     * false and the endpoint accepted any caller. Apps created before this
-     * change have no secret yet and are rejected until one is generated in the
-     * panel, rather than being left open.
-     */
     if (!app.webhookSecret) {
       AuditStore.append({
         ip: webhookIp(req),
@@ -66,15 +63,9 @@ webhookRouter.post('/deploy/:appId', async (req: RawBodyRequest, res: Response):
       return;
     }
 
-    const providedSecret = req.headers['x-aegis-secret'] as string | undefined;
-    const githubSignature = req.headers['x-hub-signature-256'] as string | undefined;
-
-    const authorized = githubSignature
-      ? CicdService.verifyGitHubSignature(req.rawBody || '', githubSignature, AppService.getWebhookSecret(app))
-      : Boolean(providedSecret) && safeEqual(providedSecret!, AppService.getWebhookSecret(app) || '');
-
-    if (!authorized) {
-      console.warn(`⛔ Webhook rejeitado para "${app.name}": credencial inválida.`);
+    const headers = headerMap(req);
+    const authorized = authorizeWebhook(headers, req.rawBody || '', AppService.getWebhookSecret(app));
+    if (!authorized.ok) {
       AuditStore.append({
         ip: webhookIp(req),
         action: 'webhook.deploy.reject',
@@ -82,7 +73,7 @@ webhookRouter.post('/deploy/:appId', async (req: RawBodyRequest, res: Response):
         target: { type: 'app', id: app.id, name: app.name },
         meta: { reason: 'invalid_credential' },
       });
-      res.status(403).json({ error: 'Credencial de webhook inválida' });
+      res.status(403).json({ error: authorized.error });
       return;
     }
 
@@ -94,47 +85,143 @@ webhookRouter.post('/deploy/:appId', async (req: RawBodyRequest, res: Response):
     }
     lastTrigger.set(appId, now);
 
-    const body = req.body || {};
     if (app.autoDeploy === false) {
       res.status(409).json({ error: 'Deploy automático está desativado para esta aplicação.' });
       return;
     }
-    const headCommit = body.head_commit || body;
-    const commitHash =
-      headCommit.id || body.commit || (headCommit.sha ? String(headCommit.sha).substring(0, 8) : undefined);
-    const commitMessage = headCommit.message || body.message || 'GitHub Push Auto-Deploy';
-    const authorName = headCommit.author?.name || headCommit.author?.username || body.author || 'GitHub';
-    const branch = body.ref ? String(body.ref).replace('refs/heads/', '') : body.branch || app.branch || 'main';
+
+    const parsed = parseWebhookEvent(headers, req.body);
+    if (!parsed.ok) {
+      res.status(parsed.status).json({ error: parsed.error });
+      return;
+    }
+
+    if (parsed.event.kind === 'pr') {
+      return handlePreview(app, parsed.event, res, req);
+    }
+
+    if (parsed.event.kind === 'tag') {
+      const glob = app.deploy?.onTag;
+      if (!glob || !matchTagGlob(parsed.event.tag, glob)) {
+        res.status(202).json({
+          accepted: true,
+          ignored: true,
+          reason: glob ? `Tag ${parsed.event.tag} fora de ${glob}.` : 'Deploy por tag não configurado.',
+        });
+        return;
+      }
+      AuditStore.append({
+        ip: webhookIp(req),
+        action: 'webhook.deploy.accept',
+        outcome: 'success',
+        target: { type: 'app', id: app.id, name: app.name },
+        meta: { tag: parsed.event.tag, commitHash: parsed.event.headSha },
+      });
+      CicdService.executeDeploy(app, {
+        commitHash: parsed.event.headSha,
+        commitMessage: parsed.event.message || `Tag ${parsed.event.tag}`,
+        authorName: parsed.event.author || 'git',
+        branch: app.deployBranch || app.branch || 'main',
+        triggeredBy: 'webhook',
+        tag: parsed.event.tag,
+      }).catch((err) => console.error(`Webhook tag deploy error for ${app.name}:`, err.message));
+      res.status(202).json({ accepted: true, message: `Deploy da tag ${parsed.event.tag} aceito.` });
+      return;
+    }
+
+    const branch = parsed.event.branch;
     const expectedBranch = app.deployBranch || app.branch || 'main';
     if (branch !== expectedBranch) {
       res.status(202).json({ accepted: true, ignored: true, reason: `Branch ignorada; esperado: ${expectedBranch}.` });
       return;
     }
 
-    console.log(`🚀 [CI/CD] Webhook aceito para "${app.name}" na branch "${branch}" - commit ${commitHash}`);
-
     AuditStore.append({
       ip: webhookIp(req),
       action: 'webhook.deploy.accept',
       outcome: 'success',
       target: { type: 'app', id: app.id, name: app.name },
-      meta: { branch, commitHash },
+      meta: { branch, commitHash: parsed.event.headSha },
     });
 
     CicdService.executeDeploy(app, {
-      commitHash,
-      commitMessage,
-      authorName,
+      commitHash: parsed.event.headSha,
+      commitMessage: parsed.event.message || 'Git Push Auto-Deploy',
+      authorName: parsed.event.author || 'git',
       branch,
-      triggeredBy: body.head_commit ? 'webhook' : 'github_action',
+      triggeredBy: headers['x-github-event'] || headers['x-aegis-secret'] ? 'webhook' : 'github_action',
     }).catch((err) => console.error(`Webhook deploy error for ${app.name}:`, err.message));
 
-    res.status(202).json({
-      accepted: true,
-      message: `Deploy aceito para ${app.name}`,
-    });
+    res.status(202).json({ accepted: true, message: `Deploy aceito para ${app.name}` });
   } catch (err: any) {
     console.error('CI/CD deploy execution error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+function handlePreview(
+  app: ReturnType<typeof dbStorage.getAppById> & object,
+  event: Extract<import('../utils/git-webhook.js').WebhookEvent, { kind: 'pr' }>,
+  res: Response,
+  req: Request
+): void {
+  const config = app.deploy?.previews || defaultPreviewConfig();
+  const existing = dbStorage.getAppPreview(app.id, event.number);
+  const all = dbStorage.getAppPreviews(app.id);
+  const decision = decidePreviewAction(event, existing, { ...defaultPreviewConfig(), ...config }, all);
+
+  if (decision.action === 'ignore') {
+    res.status(202).json({ accepted: true, ignored: true, reason: decision.reason });
+    return;
+  }
+  if (decision.action === 'remove') {
+    dbStorage.removeAppPreview(app.id, event.number);
+    res.status(202).json({ accepted: true, removed: true });
+    return;
+  }
+
+  const settings = dbStorage.getSettings();
+  const base = config.domainPattern
+    ? undefined
+    : settings.previewBaseDomain || settings.panelDomain || 'preview.localhost';
+  const domain = previewDomain(event.number, config.domainPattern || 'pr-{n}.{base}', {
+    app: app.name,
+    base,
+  });
+  const record = {
+    id: existing?.id || `prev-${app.id}-${event.number}`,
+    appId: app.id,
+    prNumber: event.number,
+    branch: event.branch,
+    headSha: event.headSha,
+    domain,
+    containerIds: existing?.containerIds || [],
+    createdAt: existing?.createdAt || new Date().toISOString(),
+    expiresAt: previewExpiresAt(config.ttlHours),
+    status: 'building' as const,
+  };
+  dbStorage.saveAppPreview(record);
+
+  if (CONFIG.LOCAL_MODE) {
+    console.warn('Modo local: preview criado sem comentar no pull request.');
+  }
+
+  CicdService.executeDeploy(app, {
+    commitHash: event.headSha,
+    commitMessage: `Preview PR #${event.number}`,
+    authorName: 'preview',
+    branch: event.branch,
+    triggeredBy: 'webhook',
+    preview: { prNumber: event.number, branch: event.branch, headSha: event.headSha },
+  }).catch((err) => console.error(`Preview deploy error for ${app.name}:`, err.message));
+
+  AuditStore.append({
+    ip: webhookIp(req),
+    action: 'webhook.preview.accept',
+    outcome: 'success',
+    target: { type: 'app', id: app.id, name: app.name },
+    meta: { pr: event.number, domain },
+  });
+
+  res.status(202).json({ accepted: true, preview: true, domain, action: decision.action });
+}

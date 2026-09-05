@@ -28,7 +28,15 @@ import {
   deployAppBodySchema,
   fileContentBodySchema,
   emptyBodySchema,
+  updateBuildConfigBodySchema,
+  updateProcessesBodySchema,
+  updateDeployConfigBodySchema,
+  runAppCommandBodySchema,
 } from '../validation/schemas.js';
+import { validateCompose } from '../utils/app-compose.js';
+import { CronService } from '../services/cron.service.js';
+import { AuditStore } from '../utils/audit.store.js';
+import { defaultPreviewConfig } from '../utils/app-preview.js';
 
 export const appRouter = Router();
 
@@ -80,6 +88,10 @@ appRouter.get('/queue', requireWrite, (_req: Request, res: Response): void => {
   res.json(DeployQueueService.status());
 });
 
+appRouter.get('/stats', (_req: Request, res: Response): void => {
+  res.json(AppService.stats());
+});
+
 appRouter.get('/:id', (req: Request, res: Response): void => {
   const app = dbStorage.getAppById(req.params.id);
   if (!app) {
@@ -102,7 +114,11 @@ appRouter.post('/inspect-repo', requireWrite, validateBody(inspectRepoBodySchema
 
 appRouter.post('/', requireWrite, validateBody(createAppBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
-    const { name, sourceType, gitUrl, branch, imageName, port, internalPort, env, domain, githubToken, autoDeploy, deployBranch, nodeId } = req.body;
+    const { name, sourceType, gitUrl, branch, imageName, composeYaml, port, internalPort, env, domain, githubToken, autoDeploy, deployBranch, nodeId, buildConfig, processes, gitProvider } = req.body;
+    if (sourceType === 'compose' && (req as AuthRequest).user?.role !== 'admin') {
+      res.status(403).json({ error: 'Apenas administradores podem criar apps a partir de compose.' });
+      return;
+    }
     if (!name) {
       res.status(400).json({ error: 'Nome é obrigatório' });
       return;
@@ -131,6 +147,10 @@ appRouter.post('/', requireWrite, validateBody(createAppBodySchema), async (req:
       deployBranch,
       nodeId,
       limits: req.body.limits,
+      composeYaml,
+      buildConfig,
+      processes,
+      gitProvider,
     });
 
     // Returned immediately so the client can open the live deploy stream; the
@@ -421,6 +441,7 @@ appRouter.post('/:id/deploy', requireWrite, validateBody(deployAppBodySchema), a
     CicdService.executeDeploy(app, {
       commitMessage: req.body.commitMessage || 'Deploy manual disparado pelo painel',
       triggeredBy: 'manual',
+      noCache: Boolean(req.body.noCache),
     }).catch((err) => {
       console.error(`Manual deploy error for app ${app.name}:`, err.message);
     });
@@ -563,6 +584,159 @@ appRouter.get('/:id/workflow', requireWrite, (req: Request, res: Response): void
     return;
   }
   res.json({ yaml: CicdService.generateGitHubWorkflow(app, hostUrl) });
+});
+
+appRouter.get('/:id/recipe', (req: Request, res: Response): void => {
+  const app = dbStorage.getAppById(req.params.id);
+  if (!app) {
+    res.status(404).json({ error: 'App não encontrado' });
+    return;
+  }
+  CicdService.recipeForApp(app)
+    .then((recipe) => res.json(recipe))
+    .catch((err: any) => res.status(400).json({ error: err.message }));
+});
+
+appRouter.put('/:id/build-config', requireWrite, validateBody(updateBuildConfigBodySchema), (req: Request, res: Response): void => {
+  try {
+    res.json(AppService.toPublic(AppService.updateBuildConfig(req.params.id, { ...req.body, source: 'manual' })));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+appRouter.put('/:id/processes', requireWrite, validateBody(updateProcessesBodySchema), (req: Request, res: Response): void => {
+  try {
+    const processes = req.body.processes || [];
+    for (const proc of processes) {
+      if (proc.type === 'cron' && proc.schedule && !CronService.isValidSchedule(proc.schedule)) {
+        res.status(400).json({ error: `Schedule cron inválido em "${proc.name}".` });
+        return;
+      }
+    }
+    res.json(AppService.toPublic(AppService.updateProcesses(req.params.id, processes)));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+appRouter.put('/:id/deploy-config', requireWrite, validateBody(updateDeployConfigBodySchema), (req: AuthRequest, res: Response): void => {
+  try {
+    if (req.body.previews?.enabled && req.user?.role !== 'admin') {
+      res.status(403).json({ error: 'Apenas administradores ligam previews com domínio.' });
+      return;
+    }
+    const body = req.body;
+    if (body.previews && !body.previews.domainPattern) {
+      body.previews = { ...defaultPreviewConfig(), ...body.previews };
+    }
+    res.json(AppService.toPublic(AppService.updateDeployConfig(req.params.id, body)));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+appRouter.post('/:id/deploy-key', requireAdmin, validateBody(emptyBodySchema), (req: AuthRequest, res: Response): void => {
+  try {
+    const key = AppService.createDeployKey(req.params.id);
+    AuditStore.append({
+      actor: req.user ? { id: req.user.id, username: req.user.username, role: req.user.role } : undefined,
+      action: 'app.deploy-key.create',
+      outcome: 'success',
+      target: { type: 'app', id: req.params.id },
+    });
+    res.json(key);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+appRouter.delete('/:id/deploy-key', requireAdmin, validateBody(emptyBodySchema), (req: AuthRequest, res: Response): void => {
+  try {
+    AuditStore.append({
+      actor: req.user ? { id: req.user.id, username: req.user.username, role: req.user.role } : undefined,
+      action: 'app.deploy-key.delete',
+      outcome: 'success',
+      target: { type: 'app', id: req.params.id },
+    });
+    res.json(AppService.toPublic(AppService.deleteDeployKey(req.params.id)));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+appRouter.post('/:id/run', requireWrite, validateBody(runAppCommandBodySchema), async (req: AuthRequest, res: Response): Promise<void> => {
+  const app = dbStorage.getAppById(req.params.id);
+  if (!app) {
+    res.status(404).json({ error: 'App não encontrado' });
+    return;
+  }
+  try {
+    AuditStore.append({
+      actor: req.user ? { id: req.user.id, username: req.user.username, role: req.user.role } : undefined,
+      action: 'app.run',
+      outcome: 'success',
+      target: { type: 'app', id: app.id, name: app.name },
+      meta: { command: req.body.command },
+    });
+    res.json(await CicdService.runOneOff(app, req.body.command));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+appRouter.get('/:id/previews', (req: Request, res: Response): void => {
+  res.json(dbStorage.getAppPreviews(req.params.id));
+});
+
+appRouter.delete('/:id/previews/:prNumber', requireWrite, validateBody(emptyBodySchema), (req: Request, res: Response): void => {
+  const prNumber = Number(req.params.prNumber);
+  const preview = dbStorage.getAppPreview(req.params.id, prNumber);
+  if (!preview) {
+    res.status(404).json({ error: 'Preview não encontrado' });
+    return;
+  }
+  dbStorage.removeAppPreview(req.params.id, prNumber);
+  res.json({ success: true });
+});
+
+appRouter.get('/:id/compose/plan', (req: Request, res: Response): void => {
+  const app = dbStorage.getAppById(req.params.id);
+  if (!app) {
+    res.status(404).json({ error: 'App não encontrado' });
+    return;
+  }
+  const yaml = app.composeYaml;
+  if (!yaml) {
+    res.status(400).json({ error: 'Esta aplicação não tem compose.' });
+    return;
+  }
+  const allowed = path.join(CONFIG.DATA_DIR, 'apps', app.id, 'volumes');
+  res.json(validateCompose(yaml, allowed));
+});
+
+appRouter.post('/:id/deployments/:depId/promote', requireWrite, validateBody(emptyBodySchema), async (req: AuthRequest, res: Response): Promise<void> => {
+  const app = dbStorage.getAppById(req.params.id);
+  const dep = dbStorage.getDeploymentById(req.params.id, req.params.depId);
+  if (!app || !dep) {
+    res.status(404).json({ error: 'Deploy não encontrado' });
+    return;
+  }
+  AuditStore.append({
+    actor: req.user ? { id: req.user.id, username: req.user.username, role: req.user.role } : undefined,
+    action: 'app.promote',
+    outcome: 'success',
+    target: { type: 'app', id: app.id, name: app.name },
+    meta: { deploymentId: dep.id },
+  });
+  CicdService.executeDeploy(app, {
+    commitHash: dep.commitHash,
+    commitMessage: `[Promote] ${dep.commitMessage || dep.commitHash}`,
+    authorName: dep.authorName,
+    branch: dep.branch,
+    triggeredBy: 'manual',
+  }).catch((err) => console.error(`Promote error for ${app.name}:`, err.message));
+  res.status(202).json({ accepted: true });
 });
 
 appRouter.post('/:id/start', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response) => {

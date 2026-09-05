@@ -18,6 +18,8 @@ import {
   Sliders,
   Webhook,
   FileCode2,
+  Boxes,
+  Hammer,
   FolderTree,
   Trash2,
   Copy,
@@ -40,11 +42,15 @@ import { socket } from '../services/socket.js';
 import { EnvEditor } from '../components/EnvEditor.js';
 import { LiveDeployModal, type LiveDeployState } from '../components/apps/LiveDeployModal.js';
 import { BuildLogsModal } from '../components/apps/BuildLogsModal.js';
+import { AppBuildPanel } from '../components/apps/AppBuildPanel.js';
+import { AppProcessesPanel } from '../components/apps/AppProcessesPanel.js';
 import type {
   AppRecord,
   DeploymentRecord,
   AppMetricsSnapshot,
   AlertHistoryRecord,
+  AppPreviewRecord,
+  AppDeployConfig,
 } from '../types/index.js';
 
 type Tab =
@@ -54,12 +60,16 @@ type Tab =
   | 'env'
   | 'network'
   | 'cicd'
+  | 'build'
+  | 'processes'
   | 'files'
   | 'settings';
 
 const TABS: Array<{ id: Tab; label: string; icon: React.ReactNode }> = [
   { id: 'overview', label: 'Visão Geral', icon: <Activity className="w-3.5 h-3.5" /> },
   { id: 'deploys', label: 'Deploys & CI/CD', icon: <Clock className="w-3.5 h-3.5" /> },
+  { id: 'build', label: 'Build', icon: <Hammer className="w-3.5 h-3.5" /> },
+  { id: 'processes', label: 'Processos', icon: <Boxes className="w-3.5 h-3.5" /> },
   { id: 'logs', label: 'Logs ao Vivo', icon: <Terminal className="w-3.5 h-3.5" /> },
   { id: 'env', label: 'Variáveis .env', icon: <Variable className="w-3.5 h-3.5" /> },
   { id: 'network', label: 'Domínio & Rede', icon: <Globe className="w-3.5 h-3.5" /> },
@@ -144,6 +154,10 @@ export const AppDetailPage: React.FC<AppDetailPageProps> = ({ appId, onBack }) =
   const [settingsName, setSettingsName] = useState('');
   const [settingsMemoryMb, setSettingsMemoryMb] = useState(512);
   const [settingsCpus, setSettingsCpus] = useState(1);
+  const [previews, setPreviews] = useState<AppPreviewRecord[]>([]);
+  const [onTag, setOnTag] = useState('');
+  const [deployStrategy, setDeployStrategy] = useState<AppDeployConfig['strategy']>('recreate');
+  const [deployCache, setDeployCache] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -271,7 +285,19 @@ export const AppDetailPage: React.FC<AppDetailPageProps> = ({ appId, onBack }) =
       .get(`/apps/${appId}/workflow`)
       .then((res) => setWorkflowYaml(res.data.yaml))
       .catch(() => setWorkflowYaml(''));
+
+    api
+      .get(`/apps/${appId}/previews`)
+      .then((res) => setPreviews(Array.isArray(res.data) ? res.data : []))
+      .catch(() => setPreviews([]));
   }, [appId, tab]);
+
+  useEffect(() => {
+    if (!app?.deploy) return;
+    setOnTag(app.deploy.onTag || '');
+    setDeployStrategy(app.deploy.strategy || 'recreate');
+    setDeployCache(app.deploy.cache !== false);
+  }, [app?.deploy]);
 
   // Load Files
   const loadFiles = useCallback(
@@ -714,9 +740,11 @@ export const AppDetailPage: React.FC<AppDetailPageProps> = ({ appId, onBack }) =
                     : 'Aguardando'}
               </div>
               <p className="text-[11px] text-on-surface-variant/70 mt-2">
-                {app.health?.checkedAt
-                  ? new Date(app.health.checkedAt).toLocaleTimeString('pt-BR')
-                  : 'Ainda não sondado'}
+                {app.buildConfig
+                  ? `${app.buildConfig.runtime} ${app.buildConfig.version || ''} · ${app.deploy?.strategy || 'recreate'}`
+                  : app.health?.checkedAt
+                    ? new Date(app.health.checkedAt).toLocaleTimeString('pt-BR')
+                    : 'Ainda não sondado'}
               </p>
             </div>
           </div>
@@ -1172,8 +1200,115 @@ export const AppDetailPage: React.FC<AppDetailPageProps> = ({ appId, onBack }) =
               <pre>{workflowYaml || '# Carregando configuração de workflow...'}</pre>
             </div>
           </div>
+
+          <div className="p-5 rounded-lg bg-surface-container border border-outline-variant space-y-3">
+            <h3 className="text-sm font-bold text-white">Deploy por tag, estratégia e cache</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <label className="block text-xs text-on-surface-variant">
+                Tag de produção
+                <input
+                  value={onTag}
+                  onChange={(e) => setOnTag(e.target.value)}
+                  placeholder="v*"
+                  className="mt-1 w-full bg-surface-container-low border border-outline-variant rounded px-3 py-2 text-xs text-white font-mono"
+                />
+              </label>
+              <label className="block text-xs text-on-surface-variant">
+                Estratégia
+                <select
+                  value={deployStrategy}
+                  onChange={(e) => setDeployStrategy(e.target.value as AppDeployConfig['strategy'])}
+                  className="mt-1 w-full bg-surface-container-low border border-outline-variant rounded px-3 py-2 text-xs text-white"
+                >
+                  <option value="blue-green">blue-green</option>
+                  <option value="recreate">recreate</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-on-surface mt-6">
+                <input
+                  type="checkbox"
+                  checked={deployCache}
+                  onChange={(e) => setDeployCache(e.target.checked)}
+                />
+                Cache de build
+              </label>
+            </div>
+            <button
+              onClick={async () => {
+                try {
+                  const res = await api.put(`/apps/${app.id}/deploy-config`, {
+                    strategy: deployStrategy,
+                    onTag: onTag || undefined,
+                    cache: deployCache,
+                    previews: app.deploy?.previews,
+                    hooks: app.deploy?.hooks,
+                  });
+                  setApp(res.data);
+                  toast.success('CI/CD atualizado');
+                } catch (err: any) {
+                  toast.error(err.response?.data?.error || err.message);
+                }
+              }}
+              className="px-3 py-1.5 rounded bg-primary text-on-primary text-xs font-semibold"
+            >
+              Salvar CI/CD
+            </button>
+          </div>
+
+          {app.hasDeployKey || app.deployKey ? (
+            <div className="p-5 rounded-lg bg-surface-container border border-outline-variant space-y-2">
+              <h3 className="text-sm font-bold text-white">Deploy key SSH</h3>
+              <p className="text-[11px] text-on-surface-variant font-mono break-all">
+                {app.deployKey?.publicKey}
+              </p>
+              <p className="text-[11px] text-on-surface-variant">Fingerprint: {app.deployKey?.fingerprint}</p>
+            </div>
+          ) : (
+            <div className="p-5 rounded-lg bg-surface-container border border-outline-variant">
+              <button
+                onClick={async () => {
+                  try {
+                    await api.post(`/apps/${app.id}/deploy-key`, {});
+                    const res = await api.get(`/apps/${app.id}`);
+                    setApp(res.data);
+                    toast.success('Chave gerada. Cole a pública no provedor Git.');
+                  } catch (err: any) {
+                    toast.error(err.response?.data?.error || err.message, 'Só o admin gera a chave');
+                  }
+                }}
+                className="px-3 py-1.5 rounded bg-surface-container-high border border-outline-variant text-xs"
+              >
+                Gerar deploy key (admin)
+              </button>
+            </div>
+          )}
+
+          {previews.length > 0 && (
+            <div className="p-5 rounded-lg bg-surface-container border border-outline-variant space-y-2">
+              <h3 className="text-sm font-bold text-white">Previews ativos</h3>
+              {previews.map((p) => (
+                <div key={p.id} className="flex items-center justify-between text-xs text-on-surface">
+                  <span>
+                    PR #{p.prNumber} · {p.domain || p.branch} · {p.status}
+                  </span>
+                  <button
+                    onClick={async () => {
+                      await api.delete(`/apps/${app.id}/previews/${p.prNumber}`, { data: {} });
+                      setPreviews(previews.filter((x) => x.prNumber !== p.prNumber));
+                    }}
+                    className="text-crit"
+                  >
+                    Remover
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
+
+      {tab === 'build' && <AppBuildPanel app={app} onSaved={setApp} />}
+      {tab === 'processes' && <AppProcessesPanel app={app} onSaved={setApp} />}
 
       {/* TAB 7: ARQUIVOS DO PROJETO */}
       {tab === 'files' && (

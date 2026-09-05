@@ -14,10 +14,15 @@
 export interface QueueEntry<T = unknown> {
   /** Deployment id; unique per queued item. */
   id: string;
-  /** Only one deploy per app may be queued at a time. */
+  /** Only one deploy per app+lane may be queued at a time. */
   appId: string;
   /** Serialisation domain. Deploys on different nodes never block each other. */
   nodeId: string;
+  /**
+   * Production and a preview of the same app must not supersede each other:
+   * they target different containers. Default is production.
+   */
+  lane?: string;
   enqueuedAtMs: number;
   payload: T;
 }
@@ -47,7 +52,10 @@ export function admit<T>(
     // against any other waiter for the same app below.
   }
 
-  const existing = queue.find((entry) => entry.appId === candidate.appId);
+  const lane = candidate.lane || 'production';
+  const existing = queue.find(
+    (entry) => entry.appId === candidate.appId && (entry.lane || 'production') === lane
+  );
   if (existing) {
     return {
       admitted: true,
@@ -72,15 +80,15 @@ export function nextRunnable<T>(
   concurrencyFor: (nodeId: string) => number
 ): QueueEntry<T> | null {
   const runningPerNode = new Map<string, number>();
-  const runningApps = new Set<string>();
+  const runningLanes = new Set<string>();
   for (const entry of running) {
     runningPerNode.set(entry.nodeId, (runningPerNode.get(entry.nodeId) || 0) + 1);
-    runningApps.add(entry.appId);
+    runningLanes.add(`${entry.appId}::${entry.lane || 'production'}`);
   }
 
   const fifo = [...queue].sort((a, b) => a.enqueuedAtMs - b.enqueuedAtMs);
   for (const entry of fifo) {
-    if (runningApps.has(entry.appId)) continue;
+    if (runningLanes.has(`${entry.appId}::${entry.lane || 'production'}`)) continue;
     if ((runningPerNode.get(entry.nodeId) || 0) >= concurrencyFor(entry.nodeId)) continue;
     return entry;
   }
