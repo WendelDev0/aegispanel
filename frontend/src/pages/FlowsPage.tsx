@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   MessageCircle,
   Plus,
@@ -7,18 +7,18 @@ import {
   Sparkles,
   Search,
   Bot,
-  Zap,
-  CheckCircle2,
+  Activity,
   AlertTriangle,
   Layers,
   X,
   Radio,
-  ArrowRight,
+  Clock,
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import type { WaFlowRecord, WaFlowTemplate } from '../types/index.js';
 import { FlowEditor } from '../components/flows/FlowEditor.js';
 import { BLOCK_META } from '../components/flows/flow-blocks.js';
+import { Panel, SectionHeader, StatCard, Badge, type Tone } from '../components/ui.js';
 
 function starterGraph() {
   return {
@@ -60,10 +60,73 @@ function hasAiNode(flow: WaFlowRecord): boolean {
   return flow.nodes.some((n) => n.type === 'agent');
 }
 
+/**
+ * One glance has to answer "is this flow healthy?". Errors outrank published,
+ * because a flow that is live and failing is the case the operator must see
+ * first — it used to read as a plain "Ativo" badge like any other.
+ */
+function flowTone(flow: WaFlowRecord): Tone {
+  if ((flow.stats?.errorsToday || 0) > 0) return 'crit';
+  if (!flow.published) return 'neutral';
+  return 'ok';
+}
+
+function compact(value: number): string {
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
+  return String(value);
+}
+
+function lastRunLabel(iso?: string): string {
+  if (!iso) return 'Nunca executou';
+  return new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/** Category is a label, not a status: one tone, no traffic lights. */
+const CATEGORY_LABEL: Record<string, string> = {
+  vendas: 'Vendas',
+  alerta: 'Alerta',
+  suporte: 'Suporte',
+};
+
 interface FlowsPageProps {
   flowId?: string | null;
   onOpen: (id?: string) => void;
 }
+
+const TemplateCard: React.FC<{
+  tmpl: WaFlowTemplate;
+  disabled?: boolean;
+  onUse: () => void;
+}> = ({ tmpl, disabled, onUse }) => (
+  <div className="bg-surface-container-low border border-outline-variant rounded-lg p-4 flex flex-col hover:border-outline transition-colors">
+    <div className="flex items-start justify-between gap-3">
+      <h4 className="text-sm font-semibold text-on-surface tracking-[-0.01em]">{tmpl.name}</h4>
+      <span className="mono-label shrink-0 mt-0.5">{CATEGORY_LABEL[tmpl.category] || tmpl.category}</span>
+    </div>
+
+    <p className="text-xs text-on-surface-variant mt-2 leading-relaxed line-clamp-2">{tmpl.description}</p>
+
+    <div className="flex items-center gap-1.5 text-2xs text-on-surface-variant/70 mt-3">
+      <Layers className="w-3 h-3" />
+      <span className="font-mono tabular-nums">{tmpl.nodes.length}</span>
+      <span>blocos prontos</span>
+    </div>
+
+    <button
+      type="button"
+      onClick={onUse}
+      disabled={disabled}
+      className="mt-4 w-full px-3 py-1.5 rounded border border-outline-variant bg-surface-container hover:border-primary/50 hover:text-primary text-on-surface text-xs font-semibold transition-colors disabled:opacity-50"
+    >
+      Usar este modelo
+    </button>
+  </div>
+);
 
 export const FlowsPage: React.FC<FlowsPageProps> = ({ flowId, onOpen }) => {
   const [flows, setFlows] = useState<WaFlowRecord[]>([]);
@@ -153,99 +216,137 @@ export const FlowsPage: React.FC<FlowsPageProps> = ({ flowId, onOpen }) => {
     }
   };
 
+  const allInstances = useMemo(
+    () => Array.from(new Set(flows.flatMap((f) => f.instanceNames || []))).filter(Boolean),
+    [flows]
+  );
+
+  /** Operation-wide read, so the health question is answered before scrolling. */
+  const totals = useMemo(() => {
+    return flows.reduce(
+      (acc, f) => ({
+        published: acc.published + (f.published ? 1 : 0),
+        runs: acc.runs + (f.stats?.runsToday || 0),
+        errors: acc.errors + (f.stats?.errorsToday || 0),
+        tokens: acc.tokens + (f.stats?.aiTokensToday || 0),
+      }),
+      { published: 0, runs: 0, errors: 0, tokens: 0 }
+    );
+  }, [flows]);
+
+  const filteredFlows = useMemo(
+    () =>
+      flows.filter((f) => {
+        if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase();
+          const matchName = f.name.toLowerCase().includes(q);
+          const matchTrigger = triggerLabel(f).toLowerCase().includes(q);
+          const matchInstance = (f.instanceNames || []).some((i) => i.toLowerCase().includes(q));
+          if (!matchName && !matchTrigger && !matchInstance) return false;
+        }
+        if (selectedInstance !== 'all') {
+          if (selectedInstance === '__global__') {
+            if ((f.instanceNames || []).length > 0) return false;
+          } else if (!(f.instanceNames || []).includes(selectedInstance)) {
+            return false;
+          }
+        }
+        return true;
+      }),
+    [flows, searchQuery, selectedInstance]
+  );
+
   if (flowId) {
     return <FlowEditor flowId={flowId} onBack={() => onOpen()} />;
   }
 
-  // Extract all distinct instances configured in flows
-  const allInstances = Array.from(
-    new Set(flows.flatMap((f) => f.instanceNames || []))
-  ).filter(Boolean);
-
-  const filteredFlows = flows.filter((f) => {
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchName = f.name.toLowerCase().includes(q);
-      const matchTrigger = triggerLabel(f).toLowerCase().includes(q);
-      const matchInstance = (f.instanceNames || []).some((i) => i.toLowerCase().includes(q));
-      if (!matchName && !matchTrigger && !matchInstance) return false;
-    }
-    if (selectedInstance !== 'all') {
-      if (selectedInstance === '__global__') {
-        if ((f.instanceNames || []).length > 0) return false;
-      } else {
-        if (!(f.instanceNames || []).includes(selectedInstance)) return false;
-      }
-    }
-    return true;
-  });
+  const chip = (active: boolean) =>
+    `px-2.5 py-1 rounded border text-xs font-medium shrink-0 transition-colors ${
+      active
+        ? 'bg-primary/10 text-primary border-primary/40'
+        : 'bg-surface-container text-on-surface-variant border-outline-variant hover:text-on-surface hover:border-outline'
+    }`;
 
   return (
     <div className="space-y-6">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-white flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-ok/10 text-ok border border-ok/20">
-              <MessageCircle className="w-5 h-5" />
-            </div>
-            Fluxos WhatsApp Pro
-          </h2>
-          <p className="text-sm text-on-surface-variant mt-1">
-            Automação conversacional multi-instância, IA e eventos de infraestrutura no mesmo canvas.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {templates.length > 0 && (
+      <SectionHeader
+        icon={<MessageCircle className="w-[18px] h-[18px]" />}
+        title="Fluxos WhatsApp"
+        subtitle="Automação conversacional multi-instância, IA e eventos de infraestrutura no mesmo canvas."
+        actions={
+          <>
+            {templates.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowTemplatesModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-outline-variant bg-surface-container hover:border-outline text-on-surface text-xs font-semibold transition-colors"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                Modelos
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => setShowTemplatesModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-primary/40 bg-primary/10 hover:bg-primary/20 text-primary text-xs font-semibold transition-colors"
+              onClick={() => void createBlankFlow()}
+              disabled={creating}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary-container hover:bg-primary text-on-primary-container text-xs font-semibold transition-colors disabled:opacity-50"
             >
-              <Sparkles className="w-4 h-4" />
-              Modelos prontos
+              <Plus className="w-3.5 h-3.5" />
+              Novo fluxo
             </button>
-          )}
+          </>
+        }
+      />
 
-          <button
-            type="button"
-            onClick={() => void createBlankFlow()}
-            disabled={creating}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-white text-xs font-semibold shadow-sm transition-colors disabled:opacity-50"
-          >
-            <Plus className="w-4 h-4" />
-            Novo fluxo
-          </button>
-        </div>
-      </div>
-
-      {/* Filter and Search Bar (if flows exist) */}
       {flows.length > 0 && (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-surface-container-low border border-outline-variant rounded-lg p-3">
-          <div className="relative w-full sm:w-72">
-            <Search className="w-4 h-4 text-on-surface-variant absolute left-3 top-1/2 -translate-y-1/2" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            icon={<Radio className="w-4 h-4" />}
+            label="Publicados"
+            value={totals.published}
+            detail={`de ${flows.length} ${flows.length === 1 ? 'fluxo' : 'fluxos'}`}
+            tone={totals.published > 0 ? 'ok' : 'neutral'}
+          />
+          <StatCard
+            icon={<Activity className="w-4 h-4" />}
+            label="Conversas hoje"
+            value={compact(totals.runs)}
+            detail="turnos atendidos"
+            tone="info"
+          />
+          <StatCard
+            icon={<AlertTriangle className="w-4 h-4" />}
+            label="Erros hoje"
+            value={totals.errors}
+            detail={totals.errors > 0 ? 'verifique os fluxos marcados' : 'nenhuma falha de envio'}
+            tone={totals.errors > 0 ? 'crit' : 'ok'}
+          />
+          <StatCard
+            icon={<Bot className="w-4 h-4" />}
+            label="Tokens IA"
+            value={compact(totals.tokens)}
+            detail="consumo do dia"
+            tone="info"
+          />
+        </div>
+      )}
+
+      {flows.length > 0 && (
+        <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+          <div className="relative w-full lg:w-80">
+            <Search className="w-3.5 h-3.5 text-on-surface-variant/70 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
-              placeholder="Buscar por nome, gatilho ou instância..."
+              placeholder="Buscar por nome, gatilho ou instância"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-surface-container border border-outline-variant rounded-md pl-9 pr-3 py-1.5 text-xs text-white placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary"
+              className="w-full bg-surface-container border border-outline-variant rounded pl-9 pr-3 py-1.5 text-xs text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary/60 transition-colors"
             />
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0 text-xs">
-            <span className="text-on-surface-variant text-[11px] font-medium shrink-0">Instância:</span>
-            <button
-              type="button"
-              onClick={() => setSelectedInstance('all')}
-              className={`px-2.5 py-1 rounded text-xs font-medium shrink-0 transition-colors ${
-                selectedInstance === 'all'
-                  ? 'bg-primary/20 text-primary border border-primary/40'
-                  : 'bg-surface-container text-on-surface-variant hover:text-white border border-outline-variant'
-              }`}
-            >
-              Todas ({flows.length})
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+            <button type="button" onClick={() => setSelectedInstance('all')} className={chip(selectedInstance === 'all')}>
+              Todas <span className="font-mono tabular-nums text-on-surface-variant">{flows.length}</span>
             </button>
             {allInstances.map((inst) => {
               const count = flows.filter((f) => (f.instanceNames || []).includes(inst)).length;
@@ -254,14 +355,9 @@ export const FlowsPage: React.FC<FlowsPageProps> = ({ flowId, onOpen }) => {
                   key={inst}
                   type="button"
                   onClick={() => setSelectedInstance(inst)}
-                  className={`px-2.5 py-1 rounded text-xs font-mono shrink-0 transition-colors flex items-center gap-1.5 ${
-                    selectedInstance === inst
-                      ? 'bg-ok/20 text-ok border border-ok/40'
-                      : 'bg-surface-container text-on-surface-variant hover:text-white border border-outline-variant'
-                  }`}
+                  className={`${chip(selectedInstance === inst)} font-mono inline-flex items-center gap-1.5`}
                 >
-                  <Radio className="w-3 h-3 text-ok" />
-                  {inst} ({count})
+                  {inst} <span className="tabular-nums text-on-surface-variant">{count}</span>
                 </button>
               );
             })}
@@ -269,331 +365,220 @@ export const FlowsPage: React.FC<FlowsPageProps> = ({ flowId, onOpen }) => {
               <button
                 type="button"
                 onClick={() => setSelectedInstance('__global__')}
-                className={`px-2.5 py-1 rounded text-xs font-medium shrink-0 transition-colors ${
-                  selectedInstance === '__global__'
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                    : 'bg-surface-container text-on-surface-variant hover:text-white border border-outline-variant'
-                }`}
+                className={chip(selectedInstance === '__global__')}
               >
-                Global (sem vínculo)
+                Sem vínculo
               </button>
             )}
           </div>
         </div>
       )}
 
-      {/* Main Content Area */}
       {loading ? (
-        <div className="p-12 text-center text-sm text-on-surface-variant">Carregando fluxos…</div>
+        <Panel className="p-12">
+          <p className="text-center text-xs text-on-surface-variant">Carregando fluxos…</p>
+        </Panel>
       ) : flows.length === 0 ? (
-        /* Empty State with Template Cards */
         <div className="space-y-6">
-          <div className="bg-surface-container border border-outline-variant rounded-xl p-8 text-center max-w-xl mx-auto">
-            <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center mx-auto mb-3">
-              <MessageCircle className="w-6 h-6" />
-            </div>
-            <h3 className="text-lg font-bold text-white">Nenhum fluxo criado ainda</h3>
-            <p className="text-xs text-on-surface-variant mt-1.5 leading-relaxed">
-              Crie um fluxo conversacional para sua operação. Você pode começar do zero ou escolher um
-              dos modelos profissionais prontos abaixo.
-            </p>
-            <div className="mt-5 flex items-center justify-center gap-3">
+          <Panel className="p-10">
+            <div className="max-w-md mx-auto text-center">
+              <span className="w-11 h-11 rounded-lg bg-surface-container-high border border-outline-variant text-primary flex items-center justify-center mx-auto">
+                <MessageCircle className="w-5 h-5" />
+              </span>
+              <h3 className="text-[15px] font-semibold text-on-surface tracking-[-0.01em] mt-4">
+                Nenhum fluxo criado ainda
+              </h3>
+              <p className="text-xs text-on-surface-variant mt-2 leading-relaxed">
+                Um fluxo responde no WhatsApp sozinho: recebe a mensagem, decide o caminho e envia a resposta.
+                Comece do zero ou parta de um modelo pronto.
+              </p>
               <button
                 type="button"
                 onClick={() => void createBlankFlow()}
                 disabled={creating}
-                className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg text-xs font-semibold transition-colors"
+                className="mt-5 px-4 py-2 rounded bg-primary-container hover:bg-primary text-on-primary-container text-xs font-semibold transition-colors disabled:opacity-50"
               >
                 Criar fluxo em branco
               </button>
             </div>
-          </div>
+          </Panel>
 
-          {/* Quick Start Templates */}
           {templates.length > 0 && (
             <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-primary" />
-                <h4 className="text-sm font-bold text-white">Comece com um modelo pronto</h4>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <SectionHeader icon={<Sparkles className="w-[18px] h-[18px]" />} title="Modelos prontos" />
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {templates.map((tmpl) => (
-                  <div
+                  <TemplateCard
                     key={tmpl.id}
-                    className="bg-surface-container border border-outline-variant hover:border-primary/40 rounded-xl p-4 transition-all flex flex-col justify-between group"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-semibold text-white group-hover:text-primary transition-colors">
-                          {tmpl.name}
-                        </span>
-                        <span
-                          className={`text-[10px] uppercase font-mono px-2 py-0.5 rounded border ${
-                            tmpl.category === 'vendas'
-                              ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
-                              : tmpl.category === 'alerta'
-                              ? 'text-amber-400 border-amber-500/30 bg-amber-500/10'
-                              : 'text-sky-400 border-sky-500/30 bg-sky-500/10'
-                          }`}
-                        >
-                          {tmpl.category}
-                        </span>
-                      </div>
-                      <p className="text-xs text-on-surface-variant mt-1.5 line-clamp-2">
-                        {tmpl.description}
-                      </p>
-                      <div className="mt-3 flex items-center gap-2 text-[11px] text-on-surface-variant/70">
-                        <Layers className="w-3.5 h-3.5 text-on-surface-variant" />
-                        <span>{tmpl.nodes.length} blocos pré-configurados</span>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 pt-3 border-t border-outline-variant flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => void createFromTemplate(tmpl)}
-                        disabled={creating}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 text-xs font-semibold transition-colors"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        Usar este modelo
-                      </button>
-                    </div>
-                  </div>
+                    tmpl={tmpl}
+                    disabled={creating}
+                    onUse={() => void createFromTemplate(tmpl)}
+                  />
                 ))}
               </div>
             </div>
           )}
         </div>
       ) : filteredFlows.length === 0 ? (
-        <div className="p-8 text-center text-on-surface-variant text-xs bg-surface-container border border-outline-variant rounded-lg">
-          Nenhum fluxo corresponde aos filtros aplicados.
-        </div>
+        <Panel className="p-10">
+          <p className="text-center text-xs text-on-surface-variant">
+            Nenhum fluxo corresponde aos filtros aplicados.
+          </p>
+        </Panel>
       ) : (
-        /* Flow Cards Grid */
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filteredFlows.map((flow) => {
-            const hasAi = hasAiNode(flow);
+            const tone = flowTone(flow);
             const runsToday = flow.stats?.runsToday || 0;
             const errorsToday = flow.stats?.errorsToday || 0;
             const tokensToday = flow.stats?.aiTokensToday || 0;
+            const usesAi = hasAiNode(flow);
 
             return (
-              <div
-                key={flow.id}
-                onClick={() => onOpen(flow.id)}
-                className="bg-surface-container hover:bg-surface-container-high/60 border border-outline-variant hover:border-primary/40 rounded-xl p-5 cursor-pointer transition-all flex flex-col justify-between space-y-4 group shadow-sm"
-              >
-                {/* Header: Title and Status */}
-                <div>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="space-y-1 pr-2">
-                      <h3 className="text-white font-bold text-sm group-hover:text-primary transition-colors flex items-center gap-2">
+              <Panel key={flow.id} accent={tone} className="group">
+                <button
+                  type="button"
+                  onClick={() => onOpen(flow.id)}
+                  className="w-full text-left p-4 pl-5 focus:outline-none focus-visible:bg-surface-container-high/40 hover:bg-surface-container-high/40 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-semibold text-on-surface tracking-[-0.01em] truncate group-hover:text-primary transition-colors">
                         {flow.name}
-                        {hasAi && (
-                          <span title="Utiliza Agente de IA" className="text-primary">
-                            <Bot className="w-3.5 h-3.5" />
-                          </span>
-                        )}
                       </h3>
-                      <p className="text-xs text-on-surface-variant line-clamp-1">
-                        {triggerLabel(flow)}
-                      </p>
+                      <p className="text-xs text-on-surface-variant mt-1 truncate">{triggerLabel(flow)}</p>
                     </div>
-
-                    <span
-                      className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded border shrink-0 ${
-                        flow.published
-                          ? 'text-ok border-ok/30 bg-ok/10'
-                          : 'text-on-surface-variant border-outline-variant bg-surface-container-low'
-                      }`}
-                    >
+                    <Badge tone={flow.published ? 'ok' : 'neutral'} dot={flow.published}>
                       {flow.published ? 'Ativo' : 'Rascunho'}
-                    </span>
+                    </Badge>
                   </div>
 
-                  {/* Bound Instances Badges */}
-                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5 mt-3">
                     {(flow.instanceNames || []).length > 0 ? (
                       flow.instanceNames.map((inst) => (
                         <span
                           key={inst}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-ok/10 text-ok border border-ok/20 font-mono text-[10px]"
-                          title={`Instância vinculada: ${inst}`}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-outline-variant bg-surface-container-lowest font-mono text-2xs text-on-surface-variant"
                         >
-                          <Radio className="w-2.5 h-2.5" />
+                          <Radio className="w-2.5 h-2.5 text-ok" />
                           {inst}
                         </span>
                       ))
                     ) : (
+                      <Badge tone="warn">Sem instância vinculada</Badge>
+                    )}
+                    {usesAi && (
                       <span
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px]"
-                        title="Atende mensagens de qualquer instância conectada"
+                        title="Usa bloco de IA"
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-outline-variant bg-surface-container-lowest text-2xs text-on-surface-variant"
                       >
-                        Global (todas as instâncias)
+                        <Bot className="w-2.5 h-2.5" />
+                        IA
                       </span>
                     )}
-
-                    {flow.priority && flow.priority > 0 ? (
-                      <span className="px-1.5 py-0.5 rounded bg-surface-container-highest text-on-surface-variant text-[10px] font-mono">
+                    {flow.priority > 0 && (
+                      <span className="px-1.5 py-0.5 rounded border border-outline-variant bg-surface-container-lowest font-mono text-2xs text-on-surface-variant">
                         P{flow.priority}
                       </span>
-                    ) : null}
+                    )}
                   </div>
-                </div>
 
-                {/* Metrics Row */}
-                <div className="grid grid-cols-3 gap-2 py-2 px-3 bg-surface-container-low/70 rounded-lg border border-outline-variant/60 text-center">
-                  <div>
-                    <span className="block text-[10px] text-on-surface-variant">Hoje</span>
-                    <span className="text-xs font-mono font-bold text-white">{runsToday}</span>
+                  {/* Left-aligned pairs: a column of numbers is read by scanning
+                      down one edge, which centred cells make impossible. */}
+                  <div className="flex items-end gap-6 mt-4">
+                    <div>
+                      <span className="mono-label block">Hoje</span>
+                      <span className="font-mono text-lg leading-none text-on-surface tabular-nums mt-1 block">
+                        {compact(runsToday)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="mono-label block">Erros</span>
+                      <span
+                        className={`font-mono text-lg leading-none tabular-nums mt-1 block ${
+                          errorsToday > 0 ? 'text-crit' : 'text-on-surface-variant/60'
+                        }`}
+                      >
+                        {errorsToday}
+                      </span>
+                    </div>
+                    {/* Tokens only where a flow can actually spend them. */}
+                    {usesAi && (
+                      <div>
+                        <span className="mono-label block">Tokens</span>
+                        <span className="font-mono text-lg leading-none text-on-surface tabular-nums mt-1 block">
+                          {compact(tokensToday)}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <span className="block text-[10px] text-on-surface-variant">Erros</span>
-                    <span
-                      className={`text-xs font-mono font-bold ${
-                        errorsToday > 0 ? 'text-crit' : 'text-on-surface-variant'
-                      }`}
-                    >
-                      {errorsToday}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="block text-[10px] text-on-surface-variant">Tokens IA</span>
-                    <span className="text-xs font-mono font-bold text-white">
-                      {tokensToday > 1000 ? `${(tokensToday / 1000).toFixed(1)}k` : tokensToday}
-                    </span>
-                  </div>
-                </div>
+                </button>
 
-                {/* Footer: Last run + Action buttons */}
-                <div className="pt-2 border-t border-outline-variant flex items-center justify-between text-xs">
-                  <span className="text-[11px] text-on-surface-variant/80 font-mono truncate max-w-[160px]">
-                    {flow.lastRunAt
-                      ? new Date(flow.lastRunAt).toLocaleTimeString('pt-BR', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          day: '2-digit',
-                          month: '2-digit',
-                        })
-                      : 'Sem execuções'}
+                <div className="flex items-center justify-between gap-2 px-4 pl-5 py-2 border-t border-outline-variant">
+                  <span className="inline-flex items-center gap-1.5 font-mono text-2xs text-on-surface-variant/70 truncate">
+                    <Clock className="w-3 h-3 shrink-0" />
+                    {lastRunLabel(flow.lastRunAt)}
                   </span>
 
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-0.5 shrink-0">
                     <button
                       type="button"
                       title="Clonar este fluxo"
                       disabled={cloningId === flow.id}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void cloneFlow(flow);
-                      }}
-                      className="p-1.5 text-on-surface-variant hover:text-white hover:bg-surface-container-high rounded transition-colors disabled:opacity-50"
+                      onClick={() => void cloneFlow(flow)}
+                      className="p-1.5 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-50"
                     >
                       <Copy className="w-3.5 h-3.5" />
                     </button>
-
                     <button
                       type="button"
                       title="Excluir fluxo"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void removeFlow(flow.id, flow.name);
-                      }}
-                      className="p-1.5 text-crit/80 hover:text-crit hover:bg-crit/10 rounded transition-colors"
+                      onClick={() => void removeFlow(flow.id, flow.name)}
+                      className="p-1.5 rounded text-on-surface-variant hover:text-crit hover:bg-crit/10 transition-colors"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
-
-                    <button
-                      type="button"
-                      onClick={() => onOpen(flow.id)}
-                      className="ml-1 px-2.5 py-1 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors"
-                    >
-                      <span>Abrir</span>
-                      <ArrowRight className="w-3 h-3" />
-                    </button>
                   </div>
                 </div>
-              </div>
+              </Panel>
             );
           })}
         </div>
       )}
 
-      {/* Templates Modal */}
       {showTemplatesModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-surface-container border border-outline-variant rounded-xl max-w-2xl w-full p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-primary" />
-                <h3 className="text-base font-bold text-white">Modelos Prontos de WhatsApp</h3>
-              </div>
+        <div
+          className="fixed inset-0 z-50 bg-surface-container-lowest/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setShowTemplatesModal(false)}
+        >
+          <div
+            className="bg-surface-container border border-outline-variant rounded-lg max-w-3xl w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 p-5 border-b border-outline-variant">
+              <SectionHeader
+                icon={<Sparkles className="w-[18px] h-[18px]" />}
+                title="Modelos prontos"
+                subtitle="Fluxos testados para partir de algo que já funciona."
+              />
               <button
                 type="button"
                 onClick={() => setShowTemplatesModal(false)}
-                className="text-on-surface-variant hover:text-white p-1 rounded hover:bg-surface-container-high"
+                className="p-1.5 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <p className="text-xs text-on-surface-variant">
-              Selecione um modelo testado para acelerar a criação do seu fluxo conversacional.
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-5 max-h-[60vh] overflow-y-auto">
               {templates.map((tmpl) => (
-                <div
+                <TemplateCard
                   key={tmpl.id}
-                  className="bg-surface-container-low border border-outline-variant rounded-lg p-4 flex flex-col justify-between hover:border-primary/40 transition-colors"
-                >
-                  <div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-bold text-white">{tmpl.name}</span>
-                      <span
-                        className={`text-[9px] uppercase font-mono px-1.5 py-0.5 rounded border ${
-                          tmpl.category === 'vendas'
-                            ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
-                            : tmpl.category === 'alerta'
-                            ? 'text-amber-400 border-amber-500/30 bg-amber-500/10'
-                            : 'text-sky-400 border-sky-500/30 bg-sky-500/10'
-                        }`}
-                      >
-                        {tmpl.category}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-on-surface-variant mt-1.5 leading-relaxed">
-                      {tmpl.description}
-                    </p>
-                    <p className="text-[10px] text-on-surface-variant/70 font-mono mt-2">
-                      {tmpl.nodes.length} blocos
-                    </p>
-                  </div>
-
-                  <div className="mt-4 pt-2 border-t border-outline-variant flex justify-end">
-                    <button
-                      type="button"
-                      disabled={creating}
-                      onClick={() => void createFromTemplate(tmpl)}
-                      className="px-3 py-1 bg-primary hover:bg-primary/90 text-white rounded text-xs font-semibold transition-colors disabled:opacity-50"
-                    >
-                      Criar a partir deste
-                    </button>
-                  </div>
-                </div>
+                  tmpl={tmpl}
+                  disabled={creating}
+                  onUse={() => void createFromTemplate(tmpl)}
+                />
               ))}
-            </div>
-
-            <div className="flex justify-end pt-2 border-t border-outline-variant">
-              <button
-                type="button"
-                onClick={() => setShowTemplatesModal(false)}
-                className="px-4 py-2 bg-surface-container-high hover:bg-surface-container-highest text-on-surface rounded text-xs"
-              >
-                Cancelar
-              </button>
             </div>
           </div>
         </div>
