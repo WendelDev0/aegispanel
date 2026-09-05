@@ -32,12 +32,14 @@ import type {
   WaFlowNodeType,
   WaFlowRecord,
   WaInboundEvent,
+  WaInboundSkipSummary,
 } from '../../types/index.js';
 import { FlowBlockNode, type FlowBlockData } from './FlowBlockNode.js';
 import { FlowInspector } from './FlowInspector.js';
 import { FlowPhoneSimulator } from './FlowPhoneSimulator.js';
 import { FlowValidationModal, type ValidationError } from './FlowValidationModal.js';
 import { FlowInstancesPanel } from './FlowInstancesPanel.js';
+import { FlowInternalRouteCard } from './FlowInternalRouteCard.js';
 import { FlowInboundStrip } from './FlowInboundStrip.js';
 import { BLOCK_META, PALETTE } from './flow-blocks.js';
 
@@ -120,6 +122,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
   const [instanceError, setInstanceError] = useState('');
   const [loadingInstances, setLoadingInstances] = useState(false);
   const [inboundEvents, setInboundEvents] = useState<WaInboundEvent[]>([]);
+  const [inboundSkipped, setInboundSkipped] = useState<WaInboundSkipSummary | null>(null);
   const [publishWarnings, setPublishWarnings] = useState<string[]>([]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -214,6 +217,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
     try {
       const res = await api.get('/wa-flows/inbound', { params: { limit: 8 } });
       setInboundEvents(Array.isArray(res.data?.events) ? res.data.events : []);
+      setInboundSkipped(res.data?.skipped || null);
     } catch {
       /* strip is best-effort */
     }
@@ -654,7 +658,9 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
         onRefresh={() => void loadInstances()}
       />
 
-      <FlowInboundStrip events={inboundEvents} />
+      <FlowInternalRouteCard />
+
+      <FlowInboundStrip events={inboundEvents} skipped={inboundSkipped} />
 
       {error && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-crit/15 border border-crit/30 text-crit text-xs">

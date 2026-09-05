@@ -1,10 +1,10 @@
 import type { WaFlowEdge, WaFlowNode, WaFlowRecord, WaPanelEvent } from '../db/storage.js';
 import { dbStorage } from '../db/storage.js';
 import {
+  classifyEvolutionInbound,
   evolutionSendButtons,
   evolutionSendFailed,
   evolutionSendText,
-  parseEvolutionUpsert,
   type EvolutionCredentials,
 } from '../utils/evolution.client.js';
 import { phoneHash, phoneTail } from '../utils/phone.js';
@@ -553,11 +553,30 @@ export class WaFlowEngine {
     customSender?: EvolutionSender,
     customPorts?: Partial<FlowPorts>
   ): Promise<boolean> {
-    const inbound = parseEvolutionUpsert(body);
-    if (!inbound) {
-      WaInboundStore.record({ outcome: 'parse_failed' });
+    const classified = classifyEvolutionInbound(body);
+
+    if (classified.kind === 'skipped') {
+      const reason = classified.reason;
+      // Groups, status broadcasts, channels and the operator's own outgoing
+      // messages are not flow traffic. Counting them keeps the strip readable
+      // while still proving the webhook is alive.
+      if (reason === 'group' || reason === 'broadcast' || reason === 'newsletter' || reason === 'from_me') {
+        WaInboundStore.countSkipped(reason);
+        return false;
+      }
+      WaInboundStore.record({
+        outcome: reason === 'no_text' ? 'no_text' : 'parse_failed',
+        instance: classified.instance,
+        phoneTail: classified.phone ? phoneTail(classified.phone) : undefined,
+        error:
+          reason === 'no_text'
+            ? 'Mensagem sem texto (figurinha, áudio ou mídia sem legenda). Fluxos só reagem a texto.'
+            : undefined,
+      });
       return false;
     }
+
+    const inbound = classified.message;
 
     const fallbackCreds = WaFlowService.evolutionCreds();
     const instance = inbound.instance || fallbackCreds?.instance || '';

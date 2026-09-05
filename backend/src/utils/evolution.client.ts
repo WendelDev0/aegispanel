@@ -275,11 +275,28 @@ function extractWaText(message: Record<string, any>): string {
   );
 }
 
+export type WaJidKind = 'group' | 'broadcast' | 'newsletter' | 'direct' | 'unknown';
+
+/**
+ * A published instance is usually the operator's own line, so it also
+ * receives every group it belongs to. Those are not flow traffic and never
+ * were — `phoneFromKey` has always dropped them. The cost was that the
+ * inbound strip logged each one as "parse_failed", and eighty group pings
+ * pushed the one real conversation out of the ring before anyone looked.
+ * Naming the reason is what lets the store count noise and list signal.
+ */
+export function jidKind(remoteJid: string): WaJidKind {
+  const jid = String(remoteJid || '');
+  if (!jid) return 'unknown';
+  if (jid.endsWith('@g.us')) return 'group';
+  if (jid.endsWith('@newsletter')) return 'newsletter';
+  if (jid === 'status@broadcast' || jid.endsWith('@broadcast')) return 'broadcast';
+  return 'direct';
+}
+
 function phoneFromKey(key: Record<string, any>): string {
   const remoteJid = String(key.remoteJid || '');
-  if (!remoteJid || remoteJid.endsWith('@g.us') || remoteJid.endsWith('@newsletter') || remoteJid === 'status@broadcast') {
-    return '';
-  }
+  if (jidKind(remoteJid) !== 'direct') return '';
 
   const candidates = [key.remoteJid, key.remoteJidAlt, key.participant, key.participantAlt];
   for (const jid of candidates) {
@@ -293,26 +310,57 @@ function phoneFromKey(key: Record<string, any>): string {
   return remoteJid.replace(/@.*$/, '').replace(/\D/g, '');
 }
 
-export function parseEvolutionUpsert(body: unknown): InboundWaMessage | null {
-  if (!body || typeof body !== 'object') return null;
+/** Why an inbound payload produced no flow turn. */
+export type InboundSkipReason =
+  | 'not_object'
+  | 'from_me'
+  | 'group'
+  | 'broadcast'
+  | 'newsletter'
+  | 'no_phone'
+  | 'no_text';
+
+export type EvolutionInbound =
+  | { kind: 'message'; message: InboundWaMessage }
+  | { kind: 'skipped'; reason: InboundSkipReason; instance?: string; phone?: string };
+
+export function classifyEvolutionInbound(body: unknown): EvolutionInbound {
+  if (!body || typeof body !== 'object') return { kind: 'skipped', reason: 'not_object' };
   const root = body as Record<string, any>;
   const data = firstMessageRecord(root);
   const key = data.key || {};
-  if (key.fromMe) return null;
+  const instance = String(root.instance || data.instance || '').trim() || undefined;
+
+  if (key.fromMe) return { kind: 'skipped', reason: 'from_me', instance };
+
+  const kind = jidKind(String(key.remoteJid || ''));
+  if (kind === 'group') return { kind: 'skipped', reason: 'group', instance };
+  if (kind === 'newsletter') return { kind: 'skipped', reason: 'newsletter', instance };
+  if (kind === 'broadcast') return { kind: 'skipped', reason: 'broadcast', instance };
 
   const phone = phoneFromKey(key);
-  if (!phone) return null;
+  if (!phone) return { kind: 'skipped', reason: 'no_phone', instance };
 
+  // A sticker or a caption-less image in a 1:1 chat reaches a real person's
+  // conversation and still moves no flow. That one belongs on the strip.
   const trimmed = String(extractWaText(data.message || {})).trim();
-  if (!trimmed) return null;
+  if (!trimmed) return { kind: 'skipped', reason: 'no_text', instance, phone };
 
   return {
-    instance: String(root.instance || data.instance || '').trim(),
-    phone,
-    text: trimmed.slice(0, 2000),
-    pushName: String(data.pushName || key.pushName || ''),
-    fromMe: false,
+    kind: 'message',
+    message: {
+      instance: instance || '',
+      phone,
+      text: trimmed.slice(0, 2000),
+      pushName: String(data.pushName || key.pushName || ''),
+      fromMe: false,
+    },
   };
+}
+
+export function parseEvolutionUpsert(body: unknown): InboundWaMessage | null {
+  const result = classifyEvolutionInbound(body);
+  return result.kind === 'message' ? result.message : null;
 }
 
 export interface EvolutionInstanceInfo {

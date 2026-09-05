@@ -415,6 +415,7 @@ export interface EvolutionInstanceInfo {
 export type WaInboundOutcome =
   | 'rejected_secret'
   | 'parse_failed'
+  | 'no_text'
   | 'no_instance'
   | 'handoff'
   | 'unmatched'
@@ -430,6 +431,36 @@ export interface WaInboundEvent {
   flowId?: string;
   flowName?: string;
   error?: string;
+  /** Consecutive identical config failures collapse into one entry. */
+  repeated?: number;
+}
+
+export interface WaInternalRouteState {
+  enabled: boolean;
+  /** Address Evolution posts the webhook to, e.g. http://aegis-backend:4000 */
+  panelBaseUrl?: string;
+  /** Address the panel calls Evolution on, e.g. http://aegis-app-evo:8080 */
+  evolutionUrl?: string;
+  verifiedAt?: string;
+}
+
+export interface WaInternalRouteProbe {
+  ok: boolean;
+  suggestion?: { url: string; appName: string; upstream: string };
+  panelBaseUrl?: string;
+  disabled?: boolean;
+  error?: string;
+  current?: WaInternalRouteState;
+}
+
+/** Traffic the panel drops by design: groups, channels, status, own sends. */
+export interface WaInboundSkipSummary {
+  since: string;
+  group: number;
+  broadcast: number;
+  newsletter: number;
+  from_me: number;
+  total: number;
 }
 
 export interface WaFlowTemplate {

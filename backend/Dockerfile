@@ -11,7 +11,11 @@ WORKDIR /app
 
 # git for CI/CD clones; docker CLI + compose plugin so self-update can
 # rebuild this stack through the mounted daemon socket.
-RUN apk add --no-cache git docker-cli docker-cli-compose curl bash
+# tzdata because Alpine ships no /usr/share/zoneinfo: Node reads TZ through
+# its bundled ICU and was always right, but every shell-side `date` printed
+# UTC. Debugging the panel from the web terminal meant comparing timestamps
+# against a clock three hours off the one the code was using.
+RUN apk add --no-cache git docker-cli docker-cli-compose curl bash tzdata
 
 COPY package*.json ./
 RUN npm ci --omit=dev

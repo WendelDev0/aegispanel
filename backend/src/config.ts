@@ -122,6 +122,12 @@ export const CONFIG = {
   DOCKER_NETWORK: process.env.AEGIS_DOCKER_NETWORK || '',
   CADDY_CONTAINER: process.env.AEGIS_CADDY_CONTAINER || 'aegis-caddy',
   /**
+   * How neighbours on the Docker network address this backend. Used as the
+   * WhatsApp webhook target when Evolution runs on the same host, so a bot
+   * reply no longer depends on public DNS and certificate renewal.
+   */
+  BACKEND_CONTAINER: process.env.AEGIS_BACKEND_CONTAINER || 'aegis-backend',
+  /**
    * Upstream Caddy uses to reach the panel's own web container when the panel
    * is published on a domain (settings.panelDomain).
    *

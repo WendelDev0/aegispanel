@@ -461,6 +461,22 @@ export interface PanelSettings {
   evolution?: {
     apiUrl: string;
     apiKey: string;
+    /**
+     * Bridge address of the Evolution container when it runs on this host.
+     * `apiUrl` stays public because the manager link opens in a browser.
+     */
+    internalApiUrl?: string;
+  };
+  /**
+   * Route WhatsApp traffic over the Docker network instead of the public
+   * hostname. Only ever set by the verified probe, never typed by hand: an
+   * unreachable value here registers a dead webhook and the bot goes silent.
+   */
+  waFlowInternalRoute?: {
+    enabled: boolean;
+    /** Panel address registered on Evolution, e.g. http://aegis-backend:4000 */
+    panelBaseUrl?: string;
+    verifiedAt?: string;
   };
   /** AI providers configuration for Flow AI agent blocks */
   aiProviders?: {
@@ -563,6 +579,7 @@ const DEFAULT_DATA: DatabaseSchema = {
       diskThresholdPercent: 90,
     },
     evolution: undefined,
+    waFlowInternalRoute: undefined,
     aiProviders: {
       openaiKey: undefined,
       openrouterKey: undefined,

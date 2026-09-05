@@ -389,6 +389,17 @@ export const releaseHandoffBodySchema = z
   })
   .strict();
 
+/**
+ * Only a flag: the addresses come from the verified probe, never from the
+ * request. An operator-supplied URL here would register a webhook nothing
+ * can reach, and the panel would still report the flow as published.
+ */
+export const internalRouteBodySchema = z
+  .object({
+    enabled: z.boolean(),
+  })
+  .strict();
+
 export const testAiBodySchema = z
   .object({
     provider: z.enum(['openai', 'openrouter']),

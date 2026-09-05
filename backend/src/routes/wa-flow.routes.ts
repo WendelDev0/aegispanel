@@ -4,6 +4,7 @@ import { authMiddleware, requireAdmin, requireWrite } from '../middleware/auth.j
 import { validateBody } from '../middleware/validate.js';
 import {
   emptyBodySchema,
+  internalRouteBodySchema,
   publishWaFlowBodySchema,
   releaseHandoffBodySchema,
   simulateWaFlowBodySchema,
@@ -71,8 +72,35 @@ waFlowRouter.get('/templates', (_req: Request, res: Response) => {
 
 waFlowRouter.get('/inbound', (req: Request, res: Response) => {
   const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 20;
-  res.json({ events: WaInboundStore.list(limit) });
+  res.json({ events: WaInboundStore.list(limit), skipped: WaInboundStore.skipSummary() });
 });
+
+waFlowRouter.get('/internal-route', requireAdmin, async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const current = WaFlowService.currentInternalRoute();
+    res.json({ current, probe: await WaFlowService.probeInternalRoute() });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+waFlowRouter.post(
+  '/internal-route',
+  requireAdmin,
+  validateBody(internalRouteBodySchema),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const result = await WaFlowService.setInternalRoute(Boolean(req.body.enabled));
+      if (!result.ok) {
+        res.status(400).json(result);
+        return;
+      }
+      res.json({ ...result, current: WaFlowService.currentInternalRoute() });
+    } catch (err: any) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  }
+);
 
 waFlowRouter.get('/instances', async (_req: Request, res: Response): Promise<void> => {
   try {

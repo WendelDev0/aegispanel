@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { dbStorage, type WaFlowEdge, type WaFlowNode, type WaFlowRecord } from '../db/storage.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { getPublicBaseUrl } from '../utils/public-url.js';
+import { localDayStamp } from '../utils/day-stamp.js';
 import {
   evolutionClearWebhook,
   evolutionFetchInstances,
@@ -13,10 +14,67 @@ import {
   type EvolutionInstanceInfo,
 } from '../utils/evolution.client.js';
 import { assessBoundInstances } from '../utils/wa-publish-ready.js';
+import {
+  internalPanelBaseUrl,
+  preferInternalUrl,
+  suggestInternalEvolutionUrl,
+  type InternalRouteSuggestion,
+} from '../utils/wa-internal-route.js';
 import { CONFIG } from '../config.js';
 import { WaSessionStore } from '../utils/wa-session.store.js';
+import { dockerService } from './docker.service.js';
 import { validateFlowGraph, type ValidationResult } from './wa-flow-validator.js';
 import { WA_FLOW_TEMPLATES } from './wa-flow-templates.js';
+
+export interface InternalRouteProbe {
+  ok: boolean;
+  suggestion?: InternalRouteSuggestion;
+  panelBaseUrl?: string;
+  disabled?: boolean;
+  error?: string;
+}
+
+/**
+ * Asks a container to fetch a URL, so "can Evolution reach the panel" is
+ * answered by Evolution rather than inferred from network membership.
+ *
+ * Three probes because the image is not ours: Evolution ships Node, but a
+ * future base image may only carry wget or curl. Each one prints the status
+ * line on success and exits non-zero on a connection error.
+ */
+async function probeFromContainer(
+  containerName: string,
+  url: string
+): Promise<{ ok: boolean; error?: string }> {
+  const attempts: string[][] = [
+    ['wget', '-q', '-T', '5', '-O', '-', url],
+    ['curl', '-fsS', '--max-time', '5', url],
+    [
+      'node',
+      '-e',
+      'fetch(process.argv[1]).then(r=>{if(!r.ok)process.exit(2);console.log("ok")}).catch(e=>{console.error(e.message);process.exit(1)})',
+      url,
+    ],
+  ];
+
+  let lastError = 'nenhum wget, curl ou node disponível no container';
+  for (const cmd of attempts) {
+    try {
+      const result = await dockerService.execInContainer(containerName, cmd, { timeoutMs: 8000 });
+      if (result.exitCode === 0) return { ok: true };
+      const detail = (result.stderr || result.stdout || '').trim();
+      // A missing binary is not a verdict on the network; try the next probe.
+      if (/not found|no such file|executable file not found/i.test(detail)) {
+        lastError = detail.slice(0, 200);
+        continue;
+      }
+      return { ok: false, error: detail.slice(0, 200) || `saída ${result.exitCode}` };
+    } catch (err: any) {
+      lastError = String(err?.message || err).slice(0, 200);
+    }
+  }
+  return { ok: false, error: lastError };
+}
 
 const NODE_TYPES = new Set([
   'trigger_message',
@@ -186,12 +244,23 @@ export class WaFlowService {
     return validateFlowGraph(flow.nodes, flow.edges);
   }
 
+  /**
+   * The hostname a browser must use. The manager link is opened by the
+   * operator, so it can never carry the container address that server-side
+   * calls prefer.
+   */
+  static publicEvolutionApiUrl(): string | null {
+    const settings = dbStorage.getSettings();
+    return settings.evolution?.apiUrl || settings.alertConfig?.whatsappApiUrl || null;
+  }
+
   static evolutionCreds(instanceName?: string): EvolutionCredentials | null {
     const settings = dbStorage.getSettings();
+    const internal = settings.waFlowInternalRoute;
     const evo = settings.evolution;
     if (evo?.apiUrl && evo?.apiKey) {
       return {
-        apiUrl: evo.apiUrl,
+        apiUrl: preferInternalUrl(evo.apiUrl, evo.internalApiUrl, internal?.enabled),
         apiKey: evo.apiKey,
         instance: instanceName || settings.alertConfig?.whatsappInstance || '',
       };
@@ -200,7 +269,7 @@ export class WaFlowService {
     const cfg = settings.alertConfig;
     if (cfg?.whatsappApiUrl && cfg.whatsappApiKey) {
       return {
-        apiUrl: cfg.whatsappApiUrl,
+        apiUrl: preferInternalUrl(cfg.whatsappApiUrl, evo?.internalApiUrl, internal?.enabled),
         apiKey: cfg.whatsappApiKey,
         instance: instanceName || cfg.whatsappInstance || '',
       };
@@ -219,12 +288,123 @@ export class WaFlowService {
     return raw;
   }
 
-  static webhookUrl(): string {
-    const base = getPublicBaseUrl(dbStorage.getSettings());
+  /**
+   * Where Evolution posts inbound messages. When the verified internal route
+   * is on, that is the panel's address on the Docker network — a bot reply no
+   * longer waits on public DNS, and a certificate renewal cannot mute it.
+   */
+  static webhookBaseUrl(): string {
+    const settings = dbStorage.getSettings();
+    const internal = settings.waFlowInternalRoute;
+    if (internal?.enabled && internal.panelBaseUrl) {
+      return internal.panelBaseUrl.replace(/\/+$/, '');
+    }
+
+    const base = getPublicBaseUrl(settings);
     if (!base) {
       throw new Error('Configure o domínio do painel ou AEGIS_PUBLIC_BASE_URL antes de publicar.');
     }
-    return `${base}/api/wa-flows/webhook?token=${encodeURIComponent(this.webhookSecret())}`;
+    return base;
+  }
+
+  static webhookUrl(): string {
+    return `${this.webhookBaseUrl()}/api/wa-flows/webhook?token=${encodeURIComponent(this.webhookSecret())}`;
+  }
+
+  /**
+   * Checks both directions before anything is saved. Registering an internal
+   * webhook that Evolution cannot reach produces no error anywhere — the
+   * panel reports "publicado", Evolution posts into the void, and the bot is
+   * silent. So the panel asks Evolution's own container to fetch /api/health
+   * instead of assuming the network reaches.
+   */
+  static currentInternalRoute(): { enabled: boolean; panelBaseUrl?: string; evolutionUrl?: string; verifiedAt?: string } {
+    const settings = dbStorage.getSettings();
+    const route = settings.waFlowInternalRoute;
+    return {
+      enabled: Boolean(route?.enabled),
+      panelBaseUrl: route?.panelBaseUrl,
+      evolutionUrl: settings.evolution?.internalApiUrl,
+      verifiedAt: route?.verifiedAt,
+    };
+  }
+
+  static async probeInternalRoute(): Promise<InternalRouteProbe> {
+    const settings = dbStorage.getSettings();
+    const publicUrl = this.publicEvolutionApiUrl();
+    const apiKey = settings.evolution?.apiKey || settings.alertConfig?.whatsappApiKey;
+
+    if (!publicUrl || !apiKey) {
+      return { ok: false, error: 'Configure a Evolution API em Configurações antes de testar a rota interna.' };
+    }
+
+    const suggestion = suggestInternalEvolutionUrl(publicUrl, dbStorage.getApps(), dbStorage.getServerNodes());
+    if (!suggestion) {
+      return {
+        ok: false,
+        error:
+          'A Evolution não é uma aplicação deste painel (ou está em um nó remoto), então não há rota interna. ' +
+          'O tráfego continua pelo domínio público.',
+      };
+    }
+
+    const panelBaseUrl = internalPanelBaseUrl(CONFIG.BACKEND_CONTAINER, CONFIG.PORT);
+
+    // Direction 1: this backend reaching Evolution by container name.
+    const reach = await evolutionFetchInstances({ apiUrl: suggestion.url, apiKey });
+    if (!reach.ok) {
+      return {
+        ok: false,
+        suggestion,
+        panelBaseUrl,
+        error: `O painel não alcançou ${suggestion.upstream}: ${reach.error || 'sem resposta'}`,
+      };
+    }
+
+    // Direction 2: Evolution reaching this backend by container name.
+    const containerName = suggestion.upstream.split(':')[0];
+    const back = await probeFromContainer(containerName, `${panelBaseUrl}/api/health`);
+    if (!back.ok) {
+      return {
+        ok: false,
+        suggestion,
+        panelBaseUrl,
+        error: `A Evolution não alcançou ${panelBaseUrl}: ${back.error}. O webhook continua no domínio público.`,
+      };
+    }
+
+    return { ok: true, suggestion, panelBaseUrl };
+  }
+
+  /**
+   * Turns the internal route on only against a fresh probe. Callers cannot
+   * hand-write the addresses; a wrong one here is invisible until a customer
+   * messages and gets nothing.
+   */
+  static async setInternalRoute(enabled: boolean): Promise<InternalRouteProbe> {
+    if (!enabled) {
+      dbStorage.updateSettings({ waFlowInternalRoute: { enabled: false } });
+      return { ok: true, disabled: true };
+    }
+
+    const probe = await this.probeInternalRoute();
+    if (!probe.ok || !probe.suggestion || !probe.panelBaseUrl) return probe;
+
+    const settings = dbStorage.getSettings();
+    const patch: Parameters<typeof dbStorage.updateSettings>[0] = {
+      waFlowInternalRoute: {
+        enabled: true,
+        panelBaseUrl: probe.panelBaseUrl,
+        verifiedAt: new Date().toISOString(),
+      },
+    };
+    // Only touch `evolution` when it exists; writing the key as undefined
+    // would drop credentials that live under alertConfig instead.
+    if (settings.evolution) {
+      patch.evolution = { ...settings.evolution, internalApiUrl: probe.suggestion.url };
+    }
+    dbStorage.updateSettings(patch);
+    return probe;
   }
 
   static async publish(id: string, published: boolean): Promise<WaFlowRecord> {
@@ -289,7 +469,10 @@ export class WaFlowService {
     error?: string;
   }> {
     const creds = this.evolutionCreds();
-    const managerUrl = creds?.apiUrl ? evolutionManagerUrl(creds.apiUrl) : null;
+    // Built from the public hostname on purpose: this link is clicked in a
+    // browser, which cannot resolve a Docker container name.
+    const publicUrl = this.publicEvolutionApiUrl();
+    const managerUrl = publicUrl ? evolutionManagerUrl(publicUrl) : null;
     if (!creds || !creds.apiUrl) {
       return { ok: false, instances: [], managerUrl, error: 'Evolution API não configurada em Configurações.' };
     }
@@ -321,7 +504,7 @@ export class WaFlowService {
     if (!flow) return;
 
     const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
+    const todayStr = localDayStamp(now);
 
     const stats = flow.stats && flow.stats.day === todayStr
       ? { ...flow.stats }
@@ -346,7 +529,7 @@ export class WaFlowService {
         f.published &&
         (f.instanceNames || []).some((name) => String(name).trim().toLowerCase() === want)
     );
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = localDayStamp();
     for (const flow of flows) {
       const stats = flow.stats && flow.stats.day === todayStr
         ? { ...flow.stats }
@@ -365,7 +548,7 @@ export class WaFlowService {
     unmatchedToday: number;
   } {
     const flows = dbStorage.getWaFlows();
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = localDayStamp();
 
     let runsToday = 0;
     let aiTokensToday = 0;

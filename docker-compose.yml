@@ -51,6 +51,10 @@ services:
       - CADDY_CONFIG_PATH=/app/caddy/Caddyfile
       - ACCESS_LOG_PATH=/var/log/caddy/access.log
       - AEGIS_CADDY_CONTAINER=aegis-caddy
+      # How Evolution (and any other container on this network) reaches the
+      # panel. Registering the WhatsApp webhook on this address keeps a bot
+      # reply off public DNS, TLS and Caddy.
+      - AEGIS_BACKEND_CONTAINER=aegis-backend
       # Resolves visitor addresses to a city for the analytics map. Off by
       # default because it sends those addresses to ip-api.com; set
       # GEOIP_ENABLED=true in .env to turn it on.

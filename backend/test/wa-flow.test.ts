@@ -5,7 +5,13 @@ import express from 'express';
 import { dbStorage } from '../src/db/storage.js';
 import { WaFlowService } from '../src/services/wa-flow.service.js';
 import { HandoffManager, WaFlowEngine } from '../src/services/wa-flow-engine.js';
-import { evolutionOutboundBlocked, parseEvolutionUpsert } from '../src/utils/evolution.client.js';
+import { classifyEvolutionInbound, evolutionOutboundBlocked, parseEvolutionUpsert } from '../src/utils/evolution.client.js';
+import { localDayStamp } from '../src/utils/day-stamp.js';
+import {
+  internalPanelBaseUrl,
+  preferInternalUrl,
+  suggestInternalEvolutionUrl,
+} from '../src/utils/wa-internal-route.js';
 import { WaSessionStore } from '../src/utils/wa-session.store.js';
 import { waFlowRouter } from '../src/routes/wa-flow.routes.js';
 import { phoneHash } from '../src/utils/phone.js';
@@ -524,4 +530,171 @@ test('webhook accepts ?token= even when Evolution sends its own apikey header', 
 
   assert.equal(res.status, 200);
   assert.equal(res.body.ok, true);
+});
+
+// --- Etapa 1: contadores diários no fuso do painel ---
+
+test('localDayStamp follows the panel timezone, not UTC', () => {
+  // 2026-09-06T01:30:00Z is still 05/09 in São Paulo (UTC-3). The counters
+  // used toISOString() and rolled "hoje" over at 21:00 local.
+  const lateNightUtc = new Date('2026-09-06T01:30:00Z');
+  assert.equal(lateNightUtc.toISOString().slice(0, 10), '2026-09-06');
+  assert.equal(localDayStamp(lateNightUtc), '2026-09-05');
+});
+
+// --- Etapa 2: ruído de grupo separado de falha real ---
+
+test('classifyEvolutionInbound separates group noise from unreadable payloads', () => {
+  const group = classifyEvolutionInbound({
+    instance: 'clinic',
+    data: { key: { remoteJid: '120363083506002733@g.us', participant: '5511999999999@s.whatsapp.net' }, message: { conversation: 'oi' } },
+  });
+  assert.deepEqual(group, { kind: 'skipped', reason: 'group', instance: 'clinic' });
+
+  const own = classifyEvolutionInbound({
+    instance: 'clinic',
+    data: { key: { remoteJid: '5511999999999@s.whatsapp.net', fromMe: true }, message: { conversation: 'oi' } },
+  });
+  assert.equal(own.kind === 'skipped' && own.reason, 'from_me');
+
+  const status = classifyEvolutionInbound({
+    instance: 'clinic',
+    data: { key: { remoteJid: 'status@broadcast' }, message: { conversation: 'oi' } },
+  });
+  assert.equal(status.kind === 'skipped' && status.reason, 'broadcast');
+
+  // A sticker in a real 1:1 chat is signal: someone wrote and got nothing.
+  const sticker = classifyEvolutionInbound({
+    instance: 'clinic',
+    data: { key: { remoteJid: '5511999999999@s.whatsapp.net' }, message: { stickerMessage: { url: 'x' } } },
+  });
+  assert.equal(sticker.kind === 'skipped' && sticker.reason, 'no_text');
+  assert.equal(sticker.kind === 'skipped' && sticker.phone, '5511999999999');
+
+  const real = classifyEvolutionInbound(upsert('oi'));
+  assert.equal(real.kind, 'message');
+});
+
+test('group traffic is counted, never listed on the inbound strip', async () => {
+  WaInboundStore.resetSkipped();
+  const before = WaInboundStore.list(80).length;
+
+  for (let i = 0; i < 5; i += 1) {
+    const handled = await WaFlowEngine.handleInbound({
+      instance: 'clinic',
+      data: { key: { remoteJid: '120363083506002733@g.us' }, message: { conversation: `msg ${i}` } },
+    });
+    assert.equal(handled, false);
+  }
+
+  assert.equal(WaInboundStore.list(80).length, before, 'grupo não pode entrar no ring de eventos');
+  assert.equal(WaInboundStore.skipSummary().group, 5);
+  assert.equal(WaInboundStore.skipSummary().total, 5);
+});
+
+test('repeated config failures collapse instead of burying the ring', () => {
+  for (let i = 0; i < 4; i += 1) {
+    WaInboundStore.record({ outcome: 'rejected_secret', instance: 'clinic', error: 'segredo inválido' });
+  }
+  const head = WaInboundStore.list(80)[0];
+  assert.equal(head.outcome, 'rejected_secret');
+  assert.equal(head.repeated, 4);
+
+  // Two messages from the same person are two facts; they must not collapse.
+  WaInboundStore.record({ outcome: 'handled', instance: 'clinic', phoneTail: '9999', textExcerpt: 'oi' });
+  WaInboundStore.record({ outcome: 'handled', instance: 'clinic', phoneTail: '9999', textExcerpt: 'tudo bem?' });
+  const events = WaInboundStore.list(80);
+  assert.equal(events[0].outcome, 'handled');
+  assert.equal(events[0].repeated, undefined);
+  assert.equal(events[1].outcome, 'handled');
+});
+
+// --- Etapa 3: rota interna Evolution <-> painel ---
+
+function appRecord(name: string, domain: string, extra: Record<string, unknown> = {}) {
+  return {
+    id: `app-${name}`,
+    name,
+    sourceType: 'image' as const,
+    port: 4103,
+    internalPort: 8080,
+    env: {},
+    domain,
+    createdAt: new Date().toISOString(),
+    ...extra,
+  } as any;
+}
+
+test('suggestInternalEvolutionUrl maps the public domain to the Caddy upstream', () => {
+  const apps = [appRecord('outra', 'site.exemplo.com'), appRecord('evolution-api-v2-app', 'evo.exemplo.com')];
+
+  const found = suggestInternalEvolutionUrl('https://evo.exemplo.com', apps, []);
+  assert.equal(found?.url, 'http://aegis-app-evolution-api-v2-app:8080');
+  assert.equal(found?.appName, 'evolution-api-v2-app');
+
+  // A blue/green swap moves the upstream; the suggestion must follow it.
+  const swapped = suggestInternalEvolutionUrl(
+    'https://evo.exemplo.com',
+    [appRecord('evolution-api-v2-app', 'evo.exemplo.com', { activeContainerName: 'aegis-app-evolution-api-v2-app--abc' })],
+    []
+  );
+  assert.equal(swapped?.url, 'http://aegis-app-evolution-api-v2-app--abc:8080');
+
+  // Evolution hosted elsewhere has no internal address at all.
+  assert.equal(suggestInternalEvolutionUrl('https://evo.terceiro.com', apps, []), null);
+});
+
+test('suggestInternalEvolutionUrl refuses a remote node: it is not on this network', () => {
+  const apps = [appRecord('evolution-api-v2-app', 'evo.exemplo.com', { nodeId: 'node-remoto' })];
+  const nodes = [{ id: 'node-remoto', isLocal: false, sshHost: '10.0.0.9' }] as any;
+  assert.equal(suggestInternalEvolutionUrl('https://evo.exemplo.com', apps, nodes), null);
+});
+
+test('preferInternalUrl falls back to public unless a bridge URL is enabled', () => {
+  const pub = 'https://evo.exemplo.com';
+  const internal = 'http://aegis-app-evo:8080';
+
+  assert.equal(preferInternalUrl(pub, internal, false), pub, 'desligado usa o público');
+  assert.equal(preferInternalUrl(pub, undefined, true), pub, 'sem valor usa o público');
+  assert.equal(preferInternalUrl(pub, internal, true), internal);
+  assert.equal(preferInternalUrl(pub, 'http://aegis-app-evo:8080/', true), internal, 'sem barra final');
+
+  // An https value here would reintroduce exactly the hop this removes.
+  assert.equal(preferInternalUrl(pub, 'https://evo.exemplo.com', true), pub);
+  assert.equal(preferInternalUrl(pub, 'nao-e-url', true), pub);
+});
+
+test('internalPanelBaseUrl builds the address neighbours use', () => {
+  assert.equal(internalPanelBaseUrl('aegis-backend', 4000), 'http://aegis-backend:4000');
+});
+
+test('webhookUrl prefers the verified internal route over the public domain', () => {
+  const before = dbStorage.getSettings();
+  dbStorage.updateSettings({ panelDomain: 'painel.exemplo.com' });
+
+  dbStorage.updateSettings({ waFlowInternalRoute: { enabled: false } });
+  assert.match(WaFlowService.webhookBaseUrl(), /painel\.exemplo\.com$/);
+
+  dbStorage.updateSettings({
+    waFlowInternalRoute: { enabled: true, panelBaseUrl: 'http://aegis-backend:4000', verifiedAt: new Date().toISOString() },
+  });
+  assert.equal(WaFlowService.webhookBaseUrl(), 'http://aegis-backend:4000');
+  assert.match(WaFlowService.webhookUrl(), /^http:\/\/aegis-backend:4000\/api\/wa-flows\/webhook\?token=/);
+
+  dbStorage.updateSettings({ waFlowInternalRoute: before.waFlowInternalRoute, panelDomain: before.panelDomain });
+});
+
+test('the manager link stays public even when the internal route is on', () => {
+  const before = dbStorage.getSettings();
+  dbStorage.updateSettings({
+    evolution: { apiUrl: 'https://evo.exemplo.com', apiKey: 'k', internalApiUrl: 'http://aegis-app-evo:8080' },
+    waFlowInternalRoute: { enabled: true, panelBaseUrl: 'http://aegis-backend:4000' },
+  });
+
+  // Server-side calls take the bridge...
+  assert.equal(WaFlowService.evolutionCreds()?.apiUrl, 'http://aegis-app-evo:8080');
+  // ...but the link the operator clicks must resolve in a browser.
+  assert.equal(WaFlowService.publicEvolutionApiUrl(), 'https://evo.exemplo.com');
+
+  dbStorage.updateSettings({ evolution: before.evolution, waFlowInternalRoute: before.waFlowInternalRoute });
 });
