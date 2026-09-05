@@ -42,6 +42,174 @@ export type NavTab =
   | 'settings'
   | 'help';
 
+interface NavItem {
+  id: NavTab;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  tooltip: string;
+  /**
+   * Reserved for state the operator must act on. Nine of eighteen entries used
+   * to carry one — three of them "NOVO", which never expired and so meant
+   * nothing, and the rest ("PaaS", "SQL", "1-Click", "Auto", "AI") naming a
+   * category rather than a state. Only an unfinished feature earns one now.
+   */
+  badge?: string;
+  adminOnly?: boolean;
+}
+
+interface NavSection {
+  title?: string;
+  items: NavItem[];
+}
+
+/**
+ * Grouped by what the operator is doing, not by which layer the feature sits
+ * on. The previous split put Analytics under "Plataforma" and Monitor under
+ * "Sistema" though both answer "how is it going", and filed the WhatsApp
+ * builder under "Infraestrutura & Rede", where nobody looks for automation.
+ *
+ * Labels are the shortest phrase that names the destination. "Aplicações &
+ * CI/CD", "Domínios & SSL", "Segurança & Firewall" spent width on a second
+ * noun that the tooltip already carries.
+ */
+const NAV_SECTIONS: NavSection[] = [
+  {
+    items: [
+      {
+        id: 'dashboard',
+        label: 'Visão Geral',
+        icon: LayoutDashboard,
+        tooltip: 'Painel com métricas de CPU, RAM e status geral da VPS',
+      },
+    ],
+  },
+  {
+    title: 'Implantar',
+    items: [
+      {
+        id: 'apps',
+        label: 'Aplicações',
+        icon: Layers,
+        tooltip: 'Deploy de sites e APIs com webhook automático, estilo Vercel',
+      },
+      {
+        id: 'templates',
+        label: 'Marketplace',
+        icon: ShoppingBag,
+        tooltip: 'Instale n8n, Evolution API, Typebot, WordPress e S3 em um clique',
+      },
+      {
+        id: 'databases',
+        label: 'Bancos de Dados',
+        icon: Database,
+        tooltip: 'PostgreSQL, MySQL, Redis e MongoDB com credenciais criptografadas',
+      },
+      {
+        id: 'querystudio',
+        label: 'SQL Studio',
+        icon: Code2,
+        tooltip: 'Executor de queries e visualizador de tabelas em tempo real',
+      },
+      {
+        id: 'domains',
+        label: 'Domínios',
+        icon: Globe,
+        tooltip: 'Mapeamento de domínios com HTTPS automático via Caddy',
+      },
+    ],
+  },
+  {
+    title: 'Operar',
+    items: [
+      {
+        id: 'flows',
+        label: 'Fluxos WhatsApp',
+        icon: MessageCircle,
+        tooltip: 'Construtor visual de fluxos para atendimento e alertas no WhatsApp',
+      },
+      {
+        id: 'analytics',
+        label: 'Analytics',
+        icon: Globe2,
+        tooltip: 'Visitas, origem geográfica dos acessos e erros de cada aplicação',
+      },
+      {
+        id: 'containers',
+        label: 'Containers',
+        icon: Boxes,
+        tooltip: 'Gerenciador Docker: iniciar, parar, inspecionar e ler logs',
+      },
+      {
+        id: 'cron',
+        label: 'Agendador',
+        icon: Clock,
+        tooltip: 'Backups automáticos agendados e rotinas cron periódicas',
+      },
+      {
+        id: 'backups',
+        label: 'Backups',
+        icon: HardDriveDownload,
+        tooltip: 'Cópias de segurança de bancos e restauração em um clique',
+      },
+    ],
+  },
+  {
+    title: 'Servidor',
+    items: [
+      {
+        id: 'monitor',
+        label: 'Monitor',
+        icon: Activity,
+        tooltip: 'Processos com maior consumo de CPU e RAM, telemetria profunda',
+      },
+      {
+        id: 'terminal',
+        label: 'Terminal',
+        icon: Terminal,
+        tooltip: 'Terminal interativo no navegador, conectado ao host ou a containers',
+      },
+      {
+        id: 'firewall',
+        label: 'Firewall',
+        icon: Shield,
+        tooltip: 'Controle de portas abertas e regras do UFW',
+      },
+      {
+        id: 'filemanager',
+        label: 'Arquivos',
+        icon: FolderTree,
+        tooltip: 'Explorador de pastas, uploads e editor de arquivos de configuração',
+        adminOnly: true,
+      },
+      {
+        id: 'nodes',
+        label: 'Servidores',
+        icon: Server,
+        // The one honest badge: the panel still manages only its own Docker.
+        badge: 'BETA',
+        tooltip: 'Registre outros servidores e verifique a conexão via SSH',
+      },
+    ],
+  },
+  {
+    title: 'Sistema',
+    items: [
+      {
+        id: 'settings',
+        label: 'Configurações',
+        icon: Settings,
+        tooltip: 'Alertas, equipe, domínio do painel, Evolution API e migração',
+      },
+      {
+        id: 'help',
+        label: 'Ajuda',
+        icon: HelpCircle,
+        tooltip: 'Prompts prontos para preparar um projeto para o AegisPanel',
+      },
+    ],
+  },
+];
+
 interface SidebarProps {
   activeTab: NavTab;
   setActiveTab: (tab: NavTab) => void;
@@ -59,73 +227,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isMobileOpen,
   onCloseMobile,
 }) => {
-  const menuSections = [
-    {
-      title: 'Plataforma & Deploys',
-      items: [
-        { id: 'dashboard' as NavTab, label: 'Visão Geral', icon: LayoutDashboard, tooltip: 'Painel com métricas de CPU, RAM e status geral da VPS' },
-        { id: 'templates' as NavTab, label: 'Marketplace 1-Clique', icon: ShoppingBag, badge: 'NOVO', tooltip: 'Instale n8n, WhatsApp Evolution API, Typebot, WordPress e S3 em 1 clique' },
-        { id: 'apps' as NavTab, label: 'Aplicações & CI/CD', icon: Layers, badge: 'PaaS', tooltip: 'Deploy de sites e APIs com Webhook automático estilo Vercel' },
-        { id: 'nodes' as NavTab, label: 'Servidores', icon: Server, badge: 'BETA', tooltip: 'Registre outros servidores e verifique a conexão via SSH' },
-        { id: 'analytics' as NavTab, label: 'Analytics', icon: Globe2, badge: 'NOVO', tooltip: 'Visitas, origem geográfica dos acessos e erros de cada aplicação' },
-        { id: 'databases' as NavTab, label: 'Bancos de Dados', icon: Database, badge: '1-Click', tooltip: 'PostgreSQL, MySQL, Redis e MongoDB com criptografia AES-256' },
-        { id: 'querystudio' as NavTab, label: 'Database Studio', icon: Code2, badge: 'SQL', tooltip: 'Executor de queries SQL e visualizador de tabelas em tempo real' },
-        { id: 'filemanager' as NavTab, label: 'Arquivos & .env', icon: FolderTree, tooltip: 'Explorador de pastas, uploads e editor de arquivos de configuração' },
-      ],
-    },
-    {
-      title: 'Infraestrutura & Rede',
-      items: [
-        { id: 'containers' as NavTab, label: 'Containers Docker', icon: Boxes, tooltip: 'Gerenciador Docker estilo Portainer (iniciar, parar, logs)' },
-        { id: 'cron' as NavTab, label: 'Agendador Cron', icon: Clock, badge: 'Auto', tooltip: 'Backups automáticos agendados e rotinas cron periódicas' },
-        { id: 'flows' as NavTab, label: 'Fluxos WhatsApp', icon: MessageCircle, badge: 'NOVO', tooltip: 'Construtor visual de fluxos para chatbot e alertas no WhatsApp' },
-        { id: 'domains' as NavTab, label: 'Domínios & SSL', icon: Globe, tooltip: 'Mapeamento de domínios Hostinger com HTTPS grátis automático' },
-        { id: 'firewall' as NavTab, label: 'Segurança & Firewall', icon: Shield, tooltip: 'Controle de portas abertas e regras de firewall UFW' },
-        { id: 'backups' as NavTab, label: 'Backups & Restore', icon: HardDriveDownload, tooltip: 'Cópias de segurança de bancos e restauração em 1 clique' },
-      ],
-    },
-    {
-      title: 'Sistema & Servidor',
-      items: [
-        { id: 'terminal' as NavTab, label: 'Terminal Web (SSH)', icon: Terminal, tooltip: 'Terminal interativo no navegador conectado ao host ou containers' },
-        { id: 'monitor' as NavTab, label: 'Monitor de Recursos', icon: Activity, tooltip: 'Processos com maior consumo de CPU/RAM e telemetria profunda' },
-        { id: 'settings' as NavTab, label: 'Configurações & Equipe', icon: Settings, tooltip: 'Alertas WhatsApp/Telegram, equipe, domínio próprio e migração' },
-        { id: 'help' as NavTab, label: 'Ajuda & Prompt IA', icon: HelpCircle, badge: 'AI', tooltip: 'Prompts prontos para IAs prepararem seu projeto Vercel para o AegisPanel' },
-      ],
-    },
-  ];
-
   return (
     <>
-      {/* Mobile Backdrop */}
       {isMobileOpen && (
         <div
           onClick={onCloseMobile}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden animate-in fade-in duration-200"
+          className="fixed inset-0 bg-surface-container-lowest/70 backdrop-blur-sm z-40 lg:hidden animate-in fade-in duration-200"
           aria-hidden="true"
         />
       )}
 
       <aside
         className={`w-64 sm:w-60 bg-surface-container-lowest border-r border-outline-variant flex flex-col h-screen shrink-0 select-none fixed inset-y-0 left-0 z-50 lg:static lg:z-auto transition-transform duration-200 ease-in-out ${
-          isMobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'
+          isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
-        {/* Brand Header */}
-        <div className="p-4 border-b border-outline-variant flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded bg-primary-container/15 border border-primary/30 flex items-center justify-center">
+        <div className="p-4 border-b border-outline-variant flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="w-9 h-9 rounded bg-primary-container/15 border border-primary/30 flex items-center justify-center shrink-0">
               <Flame className="w-[18px] h-[18px] text-primary" />
-            </div>
-            <div>
-              <h1 className="font-bold text-sm tracking-[-0.01em] text-on-surface flex items-center gap-1">
+            </span>
+            <div className="min-w-0">
+              <h1 className="font-bold text-sm tracking-[-0.01em] text-on-surface">
                 AEGIS<span className="text-primary font-normal">PANEL</span>
               </h1>
               <div className="flex items-center gap-1.5 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-ok"></span>
-                <span className="text-2xs text-on-surface-variant/80 font-mono truncate max-w-[120px]">
-                  {serverName}
-                </span>
+                <span className="w-1.5 h-1.5 rounded-full bg-ok shrink-0" aria-hidden />
+                <span className="text-2xs text-on-surface-variant/80 font-mono truncate">{serverName}</span>
               </div>
             </div>
           </div>
@@ -133,7 +261,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {onCloseMobile && (
             <button
               onClick={onCloseMobile}
-              className="lg:hidden text-on-surface-variant/70 hover:text-on-surface p-1.5 rounded-md hover:bg-surface-container transition-colors"
+              className="lg:hidden text-on-surface-variant/70 hover:text-on-surface p-1.5 rounded hover:bg-surface-container transition-colors shrink-0"
               title="Fechar menu"
             >
               <X className="w-5 h-5" />
@@ -141,15 +269,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
 
-        {/* Navigation Sections */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-5 custom-scrollbar">
-          {menuSections.map((section, sIdx) => (
-            <div key={sIdx} className="space-y-1">
-              <h2 className="px-3 mono-label">
-                {section.title}
-              </h2>
-              <div className="space-y-0.5 pt-1">
-                {section.items.filter((item) => item.id !== 'filemanager' || role === 'admin').map((item) => {
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5 custom-scrollbar">
+          {NAV_SECTIONS.map((section, index) => {
+            const items = section.items.filter((item) => !item.adminOnly || role === 'admin');
+            if (items.length === 0) return null;
+
+            return (
+              <div key={section.title ?? `group-${index}`} className="space-y-0.5">
+                {section.title && <h2 className="px-3 pb-1.5 mono-label">{section.title}</h2>}
+
+                {items.map((item) => {
                   const Icon = item.icon;
                   const isActive = activeTab === item.id;
 
@@ -161,29 +290,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         onCloseMobile?.();
                       }}
                       title={item.tooltip}
-                      className={`w-full flex items-center justify-between px-3 py-2 rounded text-xs font-medium transition-colors group ${
+                      aria-current={isActive ? 'page' : undefined}
+                      className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded text-xs font-medium transition-colors group ${
                         isActive
-                          ? 'bg-primary-container text-white'
+                          ? 'bg-primary-container text-on-primary-container'
                           : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
                       }`}
                     >
-                      <div className="flex items-center gap-2.5">
+                      <span className="flex items-center gap-2.5 min-w-0">
                         <Icon
-                          className={`w-4 h-4 transition-colors ${
-                            isActive ? 'text-white' : 'text-on-surface-variant/70 group-hover:text-on-surface'
+                          className={`w-4 h-4 shrink-0 transition-colors ${
+                            isActive ? 'text-on-primary-container' : 'text-on-surface-variant/70 group-hover:text-on-surface'
                           }`}
                         />
-                        <span>{item.label}</span>
-                      </div>
+                        <span className="truncate">{item.label}</span>
+                      </span>
 
                       {item.badge && (
                         <span
-                          className={`text-2xs px-1.5 py-0.5 rounded-full font-mono tracking-tight border ${
+                          className={`text-2xs font-mono px-1.5 py-0.5 rounded border shrink-0 ${
                             isActive
-                              ? 'bg-white/20 text-white border-white/25'
-                              : item.badge === 'NOVO'
-                              ? 'bg-ok/10 text-ok border-ok/30'
-                              : 'bg-surface-container-high text-on-surface-variant border-outline-variant'
+                              ? 'border-on-primary-container/30 text-on-primary-container'
+                              : 'border-outline-variant text-on-surface-variant/70'
                           }`}
                         >
                           {item.badge}
@@ -193,22 +321,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   );
                 })}
               </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Server Badge Footer */}
-        <div className="p-3 border-t border-outline-variant">
-          <div className="flex items-center justify-between text-2xs text-on-surface-variant/80 px-2">
-            <div className="flex items-center gap-1.5">
-              <Server className="w-3.5 h-3.5 text-primary" />
-              <span className="font-mono">VPS Ready (v2.0)</span>
-            </div>
-            <span className="text-2xs text-ok font-mono bg-ok/10 border border-ok/30 px-1.5 py-0.5 rounded-full">
-              Self-Hosted
-            </span>
-          </div>
-        </div>
+            );
+          })}
+        </nav>
       </aside>
     </>
   );
