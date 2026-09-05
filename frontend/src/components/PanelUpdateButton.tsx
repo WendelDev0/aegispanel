@@ -60,7 +60,7 @@ export const PanelUpdateButton: React.FC = () => {
 
   const apply = async () => {
     if (!status?.canApply) return;
-    if (!confirm('Baixar a nova versão e reconstruir o painel agora? O backend pode reiniciar por alguns segundos.')) {
+    if (!confirm('Baixar a nova versão e reconstruir o painel agora? A página pode cair por alguns segundos — recarregue se precisar.')) {
       return;
     }
     try {
