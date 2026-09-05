@@ -240,6 +240,7 @@ export function App() {
               onLogout={handleLogout}
               onRefresh={fetchOverview}
               onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
+              isAdmin={user?.role === 'admin'}
             />
 
             <main className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-7 custom-scrollbar">

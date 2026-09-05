@@ -1046,7 +1046,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
         </div>
         <p className="text-xs text-on-surface-variant">
           Logs allowlisted da stack (backend, frontend, caddy, nginx) e self-update via Docker Compose.
-          O progresso do self-update chega em tempo real. Bloqueado em LOCAL_MODE.
+          Quando o GitHub está à frente, o botão Atualizar também aparece no topo do painel, como numa IDE.
+          Bloqueado em LOCAL_MODE.
         </p>
 
         <div className="flex flex-wrap items-center gap-3">

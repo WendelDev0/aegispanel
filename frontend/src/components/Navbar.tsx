@@ -1,6 +1,7 @@
 import React from 'react';
-import { User, LogOut, ShieldCheck, RefreshCw, Cpu, HardDrive, Menu } from 'lucide-react';
+import { LogOut, RefreshCw, Menu } from 'lucide-react';
 import { SystemStats } from '../types/index.js';
+import { PanelUpdateButton } from './PanelUpdateButton.js';
 
 interface NavbarProps {
   stats?: SystemStats | null;
@@ -9,6 +10,7 @@ interface NavbarProps {
   onLogout: () => void;
   onRefresh?: () => void;
   onToggleMobileMenu?: () => void;
+  isAdmin?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -18,6 +20,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLogout,
   onRefresh,
   onToggleMobileMenu,
+  isAdmin,
 }) => {
   const formatUptime = (seconds: number) => {
     const days = Math.floor(seconds / 86400);
@@ -69,6 +72,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Right user & actions */}
       <div className="flex items-center gap-3">
+        {isAdmin && <PanelUpdateButton />}
         {onRefresh && (
           <button
             onClick={onRefresh}

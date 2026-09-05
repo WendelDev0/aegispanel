@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  checkComposeUpdate,
+  gitStatusCommands,
   gitUpdateCommands,
   hasComposeGit,
   sanitizeUpdateRef,
@@ -46,6 +48,40 @@ test('updateComposeCheckout skips pull when there is no .git', async () => {
     });
     assert.equal(result.pulled, false);
     assert.equal(result.skippedReason, 'no-git');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('gitStatusCommands fetch and compare without checkout', () => {
+  const cmds = gitStatusCommands('/opt/aegispanel', 'main');
+  assert.equal(cmds.length, 5);
+  assert.ok(cmds[0].includes('fetch'));
+  assert.equal(cmds.some((args) => args.includes('checkout')), false);
+  for (const args of cmds) {
+    assert.equal(args.some((a) => a.includes(';')), false);
+  }
+});
+
+test('checkComposeUpdate is available when origin is ahead', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aegis-compose-git-'));
+  fs.writeFileSync(path.join(dir, 'docker-compose.yml'), 'services: {}\n');
+  fs.mkdirSync(path.join(dir, '.git'));
+  try {
+    const status = await checkComposeUpdate(dir, {
+      ref: 'main',
+      runGit: async (args) => {
+        if (args.includes('fetch')) return '';
+        if (args.includes('rev-list')) return '2';
+        if (args.includes('HEAD') && args.includes('rev-parse') && !args.includes('FETCH_HEAD')) return 'abc1234';
+        if (args.includes('FETCH_HEAD') && args.includes('rev-parse')) return 'def5678';
+        if (args.includes('log')) return 'feat(flows): native WhatsApp builder';
+        return '';
+      },
+    });
+    assert.equal(status.available, true);
+    assert.equal(status.behind, 2);
+    assert.match(status.remoteSubject, /WhatsApp/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

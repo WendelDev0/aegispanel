@@ -525,6 +525,15 @@ systemRouter.get('/panel/logs/:target', requireAdmin, async (req: Request, res: 
   }
 });
 
+systemRouter.get('/panel/update-status', requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const force = req.query.refresh === '1' || req.query.refresh === 'true';
+    res.json(await PanelService.updateStatus(force));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 systemRouter.post('/panel/self-update', requireAdmin, validateBody(emptyBodySchema), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const result = await PanelService.selfUpdate();
