@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Layers,
   Plus,
@@ -25,6 +25,15 @@ import {
   Globe2,
   Sparkles,
   Activity,
+  LayoutGrid,
+  List,
+  Copy,
+  Check,
+  MoreVertical,
+  AlertCircle,
+  CheckCircle2,
+  ArrowUpRight,
+  HardDrive,
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { useToast } from '../components/Toast.js';
@@ -50,16 +59,6 @@ function formatRam(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/**
- * The badge an app card shows.
- *
- * A container can be `running` and serving nothing — that is exactly what a
- * crash loop looks like — so a card that reported only the container state told
- * the operator the app was fine while the site returned errors. Health takes
- * precedence when the panel has probed it; `unknown` (every app right after a
- * panel restart) falls back to the container state rather than claiming a
- * problem nobody has observed.
- */
 function appStatusBadge(
   app: AppRecord,
   nodes: ServerNode[] = [],
@@ -69,10 +68,6 @@ function appStatusBadge(
   className: string;
   dotClassName: string;
 } {
-  // A node the panel cannot reach says nothing about the container it hosts.
-  // Reporting "Online" there is a guess based on the last successful deploy,
-  // and it is the guess that sends someone debugging the app instead of the
-  // link to it.
   const node = app.nodeId ? nodes.find((n) => n.id === app.nodeId) : undefined;
   if (node && !node.isLocal && node.status === 'error') {
     return {
@@ -123,24 +118,27 @@ function appStatusBadge(
   };
 }
 
+type FilterStatus = 'all' | 'running' | 'stopped' | 'error' | 'git' | 'image';
+type ViewMode = 'grid' | 'table';
+
 interface AppsPageProps {
-  /** Opens the analytics view already focused on this application. */
   onOpenAnalytics?: (appId: string) => void;
-  /** Navigates to /apps/<id>, the addressable view of one application. */
   onOpenApp?: (appId: string) => void;
 }
 
 export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }) => {
   const toast = useToast();
   const [apps, setApps] = useState<AppRecord[]>([]);
-  // Only to grey out apps whose node is unreachable; failure is not worth
-  // blocking the page over, so an empty list simply disables that signal.
   const [nodes, setNodes] = useState<ServerNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
+  const [viewMode, setViewMode] = useState<ViewMode>('grid');
+  const [copiedPortId, setCopiedPortId] = useState<string | null>(null);
+  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
 
   // Modals state
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedLogsApp, setSelectedLogsApp] = useState<AppRecord | null>(null);
   const [selectedWebhookApp, setSelectedWebhookApp] = useState<AppRecord | null>(null);
   const [selectedDeploymentsApp, setSelectedDeploymentsApp] = useState<AppRecord | null>(null);
@@ -176,12 +174,10 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
     api
       .get('/nodes')
       .then((res) => setNodes(Array.isArray(res.data) ? res.data : []))
-      .catch(() => {
-        /* the node signal is optional; the page renders without it */
-      });
+      .catch(() => {});
 
     const handleStream = (data: any) => {
-      setLiveDeployModal(prev => {
+      setLiveDeployModal((prev) => {
         if (!prev || prev.app.id !== data.appId) return prev;
         return {
           ...prev,
@@ -221,6 +217,15 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
     };
   }, []);
 
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleDocumentClick = () => setOpenDropdownId(null);
+    if (openDropdownId) {
+      document.addEventListener('click', handleDocumentClick);
+      return () => document.removeEventListener('click', handleDocumentClick);
+    }
+  }, [openDropdownId]);
+
   const handleAppCreated = (createdApp: AppRecord) => {
     setShowCreateModal(false);
     fetchApps();
@@ -256,13 +261,6 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
     }
   };
 
-  /**
-   * Rebuilds the exact commit of a past deployment.
-   *
-   * Distinct from Rollback, which restarts an image that already exists. The
-   * rebuild is what applies a changed NEXT_PUBLIC_/VITE_ value, because those
-   * are baked into the image at build time.
-   */
   const handleRedeploy = async (appId: string, dep: DeploymentRecord) => {
     const alvo = dep.commitHash ? `#${dep.commitHash}` : 'este deploy';
     if (
@@ -329,6 +327,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
   const handleStart = async (id: string) => {
     try {
       await api.post(`/apps/${id}/start`);
+      toast.success('Aplicação iniciada.');
       fetchApps();
     } catch (err: any) {
       toast.error(err.response?.data?.error || err.message, 'Erro ao iniciar app');
@@ -338,6 +337,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
   const handleStop = async (id: string) => {
     try {
       await api.post(`/apps/${id}/stop`);
+      toast.success('Aplicação parada.');
       fetchApps();
     } catch (err: any) {
       toast.error(err.response?.data?.error || err.message, 'Erro ao parar app');
@@ -347,6 +347,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
   const handleRestart = async (id: string) => {
     try {
       await api.post(`/apps/${id}/restart`);
+      toast.success('Aplicação reiniciada.');
       fetchApps();
     } catch (err: any) {
       toast.error(err.response?.data?.error || err.message, 'Erro ao reiniciar app');
@@ -357,443 +358,819 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
     if (!confirm(`Tem certeza que deseja deletar a aplicação "${name}"?`)) return;
     try {
       await api.delete(`/apps/${id}`);
+      toast.success(`Aplicação "${name}" excluída.`);
       fetchApps();
     } catch (err: any) {
       toast.error(err.response?.data?.error || err.message, 'Erro ao deletar app');
     }
   };
 
-  const filteredApps = apps.filter(a =>
-    a.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (a.domain && a.domain.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (a.gitUrl && a.gitUrl.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    a.port.toString().includes(searchTerm)
-  );
+  const handleCopyDirectUrl = (e: React.MouseEvent, port: number, id: string) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const host = window.location.hostname || 'localhost';
+    const url = `http://${host}:${port}`;
+    void navigator.clipboard.writeText(url);
+    setCopiedPortId(id);
+    toast.success(`Link direto copiado: ${url}`);
+    setTimeout(() => setCopiedPortId(null), 2000);
+  };
+
+  // Fleet KPIs
+  const fleetKpis = useMemo(() => {
+    const total = apps.length;
+    const running = apps.filter((a) => a.status === 'running');
+    const healthy = running.filter((a) => !a.health || a.health.status === 'healthy').length;
+    const buildingOrStarting = apps.filter(
+      (a) => a.status === 'building' || (a.status === 'running' && a.health?.status === 'starting'),
+    ).length;
+    const stoppedOrError = apps.filter(
+      (a) => a.status === 'stopped' || a.status === 'error' || a.health?.status === 'unhealthy',
+    ).length;
+
+    let totalRamBytes = 0;
+    for (const snap of Object.values(appMetrics)) {
+      if (snap.available && snap.memoryUsedBytes) {
+        totalRamBytes += snap.memoryUsedBytes;
+      }
+    }
+
+    return {
+      total,
+      healthy,
+      buildingOrStarting,
+      stoppedOrError,
+      totalRamStr: formatRam(totalRamBytes),
+    };
+  }, [apps, appMetrics]);
+
+  // Filtering
+  const filteredApps = useMemo(() => {
+    return apps.filter((app) => {
+      if (filterStatus === 'running' && app.status !== 'running') return false;
+      if (filterStatus === 'stopped' && app.status !== 'stopped') return false;
+      if (filterStatus === 'error' && app.status !== 'error' && app.health?.status !== 'unhealthy') {
+        return false;
+      }
+      if (filterStatus === 'git' && app.sourceType !== 'git' && app.sourceType !== 'dockerfile') {
+        return false;
+      }
+      if (filterStatus === 'image' && app.sourceType !== 'image') return false;
+
+      if (!searchTerm) return true;
+      const term = searchTerm.toLowerCase();
+      return (
+        app.name.toLowerCase().includes(term) ||
+        (app.domain && app.domain.toLowerCase().includes(term)) ||
+        (app.gitUrl && app.gitUrl.toLowerCase().includes(term)) ||
+        (app.imageName && app.imageName.toLowerCase().includes(term)) ||
+        (app.branch && app.branch.toLowerCase().includes(term)) ||
+        app.port.toString().includes(term)
+      );
+    });
+  }, [apps, filterStatus, searchTerm]);
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Executive Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Layers className="w-6 h-6 text-primary" />
-            Aplicações & CI/CD — Experiência Cloud Profissional (Aegis Style)
-          </h2>
-          <p className="text-sm text-on-surface-variant mt-1">
-            Controle de ponta a ponta dos seus projetos com deploy em tempo real, rollback instantâneo, repositórios públicos e privados do GitHub e domínios com SSL.
-          </p>
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-lg bg-primary/10 text-primary border border-primary/20">
+              <Layers className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-white tracking-[-0.01em]">
+                Aplicações & CI/CD
+              </h2>
+              <p className="text-xs text-on-surface-variant mt-0.5">
+                Plataforma PaaS Cloud com automação de builds, rollback instantâneo e domínios com SSL.
+              </p>
+            </div>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 shrink-0">
           <button
             onClick={() => setShowAiHelpModal(true)}
-            title="Copie o prompt para a sua IA (ChatGPT, Claude, Cursor, v0) preparar o projeto para o AegisPanel"
-            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 font-semibold text-xs border border-purple-500/40 transition-all active:scale-95 shrink-0"
+            title="Copie o prompt para sua IA preparar o projeto para o AegisPanel"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 font-semibold text-xs border border-purple-500/30 transition-all active:scale-95"
           >
-            <Sparkles className="w-4 h-4 text-purple-400" />
+            <Sparkles className="w-3.5 h-3.5 text-purple-400" />
             <span>Prompt para IA ✨</span>
           </button>
 
           <button
             onClick={() => setShowCreateModal(true)}
-            title="Fazer deploy de um novo projeto do GitHub (Público ou Privado) ou Imagem Docker"
-            className="flex items-center gap-2 px-4 py-2.5 rounded bg-primary-container hover:bg-primary text-white font-semibold text-sm transition-all active:scale-95 shrink-0"
+            title="Fazer deploy de um novo projeto do GitHub ou imagem Docker"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-on-primary font-semibold text-xs transition-all hover:bg-primary/90 active:scale-95 shadow-sm"
           >
             <Plus className="w-4 h-4" />
-            Novo Deploy / Projeto
+            <span>Novo Projeto / Deploy</span>
           </button>
         </div>
       </div>
 
-      {/* Search & Stats Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-on-surface-variant absolute left-3.5 top-1/2 -translate-y-1/2" />
+      {/* Fleet Telemetry KPIs */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="p-3.5 rounded-lg bg-surface-container border border-outline-variant">
+          <div className="flex items-center justify-between text-on-surface-variant text-[11px] mb-1">
+            <span>Total de Apps</span>
+            <HardDrive className="w-3.5 h-3.5 text-on-surface-variant/60" />
+          </div>
+          <div className="text-xl font-bold text-white tabular-nums font-mono">
+            {fleetKpis.total}
+          </div>
+        </div>
+
+        <div className="p-3.5 rounded-lg bg-surface-container border border-outline-variant">
+          <div className="flex items-center justify-between text-on-surface-variant text-[11px] mb-1">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-ok animate-pulse" />
+              Online
+            </span>
+            <CheckCircle2 className="w-3.5 h-3.5 text-ok/80" />
+          </div>
+          <div className="text-xl font-bold text-ok tabular-nums font-mono">
+            {fleetKpis.healthy}
+          </div>
+        </div>
+
+        <div className="p-3.5 rounded-lg bg-surface-container border border-outline-variant">
+          <div className="flex items-center justify-between text-on-surface-variant text-[11px] mb-1">
+            <span>Parados ou Erro</span>
+            <AlertCircle className="w-3.5 h-3.5 text-warn/80" />
+          </div>
+          <div className="text-xl font-bold text-on-surface-variant tabular-nums font-mono">
+            {fleetKpis.stoppedOrError}
+          </div>
+        </div>
+
+        <div className="p-3.5 rounded-lg bg-surface-container border border-outline-variant">
+          <div className="flex items-center justify-between text-on-surface-variant text-[11px] mb-1">
+            <span>RAM Total em Uso</span>
+            <Activity className="w-3.5 h-3.5 text-tertiary/80" />
+          </div>
+          <div className="text-xl font-bold text-tertiary tabular-nums font-mono truncate">
+            {fleetKpis.totalRamStr}
+          </div>
+        </div>
+      </div>
+
+      {/* Control Toolbar: Search + Filter Pills + View Switch */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-surface-container-low p-2 rounded-lg border border-outline-variant">
+        {/* Search */}
+        <div className="relative flex-1 max-w-sm">
+          <Search className="w-3.5 h-3.5 text-on-surface-variant absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Buscar por nome do app, domínio, branch ou porta..."
+            placeholder="Buscar por nome, domínio, porta, repo..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-surface-container border border-outline-variant rounded-lg pl-10 pr-4 py-2.5 text-xs text-white placeholder-on-surface-variant/50 focus:outline-none focus:border-primary transition-colors"
+            className="w-full bg-surface-container border border-outline-variant rounded-md pl-8 pr-3 py-1.5 text-xs text-white placeholder-on-surface-variant/50 focus:outline-none focus:border-primary transition-colors"
           />
         </div>
 
-        <div className="flex items-center gap-3 text-xs font-mono text-on-surface-variant">
-          <span className="bg-surface-container-low border border-outline-variant px-3 py-1.5 rounded flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            Online: <strong className="text-white">{apps.filter(a => a.status === 'running').length}</strong>
-          </span>
-          <span className="bg-surface-container-low border border-outline-variant px-3 py-1.5 rounded">
-            Total Apps: <strong className="text-white">{apps.length}</strong>
-          </span>
+        {/* Filter Pills */}
+        <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar text-xs">
+          {[
+            { id: 'all', label: 'Todos', count: apps.length },
+            { id: 'running', label: 'Online', count: apps.filter((a) => a.status === 'running').length },
+            { id: 'stopped', label: 'Parados', count: apps.filter((a) => a.status === 'stopped').length },
+            {
+              id: 'error',
+              label: 'Problemas',
+              count: apps.filter((a) => a.status === 'error' || a.health?.status === 'unhealthy').length,
+            },
+            {
+              id: 'git',
+              label: 'Git',
+              count: apps.filter((a) => a.sourceType === 'git' || a.sourceType === 'dockerfile').length,
+            },
+            { id: 'image', label: 'Docker', count: apps.filter((a) => a.sourceType === 'image').length },
+          ].map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setFilterStatus(f.id as FilterStatus)}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                filterStatus === f.id
+                  ? 'bg-primary/20 text-primary border border-primary/30 font-semibold'
+                  : 'text-on-surface-variant hover:text-white hover:bg-surface-container'
+              }`}
+            >
+              <span>{f.label}</span>
+              <span className="text-[10px] font-mono opacity-70">({f.count})</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Right: Layout Switch & Refresh */}
+        <div className="flex items-center gap-1.5 shrink-0 self-end md:self-auto">
+          <div className="flex items-center bg-surface-container rounded border border-outline-variant p-0.5">
+            <button
+              onClick={() => setViewMode('grid')}
+              title="Modo Grade (Cards)"
+              className={`p-1 rounded ${viewMode === 'grid' ? 'bg-primary/20 text-primary' : 'text-on-surface-variant hover:text-white'}`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setViewMode('table')}
+              title="Modo Tabela (Compacto)"
+              className={`p-1 rounded ${viewMode === 'table' ? 'bg-primary/20 text-primary' : 'text-on-surface-variant hover:text-white'}`}
+            >
+              <List className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <button
+            onClick={fetchApps}
+            title="Recarregar aplicações"
+            className="p-1.5 rounded bg-surface-container hover:bg-surface-container-high border border-outline-variant text-on-surface-variant hover:text-white transition-colors"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
         </div>
       </div>
 
-      {/* Apps Grid */}
-      {loading ? (
-        <div className="flex items-center justify-center p-16 text-on-surface-variant">
+      {/* Main Content: Grid vs Table */}
+      {loading && apps.length === 0 ? (
+        <div className="flex flex-col items-center justify-center p-16 text-on-surface-variant gap-3">
           <RefreshCw className="w-6 h-6 animate-spin text-primary" />
+          <span className="text-xs">Carregando aplicações...</span>
         </div>
       ) : filteredApps.length === 0 ? (
         <div className="bg-surface-container rounded-lg p-12 border border-outline-variant text-center">
-          <div className="w-12 h-12 rounded-lg bg-primary/10 text-primary flex items-center justify-center mx-auto mb-4">
+          <div className="w-12 h-12 rounded-lg bg-primary/10 text-primary flex items-center justify-center mx-auto mb-4 border border-primary/20">
             <Layers className="w-6 h-6" />
           </div>
-          <h3 className="text-lg font-bold text-white mb-1">Nenhuma aplicação encontrada</h3>
-          <p className="text-sm text-on-surface-variant max-w-md mx-auto mb-6">
-            Conecte seu repositório do GitHub ou escolha uma imagem Docker para fazer seu primeiro deploy.
+          <h3 className="text-base font-bold text-white mb-1">
+            {apps.length === 0 ? 'Nenhuma aplicação hospedada' : 'Nenhuma aplicação com estes filtros'}
+          </h3>
+          <p className="text-xs text-on-surface-variant max-w-md mx-auto mb-5">
+            {apps.length === 0
+              ? 'Conecte seu repositório do GitHub (público ou privado) ou forneça uma imagem Docker para iniciar seu primeiro deploy.'
+              : 'Tente ajustar os termos de busca ou mudar a categoria de filtro selecionada.'}
           </p>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="px-5 py-2.5 rounded bg-primary-container hover:bg-primary text-white font-semibold text-sm inline-flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            Criar Primeiro Deploy
-          </button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {filteredApps.map((app) => (
-            <div
-              key={app.id}
-              className="bg-surface-container rounded-lg p-6 border border-outline-variant hover:border-primary/50 transition-all flex flex-col justify-between space-y-4"
+          {apps.length === 0 && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="px-4 py-2 rounded-lg bg-primary text-on-primary font-semibold text-xs inline-flex items-center gap-2 hover:bg-primary/90 transition-all active:scale-95"
             >
-              <div>
-                {/* Header: Title + Status + Branch */}
-                <div className="flex items-start justify-between gap-3 mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-lg bg-primary/10 text-primary border border-primary/25 flex items-center justify-center font-bold">
-                      <Code className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        {/* The name is the way in, so an application has a URL
-                            someone can send. */}
-                        <h3 className="font-bold text-white text-lg">
-                          {onOpenApp ? (
-                            <button
-                              onClick={() => onOpenApp(app.id)}
-                              title="Abrir a página desta aplicação"
-                              className="hover:text-primary transition-colors text-left"
-                            >
-                              {app.name}
-                            </button>
-                          ) : (
-                            app.name
-                          )}
-                        </h3>
-                        {app.sourceType === 'git' ? (
-                          <span className="text-[10px] font-mono text-primary bg-primary/20 px-2 py-0.5 rounded-md flex items-center gap-1 border border-primary/30">
-                            <GitBranch className="w-3 h-3" /> {app.branch || 'main'}
-                            {app.hasGithubToken && (
-                              <span title="Repositório Privado com Token">
-                                <Lock className="w-2.5 h-2.5 text-warn" />
-                              </span>
-                            )}
-                          </span>
+              <Plus className="w-4 h-4" />
+              Criar Primeiro Deploy
+            </button>
+          )}
+        </div>
+      ) : viewMode === 'grid' ? (
+        /* Bento Grid View */
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {filteredApps.map((app) => {
+            const badge = appStatusBadge(app, nodes);
+            const currentHost = window.location.hostname || 'localhost';
+            const directUrl = `http://${currentHost}:${app.port}`;
+            const metrics = appMetrics[app.id];
+
+            return (
+              <div
+                key={app.id}
+                className="bg-surface-container rounded-lg border border-outline-variant hover:border-primary/40 transition-all duration-200 flex flex-col justify-between overflow-hidden group shadow-sm hover:shadow-md"
+              >
+                <div className="p-5 space-y-4">
+                  {/* Card Header: Icon + Name + Branch + Status */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-lg bg-surface-container-high border border-outline-variant flex items-center justify-center font-bold text-primary shrink-0 mt-0.5">
+                        {app.sourceType === 'git' || app.sourceType === 'dockerfile' ? (
+                          <GitBranch className="w-5 h-5 text-primary" />
                         ) : (
-                          <span className="text-[10px] font-mono text-warn bg-warn/10 px-2 py-0.5 rounded-md border border-warn/30">
-                            Docker Image
+                          <Code className="w-5 h-5 text-warn" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-bold text-white text-base truncate">
+                            {onOpenApp ? (
+                              <button
+                                onClick={() => onOpenApp(app.id)}
+                                title="Abrir painel detalhado desta aplicação"
+                                className="hover:text-primary transition-colors text-left flex items-center gap-1 group-hover:text-primary"
+                              >
+                                {app.name}
+                                <ArrowUpRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                              </button>
+                            ) : (
+                              app.name
+                            )}
+                          </h3>
+
+                          {app.sourceType === 'git' ? (
+                            <span className="text-[10px] font-mono text-primary bg-primary/15 px-2 py-0.5 rounded border border-primary/30 flex items-center gap-1">
+                              <GitBranch className="w-2.5 h-2.5" />
+                              {app.branch || 'main'}
+                              {app.hasGithubToken && (
+                                <span title="Repositório Privado">
+                                  <Lock className="w-2.5 h-2.5 text-warn" />
+                                </span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-mono text-warn bg-warn/10 px-2 py-0.5 rounded border border-warn/30">
+                              Docker
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-[11px] font-mono text-on-surface-variant truncate mt-0.5 max-w-sm">
+                          {app.gitUrl || app.imageName}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Status badge */}
+                    <span
+                      title={badge.title}
+                      className={`text-[11px] px-2.5 py-1 rounded-full font-medium flex items-center gap-1.5 shrink-0 ${badge.className}`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${badge.dotClassName}`} />
+                      {badge.label}
+                    </span>
+                  </div>
+
+                  {/* Network & Access Bar: Domain + Direct Port */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
+                    {/* Domain */}
+                    <div className="p-2.5 rounded-md bg-surface-container-low border border-outline-variant flex items-center justify-between gap-2 min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Globe className="w-3.5 h-3.5 text-primary shrink-0" />
+                        {app.domain ? (
+                          <a
+                            href={`https://${app.domain}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-ok hover:underline truncate font-semibold flex items-center gap-1"
+                          >
+                            {app.domain}
+                            <ExternalLink className="w-3 h-3 shrink-0" />
+                          </a>
+                        ) : (
+                          <span className="text-on-surface-variant/70 text-[11px] truncate">
+                            Sem domínio SSL
                           </span>
                         )}
                       </div>
-                      <p className="text-xs font-mono text-on-surface-variant truncate max-w-xs mt-0.5">
-                        {app.gitUrl || app.imageName}
-                      </p>
-                    </div>
-                  </div>
-
-                  {(() => {
-                    // "running" only says the container exists. A crash-looping
-                    // app is running and serving nothing, so the badge reports
-                    // whether it actually answers when the panel knows.
-                    const badge = appStatusBadge(app, nodes);
-                    return (
-                      <span
-                        title={badge.title}
-                        className={`text-xs px-3 py-1 rounded-full font-semibold flex items-center gap-1.5 shrink-0 ${badge.className}`}
-                      >
-                        <span className={`w-2 h-2 rounded-full ${badge.dotClassName}`}></span>
-                        {badge.label}
-                      </span>
-                    );
-                  })()}
-                </div>
-
-                {/* Direct VPS IP + Port Access Banner */}
-                <div className="mb-4">
-                  {(() => {
-                    const currentHost = window.location.hostname || 'localhost';
-                    const directUrl = `http://${currentHost}:${app.port}`;
-                    return (
-                      <a
-                        href={directUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg bg-emerald-950/40 hover:bg-emerald-950/60 text-ok border border-ok/30 transition-all group"
-                      >
-                        <div className="flex items-center gap-2 text-xs font-mono font-bold">
-                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                          <span className="text-ok">🌐 Acesso Direto (IP:Porta):</span>
-                          <span className="text-white underline underline-offset-2">{directUrl}</span>
-                        </div>
-                        <span className="text-xs flex items-center gap-1 font-sans font-semibold text-ok group-hover:translate-x-0.5 transition-transform">
-                          Abrir Site &rarr;
-                        </span>
-                      </a>
-                    );
-                  })()}
-                </div>
-
-                {/* Domain & Network Section */}
-                <div className="bg-surface-container-lowest/80 rounded-lg p-4 border border-outline-variant space-y-2.5 text-xs font-mono mb-4">
-                  {/* Assigned Domain */}
-                  <div className="flex items-center justify-between">
-                    <span className="text-on-surface-variant flex items-center gap-1.5">
-                      <Globe className="w-3.5 h-3.5 text-primary" /> Domínio Hostinger / SSL:
-                    </span>
-                    {app.domain ? (
-                      <div className="flex items-center gap-2">
-                        <a
-                          href={`https://${app.domain}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-ok hover:underline flex items-center gap-1 font-bold"
-                        >
-                          <Lock className="w-3 h-3 text-ok" />
-                          {app.domain}
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                        <button
-                          onClick={() => setSelectedDomainApp(app)}
-                          title="Alterar domínio ou subdomínio"
-                          className="text-[10px] text-on-surface-variant/70 hover:text-white"
-                        >
-                          (Editar)
-                        </button>
-                      </div>
-                    ) : (
                       <button
                         onClick={() => setSelectedDomainApp(app)}
-                        className="text-primary hover:text-primary hover:underline font-sans text-xs flex items-center gap-1"
+                        className="text-[10px] text-on-surface-variant hover:text-white shrink-0 font-sans px-1 py-0.5 rounded hover:bg-surface-container"
                       >
-                        + Vincular Domínio Hostinger
+                        {app.domain ? 'Editar' : '+ Vincular'}
                       </button>
-                    )}
-                  </div>
+                    </div>
 
-                  {/* Public host port; internal listen port only when it differs. */}
-                  <div className="flex items-center justify-between text-on-surface-variant">
-                    <span>Porta:</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-on-surface font-semibold select-all">
-                        <strong className="text-ok">:{app.port}</strong>
+                    {/* Direct IP:Port Access */}
+                    <div className="p-2.5 rounded-md bg-surface-container-low border border-outline-variant flex items-center justify-between gap-2 min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+                        <span className="text-on-surface-variant text-[11px]">Porta:</span>
+                        <span className="text-white font-bold truncate">:{app.port}</span>
                         {app.internalPort && app.internalPort !== app.port && (
-                          <span className="text-on-surface-variant font-normal">
-                            {' '}
+                          <span className="text-[10px] text-on-surface-variant/70">
                             (app :{app.internalPort})
                           </span>
                         )}
-                      </span>
-                      <button
-                        onClick={() => setSelectedEditApp(app)}
-                        title="Mudar porta"
-                        className="text-[11px] text-primary hover:underline font-sans"
-                      >
-                        (Mudar)
-                      </button>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={(e) => handleCopyDirectUrl(e, app.port, app.id)}
+                          title="Copiar link IP:Porta"
+                          className="p-1 rounded text-on-surface-variant hover:text-white hover:bg-surface-container"
+                        >
+                          {copiedPortId === app.id ? (
+                            <Check className="w-3 h-3 text-ok" />
+                          ) : (
+                            <Copy className="w-3 h-3" />
+                          )}
+                        </button>
+                        <a
+                          href={directUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Abrir diretamente no navegador"
+                          className="p-1 rounded text-ok hover:bg-ok/10"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
                     </div>
                   </div>
 
-                  {appMetrics[app.id] && (
+                  {/* Resource Telemetry Bar */}
+                  {metrics && metrics.available ? (
                     <button
                       type="button"
                       onClick={() => setSelectedObservabilityApp(app)}
-                      className="w-full grid grid-cols-2 gap-2 text-[11px] font-mono bg-surface-container-low/60 border border-outline-variant rounded-lg px-3 py-2 text-left hover:border-primary/40"
-                      title="Métricas, logs retidos e histórico de alertas"
+                      className="w-full grid grid-cols-2 gap-3 p-2.5 rounded-md bg-surface-container-low border border-outline-variant text-left hover:border-primary/40 transition-colors"
+                      title="Clique para ver métricas e histórico completo"
                     >
-                      <span className="text-on-surface-variant">
-                        CPU <strong className="text-white">{appMetrics[app.id].cpuPercent}%</strong>
-                      </span>
-                      <span className="text-on-surface-variant">
-                        RAM <strong className="text-white">{formatRam(appMetrics[app.id].memoryUsedBytes)}</strong>
-                      </span>
-                    </button>
-                  )}
-
-                  {/* Environment Variables Count */}
-                  <div className="flex items-center justify-between text-on-surface-variant pt-1 border-t border-outline-variant">
-                    <span className="flex items-center gap-1">
-                      <Sliders className="w-3.5 h-3.5 text-warn" /> Variáveis de Ambiente:
-                    </span>
-                    <button
-                      onClick={() => setSelectedEnvApp(app)}
-                      className="text-warn hover:underline font-sans text-xs font-semibold flex items-center gap-1"
-                    >
-                      {Object.keys(app.env || {}).length} variável(is) .env &rarr; Editar
-                    </button>
-                  </div>
-                </div>
-
-                {/* Vercel-Style Git Commit & Deploy Status Card */}
-                {app.sourceType === 'git' && (
-                  <div className="bg-surface-container-lowest/90 rounded-lg p-3.5 border border-primary/25 space-y-2 mb-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 text-xs">
-                        <GitCommit className="w-4 h-4 text-primary" />
-                        <span className="font-bold text-white">Último Commit Real:</span>
+                      <div>
+                        <div className="flex items-center justify-between text-[11px] mb-1">
+                          <span className="text-on-surface-variant">CPU</span>
+                          <span className="font-mono text-white font-semibold">
+                            {metrics.cpuPercent}%
+                          </span>
+                        </div>
+                        <div className="h-1 bg-surface-container-high rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${
+                              metrics.cpuPercent >= 80
+                                ? 'bg-crit'
+                                : metrics.cpuPercent >= 50
+                                  ? 'bg-warn'
+                                  : 'bg-primary'
+                            }`}
+                            style={{ width: `${Math.min(100, metrics.cpuPercent)}%` }}
+                          />
+                        </div>
                       </div>
-                      {app.lastCommitHash && (
-                        <span className="text-[10px] font-mono font-bold bg-primary/20 text-primary px-2 py-0.5 rounded border border-primary/30">
-                          #{app.lastCommitHash}
+
+                      <div>
+                        <div className="flex items-center justify-between text-[11px] mb-1">
+                          <span className="text-on-surface-variant">RAM</span>
+                          <span className="font-mono text-white font-semibold">
+                            {formatRam(metrics.memoryUsedBytes)}
+                          </span>
+                        </div>
+                        <div className="h-1 bg-surface-container-high rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${
+                              metrics.memoryPercent >= 85
+                                ? 'bg-crit'
+                                : metrics.memoryPercent >= 65
+                                  ? 'bg-warn'
+                                  : 'bg-ok'
+                            }`}
+                            style={{ width: `${Math.min(100, metrics.memoryPercent)}%` }}
+                          />
+                        </div>
+                      </div>
+                    </button>
+                  ) : null}
+
+                  {/* Git Commit Snippet (Vercel Style) */}
+                  {app.sourceType === 'git' && (
+                    <div className="p-2.5 rounded-md bg-surface-container-low/70 border border-outline-variant/60 flex items-center justify-between gap-2 text-[11px]">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <GitCommit className="w-3.5 h-3.5 text-primary shrink-0" />
+                        <span className="font-mono text-primary font-bold">
+                          {app.lastCommitHash ? `#${app.lastCommitHash.substring(0, 7)}` : 'Commit'}
                         </span>
-                      )}
-                    </div>
-                    
-                    <div className="text-xs text-on-surface font-medium line-clamp-2 pl-5 border-l-2 border-primary/40">
-                      "{app.lastCommitMessage || 'Deploy inicial realizado com sucesso'}"
-                    </div>
-                    
-                    <div className="flex items-center justify-between text-[11px] text-on-surface-variant pl-5 pt-0.5">
-                      <span className="flex items-center gap-1">
-                        <User className="w-3 h-3 text-on-surface-variant/70" /> {app.lastCommitAuthor || 'Wendel Dev'}
-                      </span>
-                      <span className="text-[10px] text-on-surface-variant/70 font-mono">
-                        {app.lastDeployAt ? new Date(app.lastDeployAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'Recente'}
+                        <span className="text-on-surface truncate">
+                          "{app.lastCommitMessage || 'Deploy inicial'}"
+                        </span>
+                      </div>
+                      <span className="text-on-surface-variant/70 font-mono text-[10px] shrink-0">
+                        {app.lastCommitAuthor || 'Aegis'}
                       </span>
                     </div>
-                  </div>
-                )}
-
-                {/* CI/CD Quick Action Pills */}
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs pt-1">
-                  <button
-                    onClick={() => openDeploymentsHistory(app)}
-                    title="Ver histórico de todos os builds e deploys anteriores"
-                    className="text-ok hover:underline flex items-center gap-1 font-mono text-[11px]"
-                  >
-                    <Clock className="w-3.5 h-3.5" /> Histórico de Builds
-                  </button>
-
-                  <button
-                    onClick={() => setSelectedWorkflowApp(app)}
-                    title="Ver arquivo de configuração do GitHub Actions"
-                    className="text-primary hover:underline flex items-center gap-1 font-mono text-[11px]"
-                  >
-                    <FileCode2 className="w-3.5 h-3.5" /> GitHub Actions YAML
-                  </button>
-
-                                    <button
-                    onClick={() => onOpenAnalytics?.(app.id)}
-                    title="Ver analytics: visitas, países de origem e erros"
-                    className="p-2 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-ok transition-colors"
-                  >
-                    <Globe2 className="w-4 h-4" />
-                  </button>
-<button
-                    onClick={() => setSelectedWebhookApp(app)}
-                    title="Copiar URL de Webhook para Auto-Deploy"
-                    className="text-tertiary hover:underline flex items-center gap-1 font-mono text-[11px]"
-                  >
-                    <Webhook className="w-3.5 h-3.5" /> Webhook URL
-                  </button>
-                </div>
-              </div>
-
-              {/* Action Buttons Row */}
-              <div className="pt-4 border-t border-outline-variant flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  {/* Deploy Button */}
-                  <button
-                    onClick={() => handleTriggerDeploy(app)}
-                    disabled={deployingId === app.id}
-                    title="Disparar novo deploy agora (Git Pull & Rebuild)"
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded bg-primary-container hover:bg-primary text-white text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
-                  >
-                    <Zap className={`w-3.5 h-3.5 ${deployingId === app.id ? 'animate-bounce' : ''}`} />
-                    <span>{deployingId === app.id ? 'Buildando...' : 'Deploy'}</span>
-                  </button>
-
-                  {/* Edit Config / Port */}
-                  <button
-                    onClick={() => setSelectedEditApp(app)}
-                    title="Editar configurações (Porta, Nome, Imagem, Token GitHub)"
-                    className="p-2 rounded bg-surface-container-high text-on-surface-variant hover:text-white hover:bg-surface-container-highest transition-colors"
-                  >
-                    <Settings2 className="w-4 h-4" />
-                  </button>
-
-                  {/* View Files Explorer Button */}
-                  <button
-                    onClick={() => setSelectedFileApp(app)}
-                    title="Explorar e editar arquivos do código-fonte da aplicação"
-                    className="flex items-center gap-1.5 px-3 py-2 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-semibold border border-outline-variant transition-colors"
-                  >
-                    <FolderTree className="w-3.5 h-3.5 text-warn" />
-                    <span>Arquivos</span>
-                  </button>
-
-                  {/* Start / Stop */}
-                  {app.status === 'running' ? (
-                    <button
-                      onClick={() => handleStop(app.id)}
-                      title="Parar aplicação"
-                      className="p-2 rounded bg-warn/10 text-warn hover:bg-warn/15 transition-colors"
-                    >
-                      <Square className="w-4 h-4" />
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => handleStart(app.id)}
-                      title="Iniciar aplicação"
-                      className="p-2 rounded bg-ok/10 text-ok hover:bg-ok/15 transition-colors"
-                    >
-                      <Play className="w-4 h-4" />
-                    </button>
                   )}
-
-                  {/* Restart */}
-                  <button
-                    onClick={() => handleRestart(app.id)}
-                    title="Reiniciar contêiner da aplicação"
-                    className="p-2 rounded bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest transition-colors"
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                  </button>
-
-                  {/* Logs Button */}
-                  <button
-                    onClick={() => setSelectedLogsApp(app)}
-                    title="Visualizar logs em tempo real da aplicação"
-                    className="flex items-center gap-1.5 px-3 py-2 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-white text-xs font-medium transition-colors"
-                  >
-                    <FileText className="w-3.5 h-3.5 text-primary" />
-                    Logs
-                  </button>
-                  <button
-                    onClick={() => setSelectedObservabilityApp(app)}
-                    title="CPU, memória, logs retidos e histórico de alertas"
-                    className="flex items-center gap-1.5 px-3 py-2 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-white text-xs font-medium transition-colors"
-                  >
-                    <Activity className="w-3.5 h-3.5 text-ok" />
-                    Métricas
-                  </button>
                 </div>
 
-                {/* Delete */}
-                <button
-                  onClick={() => handleDelete(app.id, app.name)}
-                  title="Deletar aplicação permanentemente"
-                  className="p-2 rounded text-crit hover:bg-crit/10 transition-colors"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                {/* Footer Action Row */}
+                <div className="px-5 py-3 bg-surface-container-low border-t border-outline-variant flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    {/* Primary Deploy Button */}
+                    <button
+                      onClick={() => handleTriggerDeploy(app)}
+                      disabled={deployingId === app.id}
+                      title="Disparar novo deploy (Git Pull & Rebuild)"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-on-primary text-xs font-semibold hover:bg-primary/90 transition-all active:scale-95 disabled:opacity-50"
+                    >
+                      <Zap className={`w-3.5 h-3.5 ${deployingId === app.id ? 'animate-bounce' : ''}`} />
+                      <span>{deployingId === app.id ? 'Buildando...' : 'Deploy'}</span>
+                    </button>
+
+                    {/* Dedicated Console Link */}
+                    {onOpenApp && (
+                      <button
+                        onClick={() => onOpenApp(app.id)}
+                        className="px-3 py-1.5 rounded-md bg-surface-container hover:bg-surface-container-high text-on-surface text-xs font-medium border border-outline-variant transition-colors"
+                      >
+                        Console &rarr;
+                      </button>
+                    )}
+
+                    {/* Start / Stop Toggle */}
+                    {app.status === 'running' ? (
+                      <button
+                        onClick={() => handleStop(app.id)}
+                        title="Parar aplicação"
+                        className="p-1.5 rounded-md text-on-surface-variant hover:text-warn hover:bg-surface-container transition-colors"
+                      >
+                        <Square className="w-4 h-4" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleStart(app.id)}
+                        title="Iniciar aplicação"
+                        className="p-1.5 rounded-md text-ok hover:bg-ok/10 transition-colors"
+                      >
+                        <Play className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    {/* Restart */}
+                    <button
+                      onClick={() => handleRestart(app.id)}
+                      title="Reiniciar contêiner"
+                      className="p-1.5 rounded-md text-on-surface-variant hover:text-white hover:bg-surface-container transition-colors"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </button>
+
+                    {/* Logs */}
+                    <button
+                      onClick={() => setSelectedLogsApp(app)}
+                      title="Ver logs da aplicação"
+                      className="p-1.5 rounded-md text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors"
+                    >
+                      <FileText className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Contextual More Dropdown */}
+                  <div className="relative">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenDropdownId(openDropdownId === app.id ? null : app.id);
+                      }}
+                      title="Mais opções"
+                      className="p-1.5 rounded-md text-on-surface-variant hover:text-white hover:bg-surface-container transition-colors"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+
+                    {openDropdownId === app.id && (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute right-0 bottom-full mb-1 w-52 bg-surface-container-high border border-outline-variant rounded-lg shadow-xl z-30 py-1 text-xs"
+                      >
+                        <button
+                          onClick={() => {
+                            setOpenDropdownId(null);
+                            openDeploymentsHistory(app);
+                          }}
+                          className="w-full text-left px-3 py-2 text-on-surface hover:bg-surface-container flex items-center gap-2"
+                        >
+                          <Clock className="w-3.5 h-3.5 text-ok" />
+                          <span>Histórico de Deploys</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setOpenDropdownId(null);
+                            setSelectedFileApp(app);
+                          }}
+                          className="w-full text-left px-3 py-2 text-on-surface hover:bg-surface-container flex items-center gap-2"
+                        >
+                          <FolderTree className="w-3.5 h-3.5 text-warn" />
+                          <span>Explorar Arquivos</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setOpenDropdownId(null);
+                            setSelectedEnvApp(app);
+                          }}
+                          className="w-full text-left px-3 py-2 text-on-surface hover:bg-surface-container flex items-center gap-2"
+                        >
+                          <Sliders className="w-3.5 h-3.5 text-warn" />
+                          <span>Variáveis (.env)</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setOpenDropdownId(null);
+                            setSelectedWebhookApp(app);
+                          }}
+                          className="w-full text-left px-3 py-2 text-on-surface hover:bg-surface-container flex items-center gap-2"
+                        >
+                          <Webhook className="w-3.5 h-3.5 text-tertiary" />
+                          <span>Webhook Auto-Deploy</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setOpenDropdownId(null);
+                            setSelectedWorkflowApp(app);
+                          }}
+                          className="w-full text-left px-3 py-2 text-on-surface hover:bg-surface-container flex items-center gap-2"
+                        >
+                          <FileCode2 className="w-3.5 h-3.5 text-primary" />
+                          <span>GitHub Actions YAML</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setOpenDropdownId(null);
+                            setSelectedEditApp(app);
+                          }}
+                          className="w-full text-left px-3 py-2 text-on-surface hover:bg-surface-container flex items-center gap-2"
+                        >
+                          <Settings2 className="w-3.5 h-3.5 text-on-surface-variant" />
+                          <span>Configurações & Portas</span>
+                        </button>
+                        {onOpenAnalytics && (
+                          <button
+                            onClick={() => {
+                              setOpenDropdownId(null);
+                              onOpenAnalytics(app.id);
+                            }}
+                            className="w-full text-left px-3 py-2 text-on-surface hover:bg-surface-container flex items-center gap-2"
+                          >
+                            <Globe2 className="w-3.5 h-3.5 text-ok" />
+                            <span>Analytics de Tráfego</span>
+                          </button>
+                        )}
+                        <div className="my-1 border-t border-outline-variant" />
+                        <button
+                          onClick={() => {
+                            setOpenDropdownId(null);
+                            handleDelete(app.id, app.name);
+                          }}
+                          className="w-full text-left px-3 py-2 text-crit hover:bg-crit/10 flex items-center gap-2 font-semibold"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Deletar Aplicação</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
+        </div>
+      ) : (
+        /* Dense Table / List View */
+        <div className="bg-surface-container rounded-lg border border-outline-variant overflow-x-auto custom-scrollbar">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="border-b border-outline-variant bg-surface-container-low text-on-surface-variant text-[11px] uppercase tracking-wider font-semibold">
+                <th className="py-3 px-4">Aplicação & Origem</th>
+                <th className="py-3 px-4">Status & Saúde</th>
+                <th className="py-3 px-4">Acesso / Rede</th>
+                <th className="py-3 px-4">Recursos (CPU/RAM)</th>
+                <th className="py-3 px-4">Último Deploy</th>
+                <th className="py-3 px-4 text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-outline-variant">
+              {filteredApps.map((app) => {
+                const badge = appStatusBadge(app, nodes);
+                const metrics = appMetrics[app.id];
+                return (
+                  <tr
+                    key={app.id}
+                    className="hover:bg-surface-container-high/40 transition-colors group"
+                  >
+                    {/* App & Source */}
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center font-bold text-primary shrink-0">
+                          {app.sourceType === 'git' ? (
+                            <GitBranch className="w-4 h-4 text-primary" />
+                          ) : (
+                            <Code className="w-4 h-4 text-warn" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            {onOpenApp ? (
+                              <button
+                                onClick={() => onOpenApp(app.id)}
+                                className="font-bold text-white hover:text-primary transition-colors text-left"
+                              >
+                                {app.name}
+                              </button>
+                            ) : (
+                              <span className="font-bold text-white">{app.name}</span>
+                            )}
+                            {app.sourceType === 'git' && (
+                              <span className="text-[10px] font-mono text-primary bg-primary/10 px-1.5 py-0.2 rounded border border-primary/30">
+                                {app.branch || 'main'}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] font-mono text-on-surface-variant/70 truncate max-w-xs">
+                            {app.gitUrl || app.imageName}
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Status */}
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      <span
+                        title={badge.title}
+                        className={`text-[11px] px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1.5 ${badge.className}`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${badge.dotClassName}`} />
+                        {badge.label}
+                      </span>
+                    </td>
+
+                    {/* Networking */}
+                    <td className="py-3 px-4">
+                      <div className="space-y-0.5 font-mono text-[11px]">
+                        {app.domain ? (
+                          <a
+                            href={`https://${app.domain}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-ok hover:underline flex items-center gap-1 font-semibold"
+                          >
+                            <Globe className="w-3 h-3 shrink-0" />
+                            {app.domain}
+                          </a>
+                        ) : (
+                          <span className="text-on-surface-variant/70">:{app.port}</span>
+                        )}
+                        <span className="text-on-surface-variant/70 text-[10px] block">
+                          porta :{app.port}
+                        </span>
+                      </div>
+                    </td>
+
+                    {/* CPU & RAM */}
+                    <td className="py-3 px-4 font-mono text-[11px] whitespace-nowrap">
+                      {metrics && metrics.available ? (
+                        <div>
+                          <span className="text-white">CPU {metrics.cpuPercent}%</span> ·{' '}
+                          <span className="text-white">{formatRam(metrics.memoryUsedBytes)}</span>
+                        </div>
+                      ) : (
+                        <span className="text-on-surface-variant/60">—</span>
+                      )}
+                    </td>
+
+                    {/* Last deploy */}
+                    <td className="py-3 px-4 font-mono text-[11px] whitespace-nowrap">
+                      <div className="text-on-surface truncate max-w-[180px]">
+                        {app.lastCommitMessage || 'Deploy inicial'}
+                      </div>
+                      <div className="text-on-surface-variant/70 text-[10px]">
+                        {app.lastDeployAt
+                          ? new Date(app.lastDeployAt).toLocaleDateString('pt-BR')
+                          : 'Recente'}
+                      </div>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="py-3 px-4 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => handleTriggerDeploy(app)}
+                          disabled={deployingId === app.id}
+                          className="px-2.5 py-1 rounded bg-primary text-on-primary font-semibold text-xs hover:bg-primary/90 transition-all disabled:opacity-50"
+                        >
+                          Deploy
+                        </button>
+                        {onOpenApp && (
+                          <button
+                            onClick={() => onOpenApp(app.id)}
+                            className="px-2.5 py-1 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-medium border border-outline-variant"
+                          >
+                            Console
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleRestart(app.id)}
+                          title="Reiniciar"
+                          className="p-1 rounded text-on-surface-variant hover:text-white hover:bg-surface-container-high"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setSelectedLogsApp(app)}
+                          title="Logs"
+                          className="p-1 rounded text-on-surface-variant hover:text-primary hover:bg-surface-container-high"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(app.id, app.name)}
+                          title="Excluir"
+                          className="p-1 rounded text-crit hover:bg-crit/10"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
+      {/* Modals Container */}
       {selectedEditApp && (
         <EditAppModal
           app={selectedEditApp}
