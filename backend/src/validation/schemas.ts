@@ -254,6 +254,20 @@ export const importStateBodySchema = z.object({ users: z.array(z.any()).min(1) }
  * Action routes (start/stop/restart/delete/run/toggle) must not accept a
  * payload. Clients often omit the body entirely; treat undefined/null as {}.
  */
+export const upsertWaFlowBodySchema = z
+  .object({
+    name: z.string().min(1).max(80).optional(),
+    nodes: z.array(z.any()).max(80).optional(),
+    edges: z.array(z.any()).max(160).optional(),
+  })
+  .strict();
+
+export const publishWaFlowBodySchema = z
+  .object({
+    published: z.boolean(),
+  })
+  .strict();
+
 export const emptyBodySchema = z.preprocess(
   (val) => (val === undefined || val === null ? {} : val),
   z.object({}).strict()

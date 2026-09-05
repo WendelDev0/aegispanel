@@ -233,6 +233,50 @@ export interface ActivityRecord {
   metadata?: Record<string, any>;
 }
 
+export type WaFlowNodeType =
+  | 'trigger_message'
+  | 'trigger_event'
+  | 'send_text'
+  | 'menu'
+  | 'wait_reply'
+  | 'condition'
+  | 'end';
+
+export type WaPanelEvent = 'deploy_fail' | 'deploy_ok' | 'app_down' | 'backup';
+
+export interface WaFlowNode {
+  id: string;
+  type: WaFlowNodeType;
+  position: { x: number; y: number };
+  data: {
+    match?: 'any' | 'contains' | 'regex';
+    keyword?: string;
+    event?: WaPanelEvent;
+    text?: string;
+    buttons?: Array<{ id: string; label: string }>;
+    operator?: 'contains' | 'equals';
+    value?: string;
+  };
+}
+
+export interface WaFlowEdge {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string;
+}
+
+export interface WaFlowRecord {
+  id: string;
+  name: string;
+  published: boolean;
+  nodes: WaFlowNode[];
+  edges: WaFlowEdge[];
+  lastRunAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AlertHistoryRecord {
   id: string;
   title: string;

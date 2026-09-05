@@ -3,6 +3,8 @@ import https from 'https';
 import { dbStorage } from '../db/storage.js';
 import { CONFIG } from '../config.js';
 import { EncryptionService } from '../utils/crypto.js';
+import { evolutionSendText } from '../utils/evolution.client.js';
+import { WaFlowEngine } from './wa-flow-engine.js';
 
 /**
  * Blocks outbound notifications from a development copy.
@@ -100,46 +102,11 @@ export class AlertService {
 
   static async sendWhatsAppAlert(apiUrl: string, apiKey: string, instance: string, number: string, message: string) {
     if (outboundBlocked('WhatsApp')) return;
-    apiKey = this.reveal(apiKey) || '';
-    if (!apiUrl || !apiKey || !instance || !number) return;
-
-    try {
-      const cleanNumber = number.replace(/\D/g, '');
-      const formattedUrl = apiUrl.replace(/\/+$/, '');
-      const fullEndpoint = `${formattedUrl}/message/sendText/${instance}`;
-      const url = new URL(fullEndpoint);
-
-      const payload = JSON.stringify({
-        number: cleanNumber,
-        text: `🛡️ *AegisPanel Cloud Manager*\n\n${message}`,
-        options: {
-          delay: 1200,
-          presence: 'composing',
-        },
-      });
-
-      const isHttps = url.protocol === 'https:';
-      const transport = isHttps ? https : http;
-
-      const options = {
-        hostname: url.hostname,
-        port: url.port || (isHttps ? 443 : 80),
-        path: url.pathname + url.search,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': apiKey,
-          'Content-Length': Buffer.byteLength(payload),
-        },
-      };
-
-      const req = transport.request(options);
-      req.on('error', (e) => console.error('Evolution API WhatsApp alert error:', e.message));
-      req.write(payload);
-      req.end();
-    } catch (err) {
-      console.error('Error sending WhatsApp Evolution alert:', err);
-    }
+    await evolutionSendText(
+      { apiUrl, apiKey, instance },
+      number,
+      `🛡️ *AegisPanel Cloud Manager*\n\n${message}`
+    );
   }
 
   static async broadcastNotification(
@@ -165,6 +132,19 @@ export class AlertService {
       isError,
       appId: meta?.appId,
     });
+
+    const mapped = WaFlowEngine.mapBroadcast(type, isError);
+    if (mapped) {
+      const appName = meta?.appId ? dbStorage.getAppById(meta.appId)?.name : undefined;
+      void WaFlowEngine.handlePanelEvent(mapped, {
+        evento: mapped,
+        app: appName || '',
+        titulo: title,
+        mensagem: message,
+      }).catch((err) => {
+        console.error('WhatsApp flow event failed:', err?.message || err);
+      });
+    }
 
     if (!config || !config.enabled) return;
 

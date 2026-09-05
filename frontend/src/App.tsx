@@ -32,6 +32,7 @@ const QueryStudioPage = lazy(() => import('./pages/QueryStudioPage.js').then(m =
 const FirewallPage = lazy(() => import('./pages/FirewallPage.js').then(m => ({ default: m.FirewallPage })));
 const BackupsPage = lazy(() => import('./pages/BackupsPage.js').then(m => ({ default: m.BackupsPage })));
 const CronPage = lazy(() => import('./pages/CronPage.js').then(m => ({ default: m.CronPage })));
+const FlowsPage = lazy(() => import('./pages/FlowsPage.js').then(m => ({ default: m.FlowsPage })));
 
 const PageFallback = () => (
   <div className="flex items-center justify-center h-64">
@@ -195,6 +196,8 @@ export function App() {
         return user?.role === 'admin' ? <FileManagerPage /> : <DashboardPage overview={overview} realtimeStats={realtimeStats} setActiveTab={setActiveTab} currentUser={user} />;
       case 'cron':
         return <CronPage />;
+      case 'flows':
+        return <FlowsPage flowId={routeParam} onOpen={(id) => setActiveTab('flows', id)} />;
       case 'containers':
         return <ContainersPage />;
       case 'domains':
@@ -237,6 +240,7 @@ export function App() {
               onLogout={handleLogout}
               onRefresh={fetchOverview}
               onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
+              isAdmin={user?.role === 'admin'}
             />
 
             <main className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-7 custom-scrollbar">

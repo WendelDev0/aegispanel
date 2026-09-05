@@ -4,7 +4,7 @@ import fs from 'fs';
 import { CONFIG } from '../config.js';
 import { dockerService } from './docker.service.js';
 import { emit } from '../realtime.js';
-import { updateComposeCheckout } from '../utils/panel-update.js';
+import { checkComposeUpdate, updateComposeCheckout, type PanelUpdateStatus } from '../utils/panel-update.js';
 
 /** Only these container name prefixes may be tailed through PanelService. */
 const ALLOWED_LOG_TARGETS = new Set([
@@ -35,6 +35,12 @@ function hasComposeFile(dir: string): boolean {
  */
 export class PanelService {
   private static updating = false;
+  private static statusCache: { at: number; value: PanelUpdateStatus } | null = null;
+  private static readonly STATUS_TTL_MS = 90_000;
+
+  static isUpdating(): boolean {
+    return this.updating;
+  }
 
   static hasComposeFile(dir: string): boolean {
     return hasComposeFile(dir);
@@ -157,6 +163,42 @@ export class PanelService {
       throw err;
     } finally {
       this.updating = false;
+      this.statusCache = null;
+    }
+  }
+
+  /**
+   * Whether origin is ahead of the compose checkout.
+   * Cached so the navbar can poll without fetching GitHub every few seconds.
+   */
+  static async updateStatus(force = false): Promise<PanelUpdateStatus & { canApply: boolean; updating: boolean }> {
+    const composeDir = this.resolveComposeDir();
+    const now = Date.now();
+    if (!force && this.statusCache && now - this.statusCache.at < this.STATUS_TTL_MS) {
+      return {
+        ...this.statusCache.value,
+        canApply: !CONFIG.LOCAL_MODE,
+        updating: this.updating,
+      };
+    }
+    try {
+      const value = await checkComposeUpdate(composeDir);
+      this.statusCache = { at: now, value };
+      return { ...value, canApply: !CONFIG.LOCAL_MODE, updating: this.updating };
+    } catch {
+      const failed: PanelUpdateStatus = {
+        available: false,
+        ref: 'main',
+        currentSha: '',
+        remoteSha: '',
+        behind: 0,
+        remoteSubject: '',
+      };
+      return {
+        ...failed,
+        canApply: !CONFIG.LOCAL_MODE,
+        updating: this.updating,
+      };
     }
   }
 

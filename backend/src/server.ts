@@ -37,6 +37,7 @@ import { nodeRouter } from './routes/node.routes.js';
 import { templateRouter } from './routes/template.routes.js';
 import { cronRouter } from './routes/cron.routes.js';
 import { analyticsRouter } from './routes/analytics.routes.js';
+import { waFlowRouter } from './routes/wa-flow.routes.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -145,6 +146,7 @@ app.use('/api/firewall', firewallRouter);
 app.use('/api/webhooks', webhookRouter);
 app.use('/api/nodes', nodeRouter);
 app.use('/api/analytics', analyticsRouter);
+app.use('/api/wa-flows', waFlowRouter);
 
 // WebSocket Setup
 io.on('connection', (socket) => {

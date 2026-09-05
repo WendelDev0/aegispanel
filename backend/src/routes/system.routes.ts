@@ -37,6 +37,7 @@ function redactSettings(settings: PanelSettings): PanelSettings {
   const target = settings.backupTarget;
   return {
     ...settings,
+    waFlowWebhookSecret: settings.waFlowWebhookSecret ? MASK : undefined,
     backupTarget: target
       ? {
           ...target,
@@ -519,6 +520,15 @@ systemRouter.get('/panel/logs/:target', requireAdmin, async (req: Request, res: 
     const tail = req.query.tail ? Number(req.query.tail) : 200;
     const logs = await PanelService.getStackLogs(req.params.target, tail);
     res.json({ target: req.params.target, logs });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+systemRouter.get('/panel/update-status', requireAdmin, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const force = req.query.refresh === '1' || req.query.refresh === 'true';
+    res.json(await PanelService.updateStatus(force));
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
