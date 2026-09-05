@@ -76,6 +76,19 @@ appRouter.get('/metrics', requireWrite, async (_req: Request, res: Response): Pr
   }
 });
 
+appRouter.get('/queue', requireWrite, (_req: Request, res: Response): void => {
+  res.json(DeployQueueService.status());
+});
+
+appRouter.get('/:id', (req: Request, res: Response): void => {
+  const app = dbStorage.getAppById(req.params.id);
+  if (!app) {
+    res.status(404).json({ error: 'App não encontrado' });
+    return;
+  }
+  res.json(AppService.toPublic(app));
+});
+
 // Pre-Deploy Repo Inspector (Vercel Style Auto-Discovery)
 appRouter.post('/inspect-repo', requireWrite, validateBody(inspectRepoBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
@@ -498,9 +511,6 @@ appRouter.delete('/:id/deployments/:deploymentId/queue', requireWrite, (req: Req
   res.json({ success: true });
 });
 
-appRouter.get('/queue', requireWrite, (req: Request, res: Response): void => {
-  res.json(DeployQueueService.status());
-});
 
 appRouter.post('/:id/rollback/:deploymentId', requireWrite, validateBody(emptyBodySchema), async (req: Request, res: Response): Promise<void> => {
   try {
