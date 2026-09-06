@@ -97,22 +97,40 @@ export const FlowBlockNode = memo(({ id, data, selected }: NodeProps) => {
           </div>
         </div>
       ) : block.blockType === 'menu' ? (
-        <div className="px-3 pb-2 pt-1 border-t border-outline-variant/40 flex flex-wrap gap-1.5 justify-center">
-          {buttons.map((btn, i) => (
-            <span
-              key={btn.id}
-              className="relative text-[10px] px-2 py-0.5 rounded bg-surface-container-high border border-outline-variant text-on-surface"
-            >
-              {btn.label || `Opção ${i + 1}`}
-              <Handle
-                type="source"
-                id={btn.id}
-                position={Position.Bottom}
-                className={`!w-2.5 !h-2.5 !border !border-surface-container ${meta.handle}`}
-                style={{ left: '50%' }}
-              />
-            </span>
-          ))}
+        <div className="px-3 pb-2 pt-1 border-t border-outline-variant/40 space-y-1.5">
+          <div className="flex flex-wrap gap-1.5 justify-center">
+            {buttons.map((btn, i) => (
+              <span
+                key={btn.id}
+                className="relative text-[10px] px-2 py-0.5 rounded bg-surface-container-high border border-outline-variant text-on-surface"
+              >
+                {btn.label || `Opção ${i + 1}`}
+                <Handle
+                  type="source"
+                  id={btn.id}
+                  position={Position.Bottom}
+                  className={`!w-2.5 !h-2.5 !border !border-surface-container ${meta.handle}`}
+                  style={{ left: '50%' }}
+                />
+              </span>
+            ))}
+          </div>
+          {/*
+            The engine follows this branch after two invalid answers
+            (`outgoing(node, 'fallback')`). The output existed in the runtime
+            and nowhere on the canvas, so the only way to wire it was an edge
+            with no handle at all — which the engine reads as something else.
+          */}
+          <div className="relative flex items-center justify-center gap-1 text-[10px] font-mono text-on-surface-variant">
+            <span className="text-warn">não escolheu</span>
+            <Handle
+              type="source"
+              id="fallback"
+              position={Position.Bottom}
+              className="!w-2.5 !h-2.5 !bg-warn !border !border-surface-container"
+              style={{ left: '50%' }}
+            />
+          </div>
         </div>
       ) : block.blockType === 'capture' ? (
         <div className="px-3 pb-2 pt-1 border-t border-outline-variant/40 flex justify-between text-[10px] font-mono text-on-surface-variant">

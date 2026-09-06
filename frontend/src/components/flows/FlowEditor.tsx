@@ -7,6 +7,8 @@ import {
   addEdge,
   useEdgesState,
   useNodesState,
+  MarkerType,
+  SelectionMode,
   type Connection,
   type Edge,
   type Node,
@@ -23,6 +25,10 @@ import {
   SlidersHorizontal,
   Undo2,
   Redo2,
+  LayoutGrid,
+  MousePointer2,
+  Hand,
+  Keyboard,
 } from 'lucide-react';
 import { api } from '../../services/api.js';
 import type {
@@ -35,6 +41,8 @@ import type {
   WaInboundSkipSummary,
 } from '../../types/index.js';
 import { FlowBlockNode, type FlowBlockData } from './FlowBlockNode.js';
+import { FlowEdge, type FlowEdgeData } from './FlowEdge.js';
+import { layoutFlow } from './flow-layout.js';
 import { FlowInspector } from './FlowInspector.js';
 import { FlowPhoneSimulator } from './FlowPhoneSimulator.js';
 import { FlowValidationModal, type ValidationError } from './FlowValidationModal.js';
@@ -44,6 +52,18 @@ import { FlowInboundStrip } from './FlowInboundStrip.js';
 import { BLOCK_META, PALETTE } from './flow-blocks.js';
 
 const nodeTypes = { flowBlock: FlowBlockNode };
+const edgeTypes = { flowEdge: FlowEdge };
+
+/** Reads on the canvas as the name of the branch the connection leaves from. */
+const HANDLE_LABELS: Record<string, string> = {
+  yes: 'sim',
+  no: 'não',
+  next: 'ok',
+  error: 'erro',
+  empty: 'vazio',
+  invalid: 'inválido',
+  fallback: 'desistiu',
+};
 
 type GraphSnap = { nodes: Node[]; edges: Edge[] };
 
@@ -69,7 +89,10 @@ function toRfEdges(edges: WaFlowEdge[]): Edge[] {
     source: edge.source,
     target: edge.target,
     sourceHandle: edge.sourceHandle,
-    style: { stroke: '#424754', strokeWidth: 2 },
+    type: 'flowEdge',
+    // Without an arrowhead nothing on the canvas said which way a connection
+    // ran, which matters most exactly where a flow branches.
+    markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: '#424754' },
   }));
 }
 
@@ -97,12 +120,29 @@ function newId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** A change that actually alters the saved graph, as opposed to the view. */
+function isMeaningfulNodeChange(change: { type: string; dragging?: boolean }): boolean {
+  if (change.type === 'select' || change.type === 'dimensions') return false;
+  // Dragging fires continuously; only the drop moved anything for good.
+  if (change.type === 'position') return change.dragging === false;
+  return true;
+}
+
 function isTypingTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   if (!el) return false;
   const tag = el.tagName;
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
 }
+
+const Shortcut: React.FC<{ keys: string; label: string }> = ({ keys, label }) => (
+  <span className="flex items-center gap-1 whitespace-nowrap">
+    <kbd className="px-1 py-0.5 rounded bg-surface-container-high border border-outline-variant font-mono text-[9px] text-on-surface">
+      {keys}
+    </kbd>
+    {label}
+  </span>
+);
 
 interface FlowEditorProps {
   flowId: string;
@@ -129,6 +169,24 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  // Left-drag pans by default; the operator flips this to draw a selection
+  // box. Shift+drag does the same without leaving pan mode — the legend in
+  // the corner is what makes either of them discoverable.
+  const [selectMode, setSelectMode] = useState(false);
+  const [notice, setNotice] = useState('');
+  /**
+   * Only the two viewport helpers. `ReactFlowInstance` is generic over the
+   * node type, and `nodesWithActions` widens it to something that does not
+   * match the bare alias — narrowing to what is actually called keeps the
+   * ref honest instead of casting the whole instance away.
+   */
+  const rfRef = useRef<{
+    screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number };
+    fitView: (options?: { padding?: number; duration?: number }) => void;
+  } | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const clipboardRef = useRef<GraphSnap | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [cloning, setCloning] = useState(false);
@@ -247,6 +305,8 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
 
+  const persistRef = useRef<() => Promise<WaFlowRecord | null>>(async () => null);
+
   const persist = async (): Promise<WaFlowRecord | null> => {
     setSaving(true);
     setError('');
@@ -274,6 +334,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
       setSaving(false);
     }
   };
+  persistRef.current = persist;
 
   const deleteNode = useCallback(
     (id: string) => {
@@ -286,10 +347,33 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
     [setEdges, setNodes, takeSnapshot]
   );
 
-  const inspectNode = useCallback((id: string) => {
-    setSelectedId(id);
-    setRightTab('inspector');
-  }, []);
+  const deleteEdge = useCallback(
+    (id: string) => {
+      takeSnapshot();
+      setEdges((current) => current.filter((e) => e.id !== id));
+      setIsDirty(true);
+    },
+    [setEdges, takeSnapshot]
+  );
+
+  /**
+   * Selection is the single source of truth for what the inspector shows.
+   *
+   * It used to be a separate `selectedId` that `onSelectionChange` only ever
+   * wrote to and never cleared: clicking empty canvas deselected everything
+   * on screen while the inspector kept editing the block you had just let go
+   * of — and Delete killed that one. Marking the node selected here lets the
+   * canvas stay the thing that decides.
+   */
+  const inspectNode = useCallback(
+    (id: string) => {
+      setNodes((current) => current.map((n) => ({ ...n, selected: n.id === id })));
+      setEdges((current) => current.map((e) => ({ ...e, selected: false })));
+      setSelectedId(id);
+      setRightTab('inspector');
+    },
+    [setEdges, setNodes]
+  );
 
   const duplicateNode = useCallback(
     (id: string) => {
@@ -325,11 +409,97 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
     [deleteNode, duplicateNode, inspectNode, nodes]
   );
 
+  /**
+   * Fades the connections that have nothing to do with the current selection.
+   *
+   * A flow of thirty blocks is a thicket of identical grey lines; picking a
+   * block and seeing only its own path light up is the difference between
+   * reading the graph and guessing at it.
+   */
+  const edgesWithActions = useMemo(() => {
+    const focus = new Set(selectedIds);
+    return edges.map((edge) => ({
+      ...edge,
+      data: {
+        ...(edge.data || {}),
+        onDelete: deleteEdge,
+        handleLabel: edge.sourceHandle ? HANDLE_LABELS[edge.sourceHandle] : undefined,
+        dimmed: focus.size > 0 && !focus.has(edge.source) && !focus.has(edge.target),
+      } satisfies FlowEdgeData,
+    }));
+  }, [deleteEdge, edges, selectedIds]);
+
+  /** Everything highlighted goes at once — blocks and connections together. */
+  const deleteSelection = useCallback(() => {
+    const nodeIds = new Set(nodesRef.current.filter((n) => n.selected).map((n) => n.id));
+    const edgeIds = new Set(edgesRef.current.filter((e) => e.selected).map((e) => e.id));
+    if (!nodeIds.size && !edgeIds.size) return;
+
+    takeSnapshot();
+    setNodes((current) => current.filter((n) => !nodeIds.has(n.id)));
+    setEdges((current) =>
+      current.filter((e) => !edgeIds.has(e.id) && !nodeIds.has(e.source) && !nodeIds.has(e.target))
+    );
+    setSelectedId(null);
+    setSelectedIds([]);
+    setIsDirty(true);
+  }, [setEdges, setNodes, takeSnapshot]);
+
+  const copySelection = useCallback(() => {
+    const picked = nodesRef.current.filter((n) => n.selected);
+    if (!picked.length) return;
+    const ids = new Set(picked.map((n) => n.id));
+    // Only the connections whose both ends travel too; a dangling edge would
+    // paste as a link to a block that is not in the clipboard.
+    const inner = edgesRef.current.filter((e) => ids.has(e.source) && ids.has(e.target));
+    clipboardRef.current = cloneGraph(picked, inner);
+    setNotice(`${picked.length} bloco(s) copiado(s).`);
+  }, []);
+
+  const pasteSelection = useCallback(() => {
+    const clip = clipboardRef.current;
+    if (!clip?.nodes.length) return;
+
+    takeSnapshot();
+    const remap = new Map<string, string>();
+    for (const node of clip.nodes) {
+      remap.set(node.id, newId(String((node.data as FlowBlockData).blockType || 'block')));
+    }
+
+    const pastedNodes: Node[] = clip.nodes.map((node) => ({
+      ...node,
+      id: remap.get(node.id)!,
+      position: { x: node.position.x + 48, y: node.position.y + 48 },
+      selected: true,
+      data: { ...node.data },
+    }));
+    const pastedEdges: Edge[] = clip.edges.map((edge) => ({
+      ...edge,
+      id: newId('e'),
+      source: remap.get(edge.source)!,
+      target: remap.get(edge.target)!,
+      selected: false,
+    }));
+
+    setNodes((current) => [...current.map((n) => ({ ...n, selected: false })), ...pastedNodes]);
+    setEdges((current) => [...current, ...pastedEdges]);
+    setIsDirty(true);
+  }, [setEdges, setNodes, takeSnapshot]);
+
+  /** Untangles the staircase that dropping blocks one after another leaves. */
+  const autoLayout = useCallback(() => {
+    if (!nodesRef.current.length) return;
+    takeSnapshot();
+    setNodes(layoutFlow(nodesRef.current, edgesRef.current));
+    setIsDirty(true);
+    window.setTimeout(() => rfRef.current?.fitView({ padding: 0.15, duration: 300 }), 30);
+  }, [setNodes, takeSnapshot]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        void persist();
+        void persistRef.current();
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
@@ -345,14 +515,28 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
         redo();
         return;
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId && !isTypingTarget(e.target)) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+        if (isTypingTarget(e.target)) return;
+        copySelection();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        if (isTypingTarget(e.target)) return;
         e.preventDefault();
-        deleteNode(selectedId);
+        pasteSelection();
+        return;
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !isTypingTarget(e.target)) {
+        // Everything highlighted, not just the last block that happened to be
+        // clicked: selecting a connection and pressing Delete used to remove a
+        // node somewhere else on the canvas.
+        e.preventDefault();
+        deleteSelection();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  });
+  }, [copySelection, deleteSelection, pasteSelection, persistRef, redo, undo]);
 
   // The canvas, not the saved record: an agent tool must be able to point at
   // an HTTP block the operator added in this session but has not saved yet.
@@ -366,11 +550,44 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
   const onConnect = useCallback(
     (connection: Connection) => {
       takeSnapshot();
-      setEdges((els) => addEdge({ ...connection, id: newId('e'), style: { stroke: '#424754', strokeWidth: 2 } }, els));
+      setEdges((els) =>
+        addEdge(
+          {
+            ...connection,
+            id: newId('e'),
+            type: 'flowEdge',
+            markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: '#424754' },
+          },
+          els
+        )
+      );
       setIsDirty(true);
     },
     [setEdges, takeSnapshot]
   );
+
+  /**
+   * The centre of the current viewport, not a fixed cascade from the origin.
+   *
+   * Blocks were dropped at `80 + count * 20`. Add one after panning anywhere
+   * and it landed off-screen, so the click looked like it had done nothing.
+   */
+  const nextBlockPosition = (): { x: number; y: number } => {
+    const instance = rfRef.current;
+    const box = canvasRef.current?.getBoundingClientRect();
+    if (!instance || !box) {
+      return { x: 80 + nodesRef.current.length * 20, y: 80 + nodesRef.current.length * 30 };
+    }
+    const centre = instance.screenToFlowPosition({
+      x: box.left + box.width / 2,
+      y: box.top + box.height / 3,
+    });
+    // Nudge each new block so a burst of clicks does not stack them exactly.
+    const taken = nodesRef.current.filter(
+      (n) => Math.abs(n.position.x - centre.x) < 30 && Math.abs(n.position.y - centre.y) < 30
+    ).length;
+    return { x: Math.round(centre.x - 124 + taken * 28), y: Math.round(centre.y + taken * 28) };
+  };
 
   const addBlock = (type: WaFlowNodeType) => {
     takeSnapshot();
@@ -383,12 +600,14 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
           ]
         : undefined;
 
+    const position = nextBlockPosition();
     setNodes((current) => [
-      ...current,
+      ...current.map((n) => ({ ...n, selected: false })),
       {
         id,
         type: 'flowBlock',
-        position: { x: 80 + current.length * 20, y: 80 + current.length * 30 },
+        selected: true,
+        position,
         data: {
           blockType: type,
           match: 'any',
@@ -424,7 +643,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
     try {
       await persist();
       const res = await api.post(`/wa-flows/${flowId}/clone`, {});
-      alert(`Fluxo clonado com sucesso como "${res.data.name}".`);
+      setNotice(`Fluxo clonado como "${res.data.name}".`);
     } catch (err: any) {
       setError(err.response?.data?.error || err.message);
     } finally {
@@ -441,7 +660,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
         setValidationErrors(res.data.errors || []);
         setValidationModalOpen(true);
       } else {
-        alert('Grafo validado com sucesso! Nenhum erro encontrado.');
+        setNotice('Grafo validado. Nenhum erro encontrado.');
       }
     } catch (err: any) {
       setError(err.response?.data?.error || err.message);
@@ -524,6 +743,38 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="flex items-center rounded-lg bg-surface-container-high p-0.5">
+            <button
+              type="button"
+              onClick={() => setSelectMode(false)}
+              className={`p-1.5 rounded-md transition-colors ${
+                selectMode ? 'text-on-surface-variant hover:text-white' : 'bg-surface-container text-primary'
+              }`}
+              title="Mover o canvas (arrastar com o botão esquerdo)"
+            >
+              <Hand className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectMode(true)}
+              className={`p-1.5 rounded-md transition-colors ${
+                selectMode ? 'bg-surface-container text-primary' : 'text-on-surface-variant hover:text-white'
+              }`}
+              title="Selecionar em área (arrastar desenha um retângulo)"
+            >
+              <MousePointer2 className="w-4 h-4" />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={autoLayout}
+            className="p-2 rounded-lg bg-surface-container-high text-on-surface-variant hover:text-white transition-colors"
+            title="Organizar blocos automaticamente"
+          >
+            <LayoutGrid className="w-4 h-4" />
+          </button>
+
           <button
             type="button"
             onClick={undo}
@@ -693,6 +944,18 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
         </div>
       )}
 
+      {notice && (
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-ok/10 border border-ok/30 text-ok text-xs">
+          <span className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            {notice}
+          </span>
+          <button type="button" onClick={() => setNotice('')} className="opacity-70 hover:opacity-100">
+            ×
+          </button>
+        </div>
+      )}
+
       {publishWarnings.map((warning) => (
         <div key={warning} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-warn/10 border border-warn/30 text-warn text-xs">
           <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -739,32 +1002,54 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
           </div>
         </aside>
 
-        <div className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden relative">
+        <div
+          ref={canvasRef}
+          className="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden relative"
+        >
           <ReactFlow
             nodes={nodesWithActions}
-            edges={edges}
+            edges={edgesWithActions}
+            onInit={(instance) => {
+              rfRef.current = instance;
+            }}
             onNodesChange={(changes) => {
-              const structural = changes.some((change) => change.type === 'remove' || change.type === 'add');
+              const structural = changes.some((c) => c.type === 'remove' || c.type === 'add');
               if (structural) takeSnapshot();
               onNodesChange(changes);
-              setIsDirty(true);
+              // `select` and `dimensions` are not edits. Marking the flow
+              // dirty on every one of them meant simply clicking a block
+              // raised "alterações não salvas", so the warning stopped
+              // meaning anything and got ignored when it was real.
+              if (changes.some((c) => isMeaningfulNodeChange(c))) setIsDirty(true);
             }}
             onEdgesChange={(changes) => {
-              const structural = changes.some((change) => change.type === 'remove' || change.type === 'add');
+              const structural = changes.some((c) => c.type === 'remove' || c.type === 'add');
               if (structural) takeSnapshot();
               onEdgesChange(changes);
-              setIsDirty(true);
+              if (changes.some((c) => c.type !== 'select')) setIsDirty(true);
             }}
             onConnect={onConnect}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            // Deleting is handled by the window listener instead, which works
+            // whether or not the canvas holds focus and knows to keep its
+            // hands off while the operator is typing in the inspector. What
+            // was wrong before was not this line but its replacement: a
+            // handler that only ever removed nodes, so a connection could be
+            // drawn and never taken back.
             deleteKeyCode={null}
             onNodeDoubleClick={(_e, node) => inspectNode(node.id)}
             onNodeDragStart={() => takeSnapshot()}
-            onSelectionChange={({ nodes: selected }) => {
-              if (selected[0]?.id) {
-                setSelectedId(selected[0].id);
-              }
+            onSelectionChange={({ nodes: selNodes }) => {
+              const ids = selNodes.map((n) => n.id);
+              setSelectedIds(ids);
+              setSelectedId(ids.length === 1 ? ids[0] : null);
             }}
+            selectionOnDrag={selectMode}
+            panOnDrag={selectMode ? [1, 2] : true}
+            selectionMode={SelectionMode.Partial}
+            multiSelectionKeyCode={['Meta', 'Control', 'Shift']}
+            elevateEdgesOnSelect
             fitView
             colorMode="dark"
             proOptions={{ hideAttribution: true }}
@@ -779,6 +1064,22 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
               className="!bg-surface-container !border !border-outline-variant !rounded-lg"
             />
           </ReactFlow>
+
+          {/*
+            Every one of these was already possible and none of them was
+            written down anywhere, which is why removing a connection felt
+            impossible rather than merely undiscovered.
+          */}
+          <div className="absolute left-3 bottom-3 z-10 pointer-events-none">
+            <div className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg bg-surface-container/90 border border-outline-variant backdrop-blur text-[10px] text-on-surface-variant">
+              <Keyboard className="w-3 h-3 shrink-0 opacity-70" />
+              <Shortcut keys="Del" label="apagar seleção" />
+              <Shortcut keys="Shift+arrastar" label="selecionar área" />
+              <Shortcut keys="Ctrl+C/V" label="copiar" />
+              <Shortcut keys="Ctrl+Z" label="desfazer" />
+              <span className="opacity-60">passe o mouse na ligação para remover</span>
+            </div>
+          </div>
         </div>
 
         <aside className="h-full min-h-0">
