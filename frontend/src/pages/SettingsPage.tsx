@@ -25,6 +25,10 @@ import {
   RefreshCw,
   Radio,
   ExternalLink,
+  Globe,
+  SlidersHorizontal,
+  KeyRound,
+  FileCode2,
 } from 'lucide-react';
 import { api, persistSession } from '../services/api.js';
 import { socket } from '../services/socket.js';
@@ -32,6 +36,9 @@ import { User } from '../types/index.js';
 import { SecuritySection } from '../components/settings/SecuritySection.js';
 import { AuditSection } from '../components/settings/AuditSection.js';
 import { StateHistorySection } from '../components/settings/StateHistorySection.js';
+import { useToast } from '../components/Toast.js';
+import { useConfirm } from '../components/ConfirmModal.js';
+import { Badge } from '../components/ui.js';
 
 /** Placeholder the API sends in place of a stored secret. */
 const SECRET_MASK = '••••••••';
@@ -42,10 +49,14 @@ const SECRET_MASK = '••••••••';
  */
 const SecretStatus: React.FC<{ configured: boolean; onClear: () => void }> = ({ configured, onClear }) =>
   configured ? (
-    <p className="text-[10px] text-on-surface-variant/70 mt-1 flex items-center gap-1.5">
+    <p className="text-[10px] text-on-surface-variant/80 mt-1.5 flex items-center gap-1.5">
       <Lock className="w-3 h-3 text-ok shrink-0" />
-      Já configurado. Deixe em branco para manter.
-      <button type="button" onClick={onClear} className="text-crit hover:text-crit underline">
+      <span>Já configurado no servidor. Deixe em branco para manter.</span>
+      <button
+        type="button"
+        onClick={onClear}
+        className="text-crit hover:underline font-semibold ml-1 cursor-pointer"
+      >
         Remover
       </button>
     </p>
@@ -54,18 +65,68 @@ const SecretStatus: React.FC<{ configured: boolean; onClear: () => void }> = ({ 
 const ROLE_LEGEND = [
   {
     role: 'ADMIN',
-    className: 'bg-primary/10 border-primary/30 text-primary',
-    text: 'Tudo: equipe, terminal do host, tarefas shell, firewall, importar/exportar o painel.',
+    badgeTone: 'info' as const,
+    text: 'Acesso total: equipe, terminal do host, tarefas shell, firewall e migração do painel.',
   },
   {
     role: 'DEVELOPER',
-    className: 'bg-ok/10 border-ok/30 text-ok',
-    text: 'Apps, deploys, bancos, domínios, arquivos e terminal de contêineres.',
+    badgeTone: 'ok' as const,
+    text: 'Gerenciamento de apps, deploys, bancos, domínios, arquivos e terminal de contêineres.',
   },
   {
     role: 'VIEWER',
-    className: 'bg-surface-container-high border-outline-variant text-on-surface-variant',
-    text: 'Somente leitura. Não altera nada e não abre terminal.',
+    badgeTone: 'neutral' as const,
+    text: 'Somente leitura: visualiza métricas e status sem permissão para alterações ou terminal.',
+  },
+];
+
+type SettingsTabId = 'general' | 'notifications' | 'integrations' | 'security' | 'team' | 'system';
+
+interface TabItem {
+  id: SettingsTabId;
+  label: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  adminOnly?: boolean;
+}
+
+const SETTINGS_TABS: TabItem[] = [
+  {
+    id: 'general',
+    label: 'Geral & Domínio',
+    description: 'Identificação da VPS, SSL e script',
+    icon: Server,
+  },
+  {
+    id: 'notifications',
+    label: 'Alertas & Notificações',
+    description: 'WhatsApp, Telegram e Discord',
+    icon: Bell,
+  },
+  {
+    id: 'integrations',
+    label: 'IA & Integrações',
+    description: 'OpenAI, OpenRouter, Redis e SQL',
+    icon: Bot,
+  },
+  {
+    id: 'security',
+    label: 'Segurança & Senha',
+    description: '2FA, sessões e credenciais',
+    icon: Shield,
+  },
+  {
+    id: 'team',
+    label: 'Equipe & Acessos',
+    description: 'Membros e controle de funções',
+    icon: Users,
+  },
+  {
+    id: 'system',
+    label: 'Manutenção & Logs',
+    description: 'Backup, self-update e auditoria',
+    icon: Activity,
+    adminOnly: true,
   },
 ];
 
@@ -76,7 +137,13 @@ interface SettingsPageProps {
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserUpdate }) => {
   const isAdmin = currentUser?.role === 'admin';
+  const toast = useToast();
+  const confirm = useConfirm();
 
+  // Tab State
+  const [activeTab, setActiveTab] = useState<SettingsTabId>('general');
+
+  // General Settings
   const [serverName, setServerName] = useState('');
   const [caddyEnabled, setCaddyEnabled] = useState(true);
   const [panelDomain, setPanelDomain] = useState('');
@@ -130,21 +197,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
   const [memThreshold, setMemThreshold] = useState(85);
   const [diskThreshold, setDiskThreshold] = useState(90);
 
-  /**
-   * Which secrets already have a value stored on the server.
-   *
-   * The API never sends the values back, so the inputs stay empty and a stored
-   * secret is only overwritten when the user actually types a new one. Showing
-   * the mask inside the input would make it look editable and invite the user
-   * to "fix" a value they cannot see.
-   */
+  /** Which secrets already have a value stored on the server. */
   const [configuredSecrets, setConfiguredSecrets] = useState<Record<string, boolean>>({});
 
   // Testing status
   const [testingChannel, setTestingChannel] = useState<string | null>(null);
 
-  // Team loading state, so a non-admin gets an explanation instead of an
-  // empty list.
+  // Team loading state
   const [teamError, setTeamError] = useState<string | null>(null);
 
   // Change own password
@@ -160,7 +219,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
   const [newRole, setNewRole] = useState<'admin' | 'developer' | 'viewer'>('developer');
   const [addingUser, setAddingUser] = useState(false);
 
-  // Import file ref
+  // Maintenance & Logs
   const importFileRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [panelLogTarget, setPanelLogTarget] = useState('aegis-backend');
@@ -170,11 +229,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
   const [selfUpdateOutput, setSelfUpdateOutput] = useState('');
   const selfUpdatingRef = useRef(false);
 
-
   const fetchSettingsAndNodes = async () => {
-    // Settled individually: listing the team requires the admin role, and a
-    // rejection there used to abort the whole load, leaving a developer with a
-    // blank settings page.
     const [resSettings, resUsers] = await Promise.allSettled([
       api.get('/system/settings'),
       api.get('/auth/users'),
@@ -206,7 +261,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
       const isRedisConfigured = !!dataUrls.redisUrl && dataUrls.redisUrl.includes(SECRET_MASK);
       const isPostgresConfigured = !!dataUrls.postgresUrl && dataUrls.postgresUrl.includes(SECRET_MASK);
 
-      // Masked fields are recorded as "configured" and left blank in the form.
       setConfiguredSecrets({
         discordWebhookUrl: alertConf.discordWebhookUrl === SECRET_MASK,
         telegramBotToken: alertConf.telegramBotToken === SECRET_MASK,
@@ -278,18 +332,21 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
         apiUrl: whatsappApiUrl,
         apiKey: secretToSend('whatsappApiKey', whatsappApiKey),
       });
-      setEvolutionTestResult({
-        success: res.data.ok,
-        message: res.data.message || (res.data.ok ? 'Conexão estabelecida com sucesso!' : 'Falha na conexão com a Evolution.'),
-      });
-      if (res.data.instances && Array.isArray(res.data.instances)) {
+      const isOk = Boolean(res.data?.ok);
+      const msg = res.data?.message || (isOk ? 'Conexão estabelecida com sucesso!' : 'Falha na conexão com a Evolution.');
+      setEvolutionTestResult({ success: isOk, message: msg });
+      if (isOk) {
+        toast.success(msg, 'Evolution API');
+      } else {
+        toast.error(msg, 'Evolution API');
+      }
+      if (res.data?.instances && Array.isArray(res.data.instances)) {
         setEvolutionInstances(res.data.instances);
       }
     } catch (err: any) {
-      setEvolutionTestResult({
-        success: false,
-        message: err.response?.data?.error || err.message,
-      });
+      const errDetail = err.response?.data?.error || err.message;
+      setEvolutionTestResult({ success: false, message: errDetail });
+      toast.error(errDetail, 'Erro Evolution API');
     } finally {
       setTestingEvolution(false);
     }
@@ -305,22 +362,25 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
         apiKey: key,
         model: aiTestModel,
       });
-      setAiTestResult({
-        success: res.data.ok,
-        message: res.data.reply ? `Resposta da IA: "${res.data.reply}"` : res.data.message || 'IA respondeu com sucesso!',
-      });
+      const isOk = Boolean(res.data?.ok);
+      const msg = res.data?.reply ? `Resposta da IA: "${res.data.reply}"` : res.data?.message || 'IA respondeu com sucesso!';
+      setAiTestResult({ success: isOk, message: msg });
+      if (isOk) {
+        toast.success(msg, 'IA Conectada');
+      } else {
+        toast.error(msg, 'Falha no teste');
+      }
     } catch (err: any) {
-      setAiTestResult({
-        success: false,
-        message: err.response?.data?.error || err.message,
-      });
+      const errDetail = err.response?.data?.error || err.message;
+      setAiTestResult({ success: false, message: errDetail });
+      toast.error(errDetail, 'Erro Provedor IA');
     } finally {
       setTestingAi(false);
     }
   };
 
   useEffect(() => {
-    fetchSettingsAndNodes();
+    void fetchSettingsAndNodes();
   }, []);
 
   useEffect(() => {
@@ -346,17 +406,21 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
     };
   }, []);
 
-  /**
-   * Blank + already configured -> send the mask, which the server reads as
-   * "unchanged". Blank + not configured -> send empty. Typed -> send it.
-   */
   const secretToSend = (field: string, value: string): string => {
     if (value) return value;
     return configuredSecrets[field] ? SECRET_MASK : '';
   };
 
   const clearSecret = async (field: string) => {
-    if (!confirm('Remover este segredo do painel? A integração para de funcionar até você cadastrar outro.')) return;
+    const confirmed = await confirm({
+      title: 'Remover Chave Secreta',
+      message: 'Remover este segredo do painel? A integração associada para de funcionar até que uma nova credencial seja cadastrada.',
+      tone: 'crit',
+      confirmLabel: 'Remover Chave',
+      cancelLabel: 'Manter',
+    });
+    if (!confirmed) return;
+
     try {
       if (field === 'openaiKey' || field === 'openrouterKey') {
         await api.put('/system/settings', { aiProviders: { [field]: '' } });
@@ -374,8 +438,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
         if (field === 'whatsappApiKey') setWhatsappApiKey('');
       }
       setConfiguredSecrets((prev) => ({ ...prev, [field]: false }));
+      toast.success('Segredo removido com sucesso.', 'Configurações');
     } catch (err: any) {
-      alert('Erro ao remover: ' + (err.response?.data?.error || err.message));
+      toast.error('Erro ao remover: ' + (err.response?.data?.error || err.message));
     }
   };
 
@@ -391,16 +456,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
       }
       setCurrentPassword('');
       setNewOwnPassword('');
-      alert('✅ Senha alterada. Ela já vale para os próximos logins.');
+      toast.success('Sua senha foi alterada com sucesso e já vale para os próximos logins.', 'Segurança');
     } catch (err: any) {
-      alert('Erro ao alterar senha: ' + (err.response?.data?.error || err.message));
+      toast.error('Erro ao alterar senha: ' + (err.response?.data?.error || err.message));
     } finally {
       setChangingPassword(false);
     }
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async () => {
     try {
       setSaving(true);
       await api.put('/system/settings', {
@@ -409,9 +473,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
         panelDomain: panelDomain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '') || undefined,
         alertConfig: {
           enabled: alertsEnabled,
-          // A blank field on a secret that is already stored means "leave it
-          // as is": the mask is sent back so the server keeps the stored
-          // value. Clearing it deliberately requires the "Remover" action.
           discordWebhookUrl: secretToSend('discordWebhookUrl', discordWebhookUrl),
           telegramBotToken: secretToSend('telegramBotToken', telegramBotToken),
           telegramChatId,
@@ -443,9 +504,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
         },
       });
       setSavedSuccess(true);
-      setTimeout(() => setSavedSuccess(false), 2500);
+      toast.success('Configurações atualizadas e salvas com sucesso!', 'Salvo');
+      setTimeout(() => setSavedSuccess(false), 3000);
     } catch (err: any) {
-      alert('Erro ao salvar: ' + (err.response?.data?.error || err.message));
+      toast.error('Erro ao salvar configurações: ' + (err.response?.data?.error || err.message));
     } finally {
       setSaving(false);
     }
@@ -456,8 +518,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
       setTestingChannel(channel);
       const res = await api.post('/system/test-alert', {
         channel,
-        // Blank means "test with what is already stored"; the server
-        // substitutes the saved secret for the mask.
         webhookUrl: secretToSend('discordWebhookUrl', discordWebhookUrl),
         botToken: secretToSend('telegramBotToken', telegramBotToken),
         chatId: telegramChatId,
@@ -466,9 +526,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
         instance: whatsappInstance,
         recipientNumber: whatsappRecipientNumber,
       });
-      alert('✅ ' + res.data.message);
+      toast.success(res.data.message || `Alerta de teste enviado com sucesso via ${channel}!`, 'Teste de Alerta');
     } catch (err: any) {
-      alert(`Erro no envio de teste para ${channel}: ` + (err.response?.data?.error || err.message));
+      toast.error(`Falha no envio de teste para ${channel}: ` + (err.response?.data?.error || err.message));
     } finally {
       setTestingChannel(null);
     }
@@ -490,22 +550,30 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
       setNewUsername('');
       setNewPassword('');
       setNewEmail('');
-      fetchSettingsAndNodes();
-      alert('🎉 Novo membro adicionado à equipe!');
+      void fetchSettingsAndNodes();
+      toast.success('Novo membro adicionado à equipe com sucesso!', 'Equipe');
     } catch (err: any) {
-      alert('Erro ao criar usuário: ' + (err.response?.data?.error || err.message));
+      toast.error('Erro ao criar usuário: ' + (err.response?.data?.error || err.message));
     } finally {
       setAddingUser(false);
     }
   };
 
   const handleDeleteUser = async (userId: string, username: string) => {
-    if (!confirm(`Remover o usuário "${username}" da equipe?`)) return;
+    const confirmed = await confirm({
+      title: 'Remover Membro',
+      message: `Tem certeza que deseja revogar o acesso e remover "${username}" da equipe?`,
+      tone: 'crit',
+      confirmLabel: 'Remover Usuário',
+    });
+    if (!confirmed) return;
+
     try {
       await api.delete(`/auth/users/${userId}`);
-      fetchSettingsAndNodes();
+      void fetchSettingsAndNodes();
+      toast.success(`Usuário "${username}" removido da equipe.`, 'Equipe');
     } catch (err: any) {
-      alert('Erro ao remover usuário: ' + (err.response?.data?.error || err.message));
+      toast.error('Erro ao remover usuário: ' + (err.response?.data?.error || err.message));
     }
   };
 
@@ -519,8 +587,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
       document.body.appendChild(link);
       link.click();
       link.remove();
+      toast.success('Backup exportado com sucesso!', 'Download');
     } catch (err: any) {
-      alert('Erro ao exportar dados: ' + err.message);
+      toast.error('Erro ao exportar dados: ' + err.message);
     }
   };
 
@@ -531,29 +600,36 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
       setPanelLogs(res.data.logs || '');
     } catch (err: any) {
       setPanelLogs(err.response?.data?.error || err.message);
+      toast.error('Falha ao carregar logs da stack.');
     } finally {
       setLoadingPanelLogs(false);
     }
   };
 
   const handleSelfUpdate = async () => {
-    if (!confirm('Atualizar a stack do painel agora? O painel pode recarregar sozinho por alguns segundos.')) return;
+    const confirmed = await confirm({
+      title: 'Atualizar Stack do Painel',
+      message: 'Iniciar a atualização da stack via Docker Compose agora? O painel recarregará automaticamente por alguns segundos.',
+      tone: 'warn',
+      confirmLabel: 'Iniciar Self-Update',
+    });
+    if (!confirmed) return;
+
     try {
       selfUpdatingRef.current = true;
       setSelfUpdating(true);
       setSelfUpdateOutput('[aegis] Iniciando self-update…\n');
       const res = await api.post('/system/panel/self-update', {}, { timeout: 11 * 60 * 1000 });
-      if (res.data.output) {
+      if (res.data?.output) {
         setSelfUpdateOutput((prev) =>
           prev.includes(res.data.output) ? prev : `${prev}\n${res.data.output}`
         );
       }
+      toast.info('Atualização da stack iniciada.', 'Self-Update');
     } catch (err: any) {
       const msg = err.response?.data?.error || err.message;
       setSelfUpdateOutput((prev) => `${prev}\n[aegis] ${msg}\n`);
-      if (err.response) {
-        alert('Self-update falhou: ' + msg);
-      }
+      toast.error('Self-update falhou: ' + msg);
     } finally {
       selfUpdatingRef.current = false;
       setSelfUpdating(false);
@@ -564,7 +640,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!confirm('ATENÇÃO: Importar este arquivo substituirá os bancos, apps e configurações atuais do painel. Deseja continuar?')) {
+    const confirmed = await confirm({
+      title: 'Substituição de Estado do Painel',
+      message: 'ATENÇÃO: Importar este arquivo substituirá os bancos de dados, aplicações e configurações atuais do painel. Deseja prosseguir?',
+      tone: 'crit',
+      confirmLabel: 'Substituir Estado',
+    });
+    if (!confirmed) {
+      if (importFileRef.current) importFileRef.current.value = '';
       return;
     }
 
@@ -575,388 +658,694 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
         try {
           const parsed = JSON.parse(event.target?.result as string);
           const res = await api.post('/system/import-state', parsed);
-          alert(
+          toast.success(
             res.data.warning
-              ? `🎉 ${res.data.message}\n\n⚠️ ${res.data.warning}`
-              : '🎉 Estado importado com sucesso! Recarregando a página...'
+              ? `${res.data.message} (${res.data.warning})`
+              : 'Estado importado com sucesso! Recarregando…',
+            'Backup Restaurado'
           );
-          window.location.reload();
+          setTimeout(() => window.location.reload(), 1500);
         } catch (err: any) {
-          // The server validates the payload and returns what is wrong with it.
           const details: string[] = err.response?.data?.details || [];
           const reason = err.response?.data?.error || err.message;
-          alert(
-            details.length > 0
-              ? ['Arquivo de backup inválido:', '', ...details.map((d) => `• ${d}`)].join('\n')
-              : 'Arquivo de backup inválido: ' + reason
+          toast.error(
+            details.length > 0 ? `Backup inválido: ${details.join(', ')}` : 'Backup inválido: ' + reason,
+            'Erro de Importação'
           );
           setImporting(false);
         }
       };
       reader.readAsText(file);
     } catch (err: any) {
-      alert('Erro ao processar arquivo: ' + err.message);
+      toast.error('Erro ao processar arquivo: ' + err.message);
       setImporting(false);
     }
   };
 
   const copyInstallScript = () => {
     const script = `curl -fsSL https://raw.githubusercontent.com/WendelDev0/aegispanel/main/install.sh | bash`;
-    navigator.clipboard.writeText(script);
+    void navigator.clipboard.writeText(script);
     setCopiedScript(true);
-    setTimeout(() => setCopiedScript(false), 2000);
+    toast.success('Comando oficial copiado para a área de transferência!', 'Copiado');
+    setTimeout(() => setCopiedScript(false), 2500);
   };
 
-  return (
-    <div className="space-y-8 max-w-5xl">
-      {/* Header */}
+  const renderSaveFooter = () => (
+    <div className="flex items-center justify-between pt-4 border-t border-outline-variant mt-6">
       <div>
-        <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-          <Settings className="w-6 h-6 text-primary" />
-          Configurações do Servidor & Plataforma
-        </h2>
-        <p className="text-sm text-on-surface-variant mt-1">
-          Gerencie alertas no WhatsApp/Telegram, equipe, domínio próprio do painel e nós de computação.
-        </p>
+        {savedSuccess && (
+          <span className="text-ok text-xs font-semibold flex items-center gap-1.5 animate-fadeIn">
+            <Check className="w-4 h-4" /> Alterações salvas com sucesso!
+          </span>
+        )}
       </div>
+      <button
+        type="button"
+        onClick={() => void handleSave()}
+        disabled={saving || !isAdmin}
+        title={isAdmin ? undefined : 'Somente administradores podem alterar as configurações do painel.'}
+        className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary-container hover:bg-primary text-white font-semibold text-xs transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+      >
+        <Save className={`w-4 h-4 ${saving ? 'animate-spin' : ''}`} />
+        <span>{saving ? 'Salvando...' : 'Salvar Alterações'}</span>
+      </button>
+    </div>
+  );
 
-      {/* Main Settings Form */}
-      <form onSubmit={handleSave} className="space-y-6">
-        {/* Identificação do Servidor & Domínio Próprio */}
-        <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-5">
-          <h3 className="font-bold text-white text-base flex items-center gap-2">
-            <Server className="w-5 h-5 text-primary" />
-            Identificação & Domínio Próprio do Painel
-          </h3>
+  const visibleTabs = SETTINGS_TABS.filter((t) => !t.adminOnly || isAdmin);
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                Nome de Exibição do Servidor
-              </label>
-              <input
-                type="text"
-                required
-                value={serverName}
-                onChange={(e) => setServerName(e.target.value)}
-                className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
-                Domínio Próprio do Painel (SSL Nativo)
-              </label>
-              <input
-                type="text"
-                placeholder="ex: painel.seudominio.com"
-                value={panelDomain}
-                onChange={(e) => setPanelDomain(e.target.value)}
-                className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-primary"
-              />
-              <p className="text-[10px] text-on-surface-variant mt-1">
-                Acesse o dashboard via HTTPS diretamente pelo seu subdomínio.
-              </p>
-            </div>
+  return (
+    <div className="space-y-6 max-w-5xl pb-12">
+      {/* Header Banner */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-surface-container p-5 rounded-lg border border-outline-variant">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="mono-label text-primary">Painel de Administração</span>
+            {!isAdmin && (
+              <Badge tone="warn" dot>
+                Modo Leitura
+              </Badge>
+            )}
           </div>
+          <h2 className="text-2xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
+            <Settings className="w-6 h-6 text-primary" />
+            Configurações & Governança da VPS
+          </h2>
+          <p className="text-xs text-on-surface-variant mt-0.5">
+            Gerencie integrações, canais de alerta, segurança, equipe e rotinas do servidor.
+          </p>
         </div>
 
-        {/* WhatsApp Notifications (Evolution API) */}
-        <div className="bg-surface-container rounded-lg p-6 border border-ok/30 space-y-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded bg-ok/10 text-ok">
-                <MessageSquare className="w-5 h-5" />
+        {/* Global Save Button for Quick Access */}
+        {isAdmin && ['general', 'notifications', 'integrations'].includes(activeTab) && (
+          <button
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={saving}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary-container hover:bg-primary text-white font-semibold text-xs transition-all active:scale-95 disabled:opacity-50 shrink-0 self-start sm:self-center"
+          >
+            <Save className={`w-4 h-4 ${saving ? 'animate-spin' : ''}`} />
+            <span>{saving ? 'Salvando…' : 'Salvar Alterações'}</span>
+          </button>
+        )}
+      </div>
+
+      {/* Non-Admin Notice */}
+      {!isAdmin && (
+        <div className="flex items-start gap-3 p-3.5 rounded-lg border border-outline-variant bg-surface-container-low text-xs text-on-surface-variant">
+          <Shield className="w-4 h-4 text-warn shrink-0 mt-0.5" />
+          <span>
+            Você possui permissões restritas ({currentUser?.role?.toUpperCase() || 'VIEWER'}). Alterar configurações globais da VPS exige o perfil <span className="font-mono text-white">ADMIN</span>.
+          </span>
+        </div>
+      )}
+
+      {/* Segmented Navigation Tabs */}
+      <div className="bg-surface-container-low p-1.5 rounded-lg border border-outline-variant flex items-center gap-1 overflow-x-auto custom-scrollbar">
+        {visibleTabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-semibold whitespace-nowrap transition-all ${
+                isActive
+                  ? 'bg-primary-container text-white shadow-sm font-bold'
+                  : 'text-on-surface-variant hover:text-white hover:bg-surface-container'
+              }`}
+            >
+              <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-on-surface-variant/70'}`} />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* TAB 1: GERAL & DOMÍNIO */}
+      {activeTab === 'general' && (
+        <div className="space-y-6 animate-fadeIn">
+          <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-5">
+            <div className="flex items-center gap-2.5 border-b border-outline-variant pb-4">
+              <div className="p-2 rounded bg-primary/10 text-primary">
+                <Server className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-white text-base flex items-center gap-2">
-                  <span>Notificações no WhatsApp (Evolution API)</span>
-                  <span className="text-[10px] bg-ok/15 text-ok px-2 py-0.5 rounded-full font-mono">Pro</span>
-                </h3>
+                <h3 className="font-bold text-white text-base">Identificação & Domínio do Painel</h3>
                 <p className="text-xs text-on-surface-variant">
-                  Receba avisos instantâneos de deploys e incidentes direto no seu WhatsApp.
+                  Personalize o nome da VPS e configure o subdomínio com HTTPS automático emitido pelo Caddy.
                 </p>
               </div>
             </div>
 
-            <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
-              <input
-                type="checkbox"
-                checked={whatsappEnabled}
-                onChange={(e) => setWhatsappEnabled(e.target.checked)}
-                className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
-              />
-              <span className="text-on-surface">Ativar WhatsApp</span>
-            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pt-1">
+              <div>
+                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
+                  Nome de Exibição do Servidor
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={serverName}
+                  onChange={(e) => setServerName(e.target.value)}
+                  placeholder="ex: Aegis Production Node"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary transition-colors"
+                />
+                <p className="text-[11px] text-on-surface-variant/70 mt-1">
+                  Exibido na barra superior e nos alertas enviados pela VPS.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1.5">
+                  Domínio Próprio do Painel (SSL Nativo)
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="ex: painel.seudominio.com"
+                    value={panelDomain}
+                    onChange={(e) => setPanelDomain(e.target.value)}
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-primary transition-colors pr-10"
+                  />
+                  <Globe className="w-4 h-4 text-on-surface-variant absolute right-3 top-3 pointer-events-none" />
+                </div>
+                <p className="text-[11px] text-on-surface-variant/70 mt-1">
+                  Aponte o DNS (tipo A) para o IP desta máquina e acesse sem informar a porta :3000.
+                </p>
+              </div>
+            </div>
+
+            {renderSaveFooter()}
           </div>
 
-          {whatsappEnabled && (
-            <div className="space-y-4 pt-2 border-t border-outline-variant">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant mb-1">
-                    Evolution API URL (Instância)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="https://evolution.seudominio.com ou http://localhost:8080"
-                    value={whatsappApiUrl}
-                    onChange={(e) => setWhatsappApiUrl(e.target.value)}
-                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-ok"
-                  />
+          {/* Script Oficial de Instalação */}
+          <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded bg-ok/10 text-ok">
+                  <Terminal className="w-5 h-5" />
                 </div>
-
                 <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant mb-1">
-                    API Key (Chave Global de Autenticação)
-                  </label>
-                  <input
-                    type="password"
-                    placeholder={configuredSecrets.whatsappApiKey ? 'Manter a chave atual' : 'Sua chave secreta da Evolution API'}
-                    value={whatsappApiKey}
-                    onChange={(e) => setWhatsappApiKey(e.target.value)}
-                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-ok"
-                  />
-                  <SecretStatus
-                    configured={!!configuredSecrets.whatsappApiKey}
-                    onClear={() => clearSecret('whatsappApiKey')}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant mb-1">
-                    Nome da Instância WhatsApp
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="ex: principal ou selva-vps"
-                    value={whatsappInstance}
-                    onChange={(e) => setWhatsappInstance(e.target.value)}
-                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-ok"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant mb-1">
-                    Número do Seu WhatsApp (com DDI e DDD)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="ex: 5511999998888"
-                    value={whatsappRecipientNumber}
-                    onChange={(e) => setWhatsappRecipientNumber(e.target.value)}
-                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-ok"
-                  />
+                  <h3 className="font-bold text-white text-base">Script Oficial de Instalação</h3>
+                  <p className="text-xs text-on-surface-variant">
+                    Comando rápido para provisionar novas instâncias do AegisPanel em servidores Ubuntu/Debian.
+                  </p>
                 </div>
               </div>
 
-              {/* Evolution Actions & Test Result */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void handleTestEvolution()}
-                    disabled={testingEvolution || !whatsappApiUrl}
-                    className="flex items-center gap-1.5 px-3.5 py-2 bg-surface-container-high hover:bg-surface-container-highest text-white border border-outline-variant rounded text-xs font-semibold transition-all disabled:opacity-40"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${testingEvolution ? 'animate-spin' : ''}`} />
-                    <span>{testingEvolution ? 'Testando conexão…' : 'Testar Conexão Evolution'}</span>
-                  </button>
+              <button
+                type="button"
+                onClick={copyInstallScript}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-white text-xs font-semibold border border-outline-variant transition-colors"
+              >
+                {copiedScript ? <Check className="w-3.5 h-3.5 text-ok" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedScript ? 'Copiado!' : 'Copiar Script'}</span>
+              </button>
+            </div>
 
-                  <button
-                    type="button"
-                    onClick={() => handleTestAlert('whatsapp')}
-                    disabled={testingChannel === 'whatsapp' || !whatsappApiUrl || !whatsappRecipientNumber}
-                    className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-ok border border-ok/30 rounded text-xs font-semibold transition-all disabled:opacity-40"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>{testingChannel === 'whatsapp' ? 'Enviando...' : 'Enviar Alerta de Teste'}</span>
-                  </button>
+            <div className="bg-surface-container-lowest p-3.5 rounded border border-outline-variant font-mono text-xs text-ok select-all overflow-x-auto flex items-center justify-between gap-4">
+              <span>curl -fsSL https://raw.githubusercontent.com/WendelDev0/aegispanel/main/install.sh | bash</span>
+              <FileCode2 className="w-4 h-4 text-on-surface-variant/40 shrink-0" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: ALERTAS & NOTIFICAÇÕES */}
+      {activeTab === 'notifications' && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* WhatsApp Evolution API */}
+          <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-outline-variant pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded bg-ok/10 text-ok">
+                  <MessageSquare className="w-5 h-5" />
                 </div>
+                <div>
+                  <h3 className="font-bold text-white text-base flex items-center gap-2">
+                    <span>WhatsApp (Evolution API)</span>
+                    <Badge tone="ok">Pro</Badge>
+                  </h3>
+                  <p className="text-xs text-on-surface-variant">
+                    Receba notificações em tempo real de deploys, status de contêineres e incidentes críticos.
+                  </p>
+                </div>
+              </div>
 
-                {evolutionTestResult && (
-                  <div
-                    className={`text-xs px-3 py-1.5 rounded border flex items-center gap-2 ${
-                      evolutionTestResult.success
-                        ? 'bg-ok/10 border-ok/30 text-ok'
-                        : 'bg-crit/10 border-crit/30 text-crit'
-                    }`}
-                  >
-                    {evolutionTestResult.success ? (
-                      <CheckCircle2 className="w-4 h-4 shrink-0" />
-                    ) : (
-                      <AlertTriangle className="w-4 h-4 shrink-0" />
-                    )}
-                    <span>{evolutionTestResult.message}</span>
+              <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer bg-surface-container-low px-3 py-1.5 rounded-lg border border-outline-variant hover:border-outline">
+                <input
+                  type="checkbox"
+                  checked={whatsappEnabled}
+                  onChange={(e) => setWhatsappEnabled(e.target.checked)}
+                  className="w-4 h-4 rounded text-primary focus:ring-0"
+                />
+                <span className="text-on-surface">Ativar Notificações WhatsApp</span>
+              </label>
+            </div>
+
+            {whatsappEnabled && (
+              <div className="space-y-5 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                      Evolution API URL (Instância)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="https://evolution.seudominio.com ou http://localhost:8080"
+                      value={whatsappApiUrl}
+                      onChange={(e) => setWhatsappApiUrl(e.target.value)}
+                      className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-ok"
+                    />
                   </div>
-                )}
-              </div>
 
-              {/* Live Instances Cards */}
-              <div className="pt-4 border-t border-outline-variant space-y-3">
-                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                      API Key (Chave Global de Autenticação)
+                    </label>
+                    <input
+                      type="password"
+                      placeholder={configuredSecrets.whatsappApiKey ? 'Manter chave atual' : 'Sua chave secreta da Evolution API'}
+                      value={whatsappApiKey}
+                      onChange={(e) => setWhatsappApiKey(e.target.value)}
+                      className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-ok"
+                    />
+                    <SecretStatus
+                      configured={Boolean(configuredSecrets.whatsappApiKey)}
+                      onClear={() => void clearSecret('whatsappApiKey')}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                      Nome da Instância WhatsApp
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="ex: principal ou producao"
+                      value={whatsappInstance}
+                      onChange={(e) => setWhatsappInstance(e.target.value)}
+                      className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-ok"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                      Número de Destino (DDI + DDD + Número)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="ex: 5511999998888"
+                      value={whatsappRecipientNumber}
+                      onChange={(e) => setWhatsappRecipientNumber(e.target.value)}
+                      className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-ok"
+                    />
+                  </div>
+                </div>
+
+                {/* Actions & Diagnostics */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                   <div className="flex items-center gap-2">
-                    <Radio className="w-4 h-4 text-ok" />
-                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">
-                      Instâncias Conectadas na Evolution
-                    </h4>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {evolutionManagerUrl && (
-                      <a
-                        href={evolutionManagerUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-primary hover:underline flex items-center gap-1"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        Manager da Evolution
-                      </a>
-                    )}
                     <button
                       type="button"
-                      onClick={() => void fetchEvolutionInstances()}
-                      disabled={loadingInstances || !whatsappApiUrl}
-                      className="text-xs text-primary hover:underline flex items-center gap-1"
+                      onClick={() => void handleTestEvolution()}
+                      disabled={testingEvolution || !whatsappApiUrl}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-surface-container-high hover:bg-surface-container-highest text-white border border-outline-variant rounded-lg text-xs font-semibold transition-all disabled:opacity-40"
                     >
-                      <RefreshCw className={`w-3 h-3 ${loadingInstances ? 'animate-spin' : ''}`} />
-                      <span>Atualizar lista</span>
+                      <RefreshCw className={`w-3.5 h-3.5 ${testingEvolution ? 'animate-spin' : ''}`} />
+                      <span>{testingEvolution ? 'Testando conexão…' : 'Testar Conexão Evolution'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => void handleTestAlert('whatsapp')}
+                      disabled={testingChannel === 'whatsapp' || !whatsappApiUrl || !whatsappRecipientNumber}
+                      className="flex items-center gap-1.5 px-3.5 py-2 bg-ok/15 hover:bg-ok/25 text-ok border border-ok/30 rounded-lg text-xs font-semibold transition-all disabled:opacity-40"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>{testingChannel === 'whatsapp' ? 'Enviando…' : 'Enviar Alerta de Teste'}</span>
+                    </button>
+                  </div>
+
+                  {evolutionTestResult && (
+                    <div
+                      className={`text-xs px-3 py-1.5 rounded-lg border flex items-center gap-2 ${
+                        evolutionTestResult.success ? 'bg-ok/10 border-ok/30 text-ok' : 'bg-crit/10 border-crit/30 text-crit'
+                      }`}
+                    >
+                      {evolutionTestResult.success ? (
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                      )}
+                      <span>{evolutionTestResult.message}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Connected Instances */}
+                <div className="pt-3 border-t border-outline-variant space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Radio className="w-4 h-4 text-ok" />
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                        Instâncias Detectadas
+                      </h4>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {evolutionManagerUrl && (
+                        <a
+                          href={evolutionManagerUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs text-primary hover:underline flex items-center gap-1"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          Manager Evolution
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => void fetchEvolutionInstances()}
+                        disabled={loadingInstances || !whatsappApiUrl}
+                        className="text-xs text-primary hover:underline flex items-center gap-1"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${loadingInstances ? 'animate-spin' : ''}`} />
+                        <span>Atualizar</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {loadingInstances ? (
+                    <p className="text-xs text-on-surface-variant font-mono">Verificando instâncias…</p>
+                  ) : evolutionInstances.length === 0 ? (
+                    <div className="p-3.5 rounded bg-surface-container-low border border-outline-variant text-xs text-on-surface-variant">
+                      Nenhuma instância conectada encontrada no momento.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                      {evolutionInstances.map((inst) => {
+                        const isOpen = inst.connectionStatus === 'open';
+                        const isConnecting = inst.connectionStatus === 'connecting';
+                        return (
+                          <div
+                            key={inst.name}
+                            className="bg-surface-container-low border border-outline-variant rounded-lg p-3 flex flex-col justify-between space-y-2"
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-xs font-mono font-bold text-white truncate">{inst.name}</span>
+                              <Badge tone={isOpen ? 'ok' : isConnecting ? 'warn' : 'crit'} dot>
+                                {isOpen ? 'Online' : isConnecting ? 'Conectando' : 'Offline'}
+                              </Badge>
+                            </div>
+                            {inst.number && (
+                              <p className="text-[11px] text-on-surface-variant/80 font-mono">{inst.number}</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Webhook Configuration Helper */}
+                <div className="p-3.5 bg-surface-container-low border border-outline-variant rounded-lg space-y-1.5 text-xs">
+                  <span className="font-semibold text-white">URL de Webhook para Fluxos:</span>
+                  <div className="flex items-center justify-between gap-2 bg-surface-container px-3 py-2 rounded font-mono text-[11px] text-on-surface-variant overflow-x-auto">
+                    <span className="truncate">{`${window.location.origin}/api/wa-flows/webhook`}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(`${window.location.origin}/api/wa-flows/webhook`);
+                        toast.success('URL de Webhook copiada!');
+                      }}
+                      className="text-primary hover:underline font-sans text-xs shrink-0 cursor-pointer"
+                    >
+                      Copiar
                     </button>
                   </div>
                 </div>
+              </div>
+            )}
+          </div>
 
-                {loadingInstances ? (
-                  <p className="text-xs text-on-surface-variant font-mono">Consultando instâncias…</p>
-                ) : evolutionInstances.length === 0 ? (
-                  <div className="p-3.5 rounded bg-surface-container-low border border-outline-variant text-xs text-on-surface-variant">
-                    Nenhuma instância detectada ou a API ainda não foi testada. Salve as credenciais e clique em
-                    "Testar Conexão Evolution".
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-                    {evolutionInstances.map((inst) => {
-                      const isOpen = inst.connectionStatus === 'open';
-                      const isConnecting = inst.connectionStatus === 'connecting';
-                      return (
-                        <div
-                          key={inst.name}
-                          className="bg-surface-container-low border border-outline-variant rounded-lg p-3 flex flex-col justify-between space-y-2"
-                        >
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="text-xs font-mono font-bold text-white truncate">
-                              {inst.name}
-                            </span>
-                            <span
-                              className={`text-[9px] uppercase px-2 py-0.5 rounded font-mono border ${
-                                isOpen
-                                  ? 'bg-ok/10 text-ok border-ok/30'
-                                  : isConnecting
-                                  ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                                  : 'bg-crit/10 text-crit border-crit/30'
-                              }`}
-                            >
-                              {isOpen ? 'Conectado' : isConnecting ? 'Conectando' : 'Desconectado'}
-                            </span>
-                          </div>
-                          {inst.number && (
-                            <p className="text-[11px] text-on-surface-variant/80 font-mono">{inst.number}</p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                <p className="text-[10px] text-on-surface-variant/70">
-                  💡 No editor de fluxos, você pode vincular fluxos específicos a cada uma dessas instâncias.
-                </p>
+          {/* Telegram & Discord Notifications */}
+          <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-outline-variant pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded bg-primary/10 text-primary">
+                  <Bell className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base">Alertas no Telegram & Discord</h3>
+                  <p className="text-xs text-on-surface-variant">
+                    Integrações de canal único para envio automatizado de logs e avisos.
+                  </p>
+                </div>
               </div>
 
-              {/* Webhook Configuration Helper */}
-              <div className="p-3.5 bg-surface-container-low border border-outline-variant rounded-lg space-y-1.5 text-xs">
-                <span className="font-semibold text-white">URL de Webhook para Fluxos:</span>
-                <div className="flex items-center justify-between gap-2 bg-surface-container px-3 py-2 rounded font-mono text-[11px] text-on-surface-variant overflow-x-auto">
-                  <span className="truncate">
-                    {`${window.location.origin}/api/wa-flows/webhook`}
-                  </span>
+              <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer bg-surface-container-low px-3 py-1.5 rounded-lg border border-outline-variant hover:border-outline">
+                <input
+                  type="checkbox"
+                  checked={alertsEnabled}
+                  onChange={(e) => setAlertsEnabled(e.target.checked)}
+                  className="w-4 h-4 rounded text-primary focus:ring-0"
+                />
+                <span className="text-on-surface">Ativar Alertas Secundários</span>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pt-1">
+              <div>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
+                  Discord Webhook URL
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder={configuredSecrets.discordWebhookUrl ? 'Manter webhook atual' : 'https://discord.com/api/webhooks/…'}
+                    value={discordWebhookUrl}
+                    onChange={(e) => setDiscordWebhookUrl(e.target.value)}
+                    className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2 text-white text-xs font-mono focus:outline-none focus:border-primary"
+                  />
                   <button
                     type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(`${window.location.origin}/api/wa-flows/webhook`);
-                      alert('URL de Webhook copiada com sucesso!');
-                    }}
-                    className="text-primary hover:underline font-sans text-xs shrink-0"
+                    onClick={() => void handleTestAlert('discord')}
+                    disabled={(!discordWebhookUrl && !configuredSecrets.discordWebhookUrl) || testingChannel === 'discord'}
+                    className="px-3.5 py-2 bg-surface-container-high hover:bg-surface-container-highest text-on-surface rounded-lg text-xs font-semibold shrink-0 disabled:opacity-40 border border-outline-variant"
                   >
-                    Copiar
+                    {testingChannel === 'discord' ? 'Enviando…' : 'Testar'}
                   </button>
                 </div>
-                <p className="text-[10px] text-on-surface-variant/70">
-                  Cadastre esta URL nas configurações de Webhook das instâncias da Evolution API com o evento{' '}
-                  <span className="font-mono text-white">MESSAGES_UPSERT</span>.
-                </p>
+                <SecretStatus
+                  configured={Boolean(configuredSecrets.discordWebhookUrl)}
+                  onClear={() => void clearSecret('discordWebhookUrl')}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
+                  Telegram (Bot Token & Chat ID)
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="password"
+                    placeholder={configuredSecrets.telegramBotToken ? 'Manter token' : 'Bot Token'}
+                    value={telegramBotToken}
+                    onChange={(e) => setTelegramBotToken(e.target.value)}
+                    className="w-1/2 bg-surface-container-low border border-outline-variant rounded px-3 py-2 text-white text-xs font-mono focus:outline-none focus:border-primary"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Chat ID"
+                    value={telegramChatId}
+                    onChange={(e) => setTelegramChatId(e.target.value)}
+                    className="w-1/2 bg-surface-container-low border border-outline-variant rounded px-3 py-2 text-white text-xs font-mono focus:outline-none focus:border-primary"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleTestAlert('telegram')}
+                    disabled={
+                      (!telegramBotToken && !configuredSecrets.telegramBotToken) ||
+                      !telegramChatId ||
+                      testingChannel === 'telegram'
+                    }
+                    className="px-3.5 py-2 bg-surface-container-high hover:bg-surface-container-highest text-on-surface rounded-lg text-xs font-semibold shrink-0 disabled:opacity-40 border border-outline-variant"
+                  >
+                    {testingChannel === 'telegram' ? 'Enviando…' : 'Testar'}
+                  </button>
+                </div>
+                <SecretStatus
+                  configured={Boolean(configuredSecrets.telegramBotToken)}
+                  onClear={() => void clearSecret('telegramBotToken')}
+                />
               </div>
             </div>
-          )}
-        </div>
 
-        {/* AI Providers Section */}
-        <div className="bg-surface-container rounded-lg p-6 border border-primary/30 space-y-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
+            {/* Notification Triggers */}
+            <div className="pt-4 border-t border-outline-variant space-y-3">
+              <h4 className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">
+                Gatilhos de Notificação
+              </h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <label className="flex items-center gap-2 cursor-pointer bg-surface-container-low p-2.5 rounded-lg border border-outline-variant hover:border-outline transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={notifyOnDeploySuccess}
+                    onChange={(e) => setNotifyOnDeploySuccess(e.target.checked)}
+                    className="rounded text-primary focus:ring-0"
+                  />
+                  <CheckCircle2 className="w-3.5 h-3.5 text-ok shrink-0" />
+                  <span className="text-on-surface">Deploy Sucesso</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer bg-surface-container-low p-2.5 rounded-lg border border-outline-variant hover:border-outline transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={notifyOnDeployFail}
+                    onChange={(e) => setNotifyOnDeployFail(e.target.checked)}
+                    className="rounded text-primary focus:ring-0"
+                  />
+                  <AlertTriangle className="w-3.5 h-3.5 text-crit shrink-0" />
+                  <span className="text-on-surface">Deploy Falha</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer bg-surface-container-low p-2.5 rounded-lg border border-outline-variant hover:border-outline transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={notifyOnHighResource}
+                    onChange={(e) => setNotifyOnHighResource(e.target.checked)}
+                    className="rounded text-primary focus:ring-0"
+                  />
+                  <Activity className="w-3.5 h-3.5 text-warn shrink-0" />
+                  <span className="text-on-surface">Alto Consumo</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer bg-surface-container-low p-2.5 rounded-lg border border-outline-variant hover:border-outline transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={notifyOnBackup}
+                    onChange={(e) => setNotifyOnBackup(e.target.checked)}
+                    className="rounded text-primary focus:ring-0"
+                  />
+                  <Database className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <span className="text-on-surface">Rotina Backup</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Threshold Sliders */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 pt-4 border-t border-outline-variant">
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs font-semibold text-on-surface-variant">Alerta CPU</span>
+                  <span className="text-xs font-mono font-bold text-primary">{cpuThreshold}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="50"
+                  max="98"
+                  value={cpuThreshold}
+                  onChange={(e) => setCpuThreshold(parseInt(e.target.value))}
+                  className="w-full accent-[#4d8eff] cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs font-semibold text-on-surface-variant">Alerta Memória RAM</span>
+                  <span className="text-xs font-mono font-bold text-ok">{memThreshold}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="50"
+                  max="98"
+                  value={memThreshold}
+                  onChange={(e) => setMemThreshold(parseInt(e.target.value))}
+                  className="w-full accent-emerald-500 cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs font-semibold text-on-surface-variant">Alerta Disco</span>
+                  <span className="text-xs font-mono font-bold text-warn">{diskThreshold}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="50"
+                  max="98"
+                  value={diskThreshold}
+                  onChange={(e) => setDiskThreshold(parseInt(e.target.value))}
+                  className="w-full accent-amber-500 cursor-pointer"
+                />
+              </div>
+            </div>
+
+            {renderSaveFooter()}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: IA & INTEGRAÇÕES */}
+      {activeTab === 'integrations' && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* AI Providers Section */}
+          <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-5">
+            <div className="flex items-center gap-3 border-b border-outline-variant pb-4">
               <div className="p-2 rounded bg-primary/10 text-primary">
                 <Bot className="w-5 h-5" />
               </div>
               <div>
                 <h3 className="font-bold text-white text-base flex items-center gap-2">
                   <span>Provedores de Inteligência Artificial</span>
-                  <span className="text-[10px] bg-primary/15 text-primary px-2 py-0.5 rounded-full font-mono">
-                    Fluxos Pro
-                  </span>
+                  <Badge tone="info">Fluxos & Agentes</Badge>
                 </h3>
                 <p className="text-xs text-on-surface-variant">
-                  Chaves de API para alimentar o bloco Agente IA e respostas inteligentes no WhatsApp.
+                  Chaves de API para agentes autônomos, assistentes de atendimento e geração de texto nos fluxos.
                 </p>
               </div>
             </div>
-          </div>
 
-          <div className="space-y-4 pt-2 border-t border-outline-variant">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pt-1">
               <div>
-                <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
                   OpenAI API Key
                 </label>
                 <input
                   type="password"
-                  placeholder={configuredSecrets.openaiKey ? 'Manter a chave atual' : 'sk-...'}
+                  placeholder={configuredSecrets.openaiKey ? 'Manter chave atual' : 'sk-…'}
                   value={openaiKey}
                   onChange={(e) => setOpenaiKey(e.target.value)}
                   className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
                 />
                 <SecretStatus
-                  configured={!!configuredSecrets.openaiKey}
-                  onClear={() => clearSecret('openaiKey')}
+                  configured={Boolean(configuredSecrets.openaiKey)}
+                  onClear={() => void clearSecret('openaiKey')}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
                   OpenRouter API Key
                 </label>
                 <input
                   type="password"
-                  placeholder={configuredSecrets.openrouterKey ? 'Manter a chave atual' : 'sk-or-...'}
+                  placeholder={configuredSecrets.openrouterKey ? 'Manter chave atual' : 'sk-or-…'}
                   value={openrouterKey}
                   onChange={(e) => setOpenrouterKey(e.target.value)}
                   className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
                 />
                 <SecretStatus
-                  configured={!!configuredSecrets.openrouterKey}
-                  onClear={() => clearSecret('openrouterKey')}
+                  configured={Boolean(configuredSecrets.openrouterKey)}
+                  onClear={() => void clearSecret('openrouterKey')}
                 />
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-on-surface-variant mb-1">
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
                   Modelos Permitidos (separados por vírgula)
                 </label>
                 <input
@@ -966,19 +1355,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
                   onChange={(e) => setAllowedModels(e.target.value)}
                   className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
                 />
-                <p className="text-[10px] text-on-surface-variant/70 mt-1">
-                  Modelos disponíveis para seleção no bloco Agente IA.
-                </p>
               </div>
             </div>
 
             {/* Test AI Provider */}
-            <div className="pt-3 border-t border-outline-variant flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
+            <div className="pt-4 border-t border-outline-variant flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
                 <select
                   value={aiTestProvider}
                   onChange={(e) => setAiTestProvider(e.target.value as any)}
-                  className="bg-surface-container-low border border-outline-variant rounded px-3 py-1.5 text-white text-xs"
+                  className="bg-surface-container-low border border-outline-variant rounded-lg px-3 py-2 text-white text-xs"
                 >
                   <option value="openai">OpenAI</option>
                   <option value="openrouter">OpenRouter</option>
@@ -989,593 +1375,389 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
                   value={aiTestModel}
                   onChange={(e) => setAiTestModel(e.target.value)}
                   placeholder="Modelo de teste"
-                  className="bg-surface-container-low border border-outline-variant rounded px-3 py-1.5 text-white text-xs font-mono w-40"
+                  className="bg-surface-container-low border border-outline-variant rounded-lg px-3 py-2 text-white text-xs font-mono w-40"
                 />
 
                 <button
                   type="button"
                   onClick={() => void handleTestAi()}
                   disabled={testingAi}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 rounded text-xs font-semibold transition-all disabled:opacity-40"
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 rounded-lg text-xs font-semibold transition-all disabled:opacity-40"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>{testingAi ? 'Testando IA…' : 'Testar Provedor de IA'}</span>
+                  <span>{testingAi ? 'Testando IA…' : 'Testar Resposta IA'}</span>
                 </button>
               </div>
 
               {aiTestResult && (
                 <div
-                  className={`text-xs px-3 py-1.5 rounded border flex items-center gap-2 ${
-                    aiTestResult.success
-                      ? 'bg-ok/10 border-ok/30 text-ok'
-                      : 'bg-crit/10 border-crit/30 text-crit'
+                  className={`text-xs px-3 py-1.5 rounded-lg border flex items-center gap-2 ${
+                    aiTestResult.success ? 'bg-ok/10 border-ok/30 text-ok' : 'bg-crit/10 border-crit/30 text-crit'
                   }`}
                 >
-                  {aiTestResult.success ? (
-                    <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4 shrink-0" />
-                  )}
+                  {aiTestResult.success ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
                   <span>{aiTestResult.message}</span>
                 </div>
               )}
             </div>
-          </div>
-        </div>
 
-        {/* Flow External Data Plane (Redis & Postgres) */}
-        <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-5">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded bg-surface-container-highest text-white">
-              <Database className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-bold text-white text-base">Fontes de Dados dos Fluxos (Opcional)</h3>
-              <p className="text-xs text-on-surface-variant">
-                Infraestrutura externa para sessões distribuídas (Redis) e consultas diretas (PostgreSQL).
-              </p>
-            </div>
+            {renderSaveFooter()}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-outline-variant">
-            <div>
-              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
-                Redis URL (Sessões distribuídas)
-              </label>
-              <input
-                type="text"
-                placeholder={configuredSecrets.flowRedisUrl ? 'Manter URL atual' : 'redis://:senha@host:6379/0'}
-                value={flowRedisUrl}
-                onChange={(e) => setFlowRedisUrl(e.target.value)}
-                className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
-              />
-              <SecretStatus
-                configured={!!configuredSecrets.flowRedisUrl}
-                onClear={() => clearSecret('flowRedisUrl')}
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
-                PostgreSQL URL (Bloco SQL)
-              </label>
-              <input
-                type="text"
-                placeholder={configuredSecrets.flowPostgresUrl ? 'Manter URL atual' : 'postgres://user:senha@host:5432/db'}
-                value={flowPostgresUrl}
-                onChange={(e) => setFlowPostgresUrl(e.target.value)}
-                className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
-              />
-              <SecretStatus
-                configured={!!configuredSecrets.flowPostgresUrl}
-                onClear={() => clearSecret('flowPostgresUrl')}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Telegram & Discord Notifications */}
-        <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded bg-primary/10 text-primary">
-                <Bell className="w-5 h-5" />
+          {/* Flow External Data Plane (Redis & Postgres) */}
+          <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-5">
+            <div className="flex items-center gap-3 border-b border-outline-variant pb-4">
+              <div className="p-2 rounded bg-surface-container-high text-white">
+                <Database className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-white text-base">Alertas no Telegram & Discord</h3>
+                <h3 className="font-bold text-white text-base">Fontes de Dados dos Fluxos (Opcional)</h3>
                 <p className="text-xs text-on-surface-variant">
-                  Integrações adicionais de monitoramento de infraestrutura.
+                  Armazenamento externo para persistência de sessões distribuídas (Redis) e consultas SQL diretas.
                 </p>
               </div>
             </div>
 
-            <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
-              <input
-                type="checkbox"
-                checked={alertsEnabled}
-                onChange={(e) => setAlertsEnabled(e.target.checked)}
-                className="w-4 h-4 rounded text-primary focus:ring-primary"
-              />
-              <span className="text-on-surface">Ativar Notificações</span>
-            </label>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-outline-variant">
-            <div>
-              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
-                Discord Webhook URL
-              </label>
-              <div className="flex items-center gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pt-1">
+              <div>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
+                  Redis URL (Sessões distribuídas)
+                </label>
                 <input
                   type="text"
-                  placeholder={configuredSecrets.discordWebhookUrl ? 'Manter o webhook atual' : 'https://discord.com/api/webhooks/...'}
-                  value={discordWebhookUrl}
-                  onChange={(e) => setDiscordWebhookUrl(e.target.value)}
+                  placeholder={configuredSecrets.flowRedisUrl ? 'Manter URL atual' : 'redis://:senha@host:6379/0'}
+                  value={flowRedisUrl}
+                  onChange={(e) => setFlowRedisUrl(e.target.value)}
                   className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
                 />
-                <button
-                  type="button"
-                  onClick={() => handleTestAlert('discord')}
-                  disabled={(!discordWebhookUrl && !configuredSecrets.discordWebhookUrl) || testingChannel === 'discord'}
-                  className="px-3 py-2 bg-surface-container-high hover:bg-surface-container-highest text-on-surface rounded text-xs shrink-0 disabled:opacity-40"
-                >
-                  Testar
-                </button>
-              </div>
-              <SecretStatus
-                configured={!!configuredSecrets.discordWebhookUrl}
-                onClear={() => clearSecret('discordWebhookUrl')}
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
-                Telegram (Bot Token e Chat ID)
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="password"
-                  placeholder={configuredSecrets.telegramBotToken ? 'Manter o token atual' : 'Bot Token'}
-                  value={telegramBotToken}
-                  onChange={(e) => setTelegramBotToken(e.target.value)}
-                  className="w-1/2 bg-surface-container-low border border-outline-variant rounded px-3 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
+                <SecretStatus
+                  configured={Boolean(configuredSecrets.flowRedisUrl)}
+                  onClear={() => void clearSecret('flowRedisUrl')}
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
+                  PostgreSQL URL (Consultas diretas nos nós)
+                </label>
                 <input
                   type="text"
-                  placeholder="Chat ID"
-                  value={telegramChatId}
-                  onChange={(e) => setTelegramChatId(e.target.value)}
-                  className="w-1/2 bg-surface-container-low border border-outline-variant rounded px-3 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
+                  placeholder={configuredSecrets.flowPostgresUrl ? 'Manter URL atual' : 'postgres://user:senha@host:5432/db'}
+                  value={flowPostgresUrl}
+                  onChange={(e) => setFlowPostgresUrl(e.target.value)}
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-xs font-mono focus:outline-none focus:border-primary"
                 />
-                <button
-                  type="button"
-                  onClick={() => handleTestAlert('telegram')}
-                  disabled={
-                    (!telegramBotToken && !configuredSecrets.telegramBotToken) ||
-                    !telegramChatId ||
-                    testingChannel === 'telegram'
-                  }
-                  className="px-3 py-2 bg-surface-container-high hover:bg-surface-container-highest text-on-surface rounded text-xs shrink-0 disabled:opacity-40"
-                >
-                  Testar
-                </button>
+                <SecretStatus
+                  configured={Boolean(configuredSecrets.flowPostgresUrl)}
+                  onClear={() => void clearSecret('flowPostgresUrl')}
+                />
               </div>
             </div>
-          </div>
 
-          {/* Trigger Preferences */}
-          <div className="pt-3 border-t border-outline-variant space-y-3">
-            <h4 className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Gatilhos de Notificação</h4>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-              <label className="flex items-center gap-2 cursor-pointer bg-surface-container-low p-2.5 rounded border border-outline-variant hover:border-outline-variant transition-colors">
-                <input
-                  type="checkbox"
-                  checked={notifyOnDeploySuccess}
-                  onChange={(e) => setNotifyOnDeploySuccess(e.target.checked)}
-                  className="rounded text-primary focus:ring-0"
-                />
-                <CheckCircle2 className="w-3.5 h-3.5 text-ok shrink-0" />
-                <span className="text-on-surface-variant">Deploy Sucesso</span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer bg-surface-container-low p-2.5 rounded border border-outline-variant hover:border-outline-variant transition-colors">
-                <input
-                  type="checkbox"
-                  checked={notifyOnDeployFail}
-                  onChange={(e) => setNotifyOnDeployFail(e.target.checked)}
-                  className="rounded text-primary focus:ring-0"
-                />
-                <AlertTriangle className="w-3.5 h-3.5 text-crit shrink-0" />
-                <span className="text-on-surface-variant">Deploy Falhou</span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer bg-surface-container-low p-2.5 rounded border border-outline-variant hover:border-outline-variant transition-colors">
-                <input
-                  type="checkbox"
-                  checked={notifyOnHighResource}
-                  onChange={(e) => setNotifyOnHighResource(e.target.checked)}
-                  className="rounded text-primary focus:ring-0"
-                />
-                <Activity className="w-3.5 h-3.5 text-warn shrink-0" />
-                <span className="text-on-surface-variant">CPU / RAM &gt; 90%</span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer bg-surface-container-low p-2.5 rounded border border-outline-variant hover:border-outline-variant transition-colors">
-                <input
-                  type="checkbox"
-                  checked={notifyOnBackup}
-                  onChange={(e) => setNotifyOnBackup(e.target.checked)}
-                  className="rounded text-primary focus:ring-0"
-                />
-                <Database className="w-3.5 h-3.5 text-primary shrink-0" />
-                <span className="text-on-surface-variant">Backup Banco</span>
-              </label>
-            </div>
-          </div>
-
-          {/* Threshold Sliders */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3 border-t border-outline-variant">
-            <div>
-              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
-                Limite Alerta CPU: <span className="text-primary font-bold">{cpuThreshold}%</span>
-              </label>
-              <input
-                type="range"
-                min="50"
-                max="98"
-                value={cpuThreshold}
-                onChange={(e) => setCpuThreshold(parseInt(e.target.value))}
-                className="w-full accent-[#4d8eff]"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
-                Limite Alerta Memória: <span className="text-ok font-bold">{memThreshold}%</span>
-              </label>
-              <input
-                type="range"
-                min="50"
-                max="98"
-                value={memThreshold}
-                onChange={(e) => setMemThreshold(parseInt(e.target.value))}
-                className="w-full accent-emerald-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-on-surface-variant mb-1">
-                Limite Alerta Disco: <span className="text-warn font-bold">{diskThreshold}%</span>
-              </label>
-              <input
-                type="range"
-                min="50"
-                max="98"
-                value={diskThreshold}
-                onChange={(e) => setDiskThreshold(parseInt(e.target.value))}
-                className="w-full accent-amber-500"
-              />
-            </div>
-          </div>
-
-              {!isAdmin && (
-            <div className="flex items-start gap-3 p-4 rounded-lg border border-outline-variant bg-surface-container-low">
-              <Shield className="w-5 h-5 text-on-surface-variant shrink-0 mt-0.5" />
-              <p className="text-xs text-on-surface-variant">
-                Você está vendo estas configurações em modo leitura. Alterá-las exige o perfil{' '}
-                <span className="font-mono text-on-surface">admin</span>.
-              </p>
-            </div>
-          )}
-
-          {/* Save Button */}
-          <div className="flex items-center justify-between pt-3">
-            {savedSuccess ? (
-              <span className="text-ok text-xs font-semibold flex items-center gap-1">
-                <Check className="w-4 h-4" /> Configurações salvas com sucesso!
-              </span>
-            ) : <span></span>}
-
-            <button
-              type="submit"
-              disabled={saving || !isAdmin}
-              title={isAdmin ? undefined : 'Somente administradores podem alterar as configurações do painel.'}
-              className="flex items-center gap-2 px-6 py-2.5 rounded bg-primary-container hover:bg-primary text-white font-semibold text-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Save className="w-4 h-4" />
-              {saving ? 'Salvando...' : 'Salvar Alterações'}
-            </button>
+            {renderSaveFooter()}
           </div>
         </div>
-      </form>
+      )}
 
-      <SecuritySection
-        currentUser={currentUser}
-        onUserUpdate={(user) => onUserUpdate?.(user)}
-      />
-
-      {/* Change own password: available to every role, including viewers. */}
-      <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded bg-sky-500/10 text-sky-400">
-            <Lock className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="font-bold text-white text-base">Minha Senha</h3>
-            <p className="text-xs text-on-surface-variant">
-              Conectado como <span className="text-on-surface font-semibold">{currentUser?.username || '-'}</span>
-              {currentUser?.role && (
-                <span className="ml-1.5 text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold bg-surface-container-high text-on-surface-variant">
-                  {currentUser.role.toUpperCase()}
-                </span>
-              )}
-            </p>
-          </div>
-        </div>
-
-        <form onSubmit={handleChangeOwnPassword} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-          <div>
-            <label className="block text-xs font-semibold text-on-surface-variant mb-1">Senha atual</label>
-            <input
-              type="password"
-              required
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-sky-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-on-surface-variant mb-1">Nova senha</label>
-            <input
-              type="password"
-              required
-              minLength={12}
-              placeholder="Mínimo 12 caracteres"
-              value={newOwnPassword}
-              onChange={(e) => setNewOwnPassword(e.target.value)}
-              className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-sky-500"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={changingPassword}
-            className="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded text-xs font-semibold"
-          >
-            {changingPassword ? 'Alterando...' : 'Alterar senha'}
-          </button>
-        </form>
-      </div>
-
-      {/* Team / Multi-User Management Section */}
-      <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded bg-purple-500/10 text-purple-400">
-              <Users className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-bold text-white text-base">Equipe & Controle de Permissões</h3>
-              <p className="text-xs text-on-surface-variant">
-                Convide desenvolvedores e operadores com permissões granulares.
-              </p>
-            </div>
-          </div>
-
-          {isAdmin && (
-            <button
-              onClick={() => setShowAddUserModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs font-semibold transition-all"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              Adicionar Membro
-            </button>
-          )}
-        </div>
-
-        {teamError ? (
-          <div className="flex items-start gap-3 p-4 rounded-lg border border-outline-variant bg-surface-container-low">
-            <Shield className="w-5 h-5 text-on-surface-variant shrink-0 mt-0.5" />
-            <p className="text-xs text-on-surface-variant">{teamError}</p>
-          </div>
-        ) : (
-          <>
-            {/* What each role can do, so the choice is not a guess. */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {ROLE_LEGEND.map((r) => (
-                <div key={r.role} className={`p-3 rounded border ${r.className}`}>
-                  <p className="text-[10px] font-mono font-bold mb-1">{r.role}</p>
-                  <p className="text-[11px] text-on-surface-variant leading-snug">{r.text}</p>
-                </div>
-              ))}
+      {/* TAB 4: SEGURANÇA & SENHA */}
+      {activeTab === 'security' && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* Minha Senha */}
+          <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
+            <div className="flex items-center gap-3 border-b border-outline-variant pb-4">
+              <div className="p-2 rounded bg-primary/10 text-primary">
+                <Lock className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base">Alteração de Senha do Usuário</h3>
+                <p className="text-xs text-on-surface-variant">
+                  Conectado como <span className="text-white font-semibold">{currentUser?.username || '-'}</span>
+                  {currentUser?.role && (
+                    <span className="ml-2 text-[10px] px-2 py-0.5 rounded font-mono font-semibold bg-surface-container-high text-primary">
+                      {currentUser.role.toUpperCase()}
+                    </span>
+                  )}
+                </p>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {teamUsers.map((user) => {
-                const isSelf = user.id === currentUser?.id;
-                const adminCount = teamUsers.filter((u) => u.role === 'admin').length;
-                // Mirrors the server rules, so the button is absent rather than
-                // present and guaranteed to fail.
-                const isLastAdmin = user.role === 'admin' && adminCount <= 1;
-                const canRemove = isAdmin && !isSelf && !isLastAdmin;
+            <form onSubmit={handleChangeOwnPassword} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end pt-1">
+              <div>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Senha Atual</label>
+                <input
+                  type="password"
+                  required
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Nova Senha</label>
+                <input
+                  type="password"
+                  required
+                  minLength={12}
+                  placeholder="Mínimo 12 caracteres"
+                  value={newOwnPassword}
+                  onChange={(e) => setNewOwnPassword(e.target.value)}
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary font-mono"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={changingPassword}
+                className="px-5 py-2.5 bg-primary-container hover:bg-primary disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition-all active:scale-95"
+              >
+                {changingPassword ? 'Alterando senha…' : 'Atualizar Minha Senha'}
+              </button>
+            </form>
+          </div>
 
-                return (
-                  <div
-                    key={user.id}
-                    className="p-4 rounded-lg bg-surface-container-lowest border border-outline-variant flex items-center justify-between gap-2"
-                  >
-                    <div className="space-y-0.5 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-white text-sm truncate">{user.username}</span>
-                        {isSelf && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/20 text-tertiary font-semibold">
-                            você
-                          </span>
-                        )}
-                        <span
-                          className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold ${
-                            user.role === 'admin'
-                              ? 'bg-primary/20 text-primary'
-                              : user.role === 'developer'
-                              ? 'bg-ok/15 text-ok'
-                              : 'bg-surface-container-high text-on-surface-variant'
-                          }`}
-                        >
-                          {user.role.toUpperCase()}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-on-surface-variant truncate">{user.email || 'Sem e-mail cadastrado'}</p>
-                      {isLastAdmin && (
-                        <p className="text-[10px] text-warn/80">Único administrador — não pode ser removido.</p>
-                      )}
-                    </div>
-
-                    {canRemove && (
-                      <button
-                        onClick={() => handleDeleteUser(user.id, user.username)}
-                        className="p-1.5 text-on-surface-variant/70 hover:text-crit rounded-lg hover:bg-surface-container-low transition-colors shrink-0"
-                        title="Remover usuário da equipe"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Migration & Backup Section: admin only, mirrors the server rule. */}
-      {isAdmin && (
-      <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-primary" />
-          <h3 className="font-bold text-white text-base">Migração & Backup Global do Painel</h3>
-        </div>
-        <p className="text-xs text-on-surface-variant">
-          Exporte todo o estado do AegisPanel (Bancos, Aplicações, Cron Jobs, Domínios e Configurações) em um único arquivo JSON para restauração instantânea.
-        </p>
-
-        <div className="flex flex-wrap items-center gap-3 pt-2">
-          <button
-            onClick={handleExportState}
-            className="flex items-center gap-2 px-4 py-2.5 rounded bg-surface-container-high hover:bg-surface-container-highest text-primary text-xs font-semibold border border-primary/30 transition-all active:scale-95"
-          >
-            <Download className="w-4 h-4" />
-            <span>Exportar Backup Completo (.JSON)</span>
-          </button>
-
-          <input
-            type="file"
-            ref={importFileRef}
-            onChange={handleImportFile}
-            accept=".json"
-            className="hidden"
+          {/* 2FA and Session Security Section */}
+          <SecuritySection
+            currentUser={currentUser}
+            onUserUpdate={(user) => onUserUpdate?.(user)}
           />
-
-          <button
-            onClick={() => importFileRef.current?.click()}
-            disabled={importing}
-            className="flex items-center gap-2 px-4 py-2.5 rounded bg-surface-container-high hover:bg-surface-container-highest text-ok text-xs font-semibold border border-ok/30 transition-all active:scale-95 disabled:opacity-50"
-          >
-            <Upload className="w-4 h-4" />
-            <span>{importing ? 'Importando...' : 'Restaurar / Importar Backup'}</span>
-          </button>
         </div>
-      </div>
       )}
 
-      {isAdmin && (
-      <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
-        <div className="flex items-center gap-2">
-          <Activity className="w-5 h-5 text-ok" />
-          <h3 className="font-bold text-white text-base">Autogestão do Painel</h3>
-        </div>
-        <p className="text-xs text-on-surface-variant">
-          Logs allowlisted da stack (backend, frontend, caddy, nginx) e self-update via Docker Compose.
-          Quando o GitHub está à frente, o botão Atualizar também aparece no topo do painel, como numa IDE.
-          O compose sobe num contêiner irmão para o backend não se matar no meio (isso gerava 502).
-          Bloqueado em LOCAL_MODE.
-        </p>
+      {/* TAB 5: EQUIPE & ACESSOS */}
+      {activeTab === 'team' && (
+        <div className="space-y-6 animate-fadeIn">
+          <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-outline-variant pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded bg-primary/10 text-primary">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base flex items-center gap-2">
+                    <span>Equipe & Controle de Permissões</span>
+                    <Badge tone="neutral">{teamUsers.length} membros</Badge>
+                  </h3>
+                  <p className="text-xs text-on-surface-variant">
+                    Controle os usuários que possuem acesso ao painel com níveis de privilégio bem definidos.
+                  </p>
+                </div>
+              </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <select
-            value={panelLogTarget}
-            onChange={(e) => setPanelLogTarget(e.target.value)}
-            className="bg-surface-container-low border border-outline-variant rounded px-3 py-2 text-xs text-white"
-          >
-            <option value="aegis-backend">aegis-backend</option>
-            <option value="aegis-frontend">aegis-frontend</option>
-            <option value="aegis-caddy">aegis-caddy</option>
-            <option value="aegis-nginx">aegis-nginx</option>
-          </select>
-          <button
-            onClick={handleLoadPanelLogs}
-            disabled={loadingPanelLogs}
-            className="px-4 py-2 rounded bg-surface-container-high text-xs font-semibold text-on-surface border border-outline-variant disabled:opacity-50"
-          >
-            {loadingPanelLogs ? 'Carregando…' : 'Ver logs'}
-          </button>
-          <button
-            onClick={handleSelfUpdate}
-            disabled={selfUpdating}
-            className="px-4 py-2 rounded bg-primary-container hover:bg-primary text-white text-xs font-semibold disabled:opacity-50"
-          >
-            {selfUpdating ? 'Atualizando…' : 'Self-update da stack'}
-          </button>
-        </div>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setShowAddUserModal(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-primary-container hover:bg-primary text-white rounded-lg text-xs font-semibold transition-all shadow-sm active:scale-95"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Adicionar Membro</span>
+                </button>
+              )}
+            </div>
 
-        {selfUpdateOutput && (
-          <pre className="max-h-64 overflow-auto bg-surface-container-lowest border border-outline-variant rounded p-3 text-[11px] font-mono text-ok whitespace-pre-wrap">
-            {selfUpdateOutput}
-          </pre>
-        )}
-        {panelLogs && (
-          <pre className="max-h-64 overflow-auto bg-surface-container-lowest border border-outline-variant rounded p-3 text-[11px] font-mono text-ok whitespace-pre-wrap">
-            {panelLogs}
-          </pre>
-        )}
-      </div>
-      )}
-
-      {/* VPS 1-Click Installer Script Box */}
-      <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-ok" />
-            <h3 className="font-bold text-white text-base">Script Oficial de Instalação em VPS Linux</h3>
-          </div>
-          <button
-            onClick={copyInstallScript}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-medium border border-outline-variant transition-colors"
-          >
-            {copiedScript ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-ok" />
-                <span className="text-ok">Copiado</span>
-              </>
+            {teamError ? (
+              <div className="flex items-start gap-3 p-4 rounded-lg border border-outline-variant bg-surface-container-low">
+                <Shield className="w-5 h-5 text-on-surface-variant shrink-0 mt-0.5" />
+                <p className="text-xs text-on-surface-variant">{teamError}</p>
+              </div>
             ) : (
               <>
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copiar Comando</span>
+                {/* Role Legend */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {ROLE_LEGEND.map((r) => (
+                    <div key={r.role} className="p-3.5 rounded-lg border border-outline-variant bg-surface-container-low space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="mono-label text-white font-bold">{r.role}</span>
+                        <Badge tone={r.badgeTone} dot>{r.role}</Badge>
+                      </div>
+                      <p className="text-[11px] text-on-surface-variant/80 leading-relaxed">{r.text}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Team Members List */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
+                  {teamUsers.map((user) => {
+                    const isSelf = user.id === currentUser?.id;
+                    const adminCount = teamUsers.filter((u) => u.role === 'admin').length;
+                    const isLastAdmin = user.role === 'admin' && adminCount <= 1;
+                    const canRemove = isAdmin && !isSelf && !isLastAdmin;
+
+                    return (
+                      <div
+                        key={user.id}
+                        className="p-4 rounded-lg bg-surface-container-lowest border border-outline-variant flex items-start justify-between gap-3 hover:border-outline transition-colors"
+                      >
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-white text-sm truncate">{user.username}</span>
+                            {isSelf && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-semibold">
+                                você
+                              </span>
+                            )}
+                            <Badge
+                              tone={user.role === 'admin' ? 'info' : user.role === 'developer' ? 'ok' : 'neutral'}
+                              dot
+                            >
+                              {user.role.toUpperCase()}
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-on-surface-variant truncate font-mono">
+                            {user.email || 'Sem e-mail cadastrado'}
+                          </p>
+                          {isLastAdmin && (
+                            <p className="text-[10px] text-warn font-semibold">Único administrador (protegido)</p>
+                          )}
+                        </div>
+
+                        {canRemove && (
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteUser(user.id, user.username)}
+                            className="p-1.5 text-on-surface-variant/70 hover:text-crit rounded-lg hover:bg-surface-container transition-colors shrink-0 cursor-pointer"
+                            title="Remover usuário da equipe"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </>
             )}
-          </button>
+          </div>
         </div>
-        <div className="bg-surface-container-lowest p-4 rounded border border-outline-variant font-mono text-xs text-ok select-all">
-          curl -fsSL https://raw.githubusercontent.com/WendelDev0/aegispanel/main/install.sh | bash
+      )}
+
+      {/* TAB 6: MANUTENÇÃO & LOGS (ADMIN ONLY) */}
+      {activeTab === 'system' && isAdmin && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* Backup & Migration */}
+          <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
+            <div className="flex items-center gap-3 border-b border-outline-variant pb-4">
+              <div className="p-2 rounded bg-primary/10 text-primary">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base">Migração & Backup Global do Painel</h3>
+                <p className="text-xs text-on-surface-variant">
+                  Exporte todo o estado do painel (Aplicações, Bancos, Cron, Domínios e Configurações) em um único JSON.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => void handleExportState()}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-white text-xs font-semibold border border-outline-variant transition-all active:scale-95"
+              >
+                <Download className="w-4 h-4 text-primary" />
+                <span>Exportar Backup Completo (.JSON)</span>
+              </button>
+
+              <input
+                type="file"
+                ref={importFileRef}
+                onChange={(e) => void handleImportFile(e)}
+                accept=".json"
+                className="hidden"
+              />
+
+              <button
+                type="button"
+                onClick={() => importFileRef.current?.click()}
+                disabled={importing}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-white text-xs font-semibold border border-outline-variant transition-all active:scale-95 disabled:opacity-50"
+              >
+                <Upload className="w-4 h-4 text-ok" />
+                <span>{importing ? 'Processando importação…' : 'Restaurar Backup do Painel'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Autogestão & Logs da Stack */}
+          <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
+            <div className="flex items-center gap-3 border-b border-outline-variant pb-4">
+              <div className="p-2 rounded bg-ok/10 text-ok">
+                <Activity className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base">Autogestão & Logs da Stack</h3>
+                <p className="text-xs text-on-surface-variant">
+                  Diagnóstico interno dos contêineres do painel (backend, frontend, caddy, nginx) e self-update via compose.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <select
+                value={panelLogTarget}
+                onChange={(e) => setPanelLogTarget(e.target.value)}
+                className="bg-surface-container-low border border-outline-variant rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-primary"
+              >
+                <option value="aegis-backend">aegis-backend (Node.js API)</option>
+                <option value="aegis-frontend">aegis-frontend (Nginx UI)</option>
+                <option value="aegis-caddy">aegis-caddy (Reverse Proxy)</option>
+                <option value="aegis-nginx">aegis-nginx (Ingress)</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={() => void handleLoadPanelLogs()}
+                disabled={loadingPanelLogs}
+                className="px-4 py-2 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-xs font-semibold text-white border border-outline-variant disabled:opacity-50 transition-colors"
+              >
+                {loadingPanelLogs ? 'Carregando logs…' : 'Ver Logs'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void handleSelfUpdate()}
+                disabled={selfUpdating}
+                className="px-4 py-2 rounded-lg bg-primary-container hover:bg-primary text-white text-xs font-semibold disabled:opacity-50 transition-colors shadow-sm"
+              >
+                {selfUpdating ? 'Atualizando stack…' : 'Self-Update da Stack'}
+              </button>
+            </div>
+
+            {selfUpdateOutput && (
+              <pre className="max-h-64 overflow-auto bg-surface-container-lowest border border-outline-variant rounded-lg p-3 text-[11px] font-mono text-ok whitespace-pre-wrap">
+                {selfUpdateOutput}
+              </pre>
+            )}
+
+            {panelLogs && (
+              <pre className="max-h-64 overflow-auto bg-surface-container-lowest border border-outline-variant rounded-lg p-3 text-[11px] font-mono text-ok whitespace-pre-wrap">
+                {panelLogs}
+              </pre>
+            )}
+          </div>
+
+          {/* State History and Audit Sections */}
+          <StateHistorySection />
+          <AuditSection />
         </div>
-      </div>
+      )}
 
       {/* Add Team User Modal */}
       {showAddUserModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-md overflow-hidden p-6 space-y-5">
-            <h3 className="font-bold text-white text-lg flex items-center gap-2">
-              <UserPlus className="w-5 h-5 text-purple-400" />
-              Novo Membro da Equipe
-            </h3>
+          <div className="bg-surface-container rounded-lg border border-outline-variant w-full max-w-md overflow-hidden p-6 space-y-5 shadow-2xl animate-scaleIn">
+            <div className="flex items-center justify-between border-b border-outline-variant pb-3">
+              <h3 className="font-bold text-white text-base flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-primary" />
+                Novo Membro da Equipe
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowAddUserModal(false)}
+                className="text-on-surface-variant hover:text-white text-sm"
+              >
+                ✕
+              </button>
+            </div>
 
             <form onSubmit={handleAddUser} className="space-y-4">
               <div>
@@ -1583,10 +1765,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
                 <input
                   type="text"
                   required
-                  placeholder="ex: dev_selva"
+                  placeholder="ex: dev_operador"
                   value={newUsername}
                   onChange={(e) => setNewUsername(e.target.value)}
-                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary"
                 />
               </div>
 
@@ -1599,7 +1781,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
                   placeholder="Mínimo 12 caracteres"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary font-mono"
                 />
               </div>
 
@@ -1607,34 +1789,33 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
                 <label className="block text-xs font-semibold text-on-surface-variant mb-1">E-mail (Opcional)</label>
                 <input
                   type="email"
-                  placeholder="voce@seudominio.com"
+                  placeholder="operador@seudominio.com"
                   value={newEmail}
                   onChange={(e) => setNewEmail(e.target.value)}
-                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-on-surface-variant mb-1">Função / Permissão</label>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1">Nível de Acesso</label>
                 <select
                   value={newRole}
                   onChange={(e: any) => setNewRole(e.target.value)}
-                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-purple-500"
+                  className="w-full bg-surface-container-low border border-outline-variant rounded px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-primary"
                 >
-                  <option value="viewer">Visualizador — somente leitura</option>
-                  <option value="developer">Desenvolvedor — deploys, apps, bancos, arquivos</option>
-                  <option value="admin">Administrador — controle total do servidor</option>
+                  <option value="viewer">Visualizador — Somente leitura</option>
+                  <option value="developer">Desenvolvedor — Deploys, bancos e contêineres</option>
+                  <option value="admin">Administrador — Acesso total e terminal host</option>
                 </select>
                 {newRole === 'admin' && (
-                  <p className="text-[11px] text-warn/90 mt-1.5 flex items-start gap-1.5">
+                  <p className="text-[11px] text-warn mt-1.5 flex items-start gap-1.5">
                     <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
-                    Administradores abrem terminal no host, executam comandos e gerenciam a equipe. Na prática,
-                    é acesso root ao servidor.
+                    Administradores possuem controle total sobre a VPS, incluindo terminal root no host.
                   </p>
                 )}
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex justify-end gap-2 pt-3 border-t border-outline-variant">
                 <button
                   type="button"
                   onClick={() => setShowAddUserModal(false)}
@@ -1645,18 +1826,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ currentUser, onUserU
                 <button
                   type="submit"
                   disabled={addingUser}
-                  className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
+                  className="px-5 py-2.5 bg-primary-container hover:bg-primary text-white rounded-lg text-xs font-semibold transition-all active:scale-95 disabled:opacity-50"
                 >
-                  {addingUser ? 'Criando...' : 'Salvar Membro'}
+                  {addingUser ? 'Criando usuário…' : 'Salvar Membro'}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
-
-      {isAdmin && <StateHistorySection />}
-      {isAdmin && <AuditSection />}
     </div>
   );
 };
