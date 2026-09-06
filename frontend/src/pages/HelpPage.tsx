@@ -9,146 +9,104 @@ import {
   Code2,
   FileCode,
   CheckCircle2,
-  AlertTriangle,
   Server,
-  ArrowRight,
   ShieldCheck,
   Cpu,
-  RefreshCw
+  Layers,
+  Package,
 } from 'lucide-react';
+import { Panel, SectionHeader } from '../components/ui.js';
+import {
+  DEFAULT_HELP_STACK_ID,
+  findHelpStack,
+  stacksForFamily,
+  type HelpFamily,
+} from './helpStacks.js';
+
+const FAMILY_TABS: { id: HelpFamily; label: string; hint: string }[] = [
+  { id: 'node', label: 'Node / frontend', hint: 'Vercel, Next, Vite, Express' },
+  { id: 'python', label: 'Python', hint: 'Flask, FastAPI, Django' },
+];
+
+const STACK_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  universal: Sparkles,
+  nextjs: Zap,
+  vite: Code2,
+  nodeapi: Server,
+  python: Package,
+  fastapi: Zap,
+  django: Layers,
+  flask: FileCode,
+};
 
 export const HelpPage: React.FC = () => {
-  const [selectedStack, setSelectedStack] = useState<string>('universal');
+  const [selectedStack, setSelectedStack] = useState(DEFAULT_HELP_STACK_ID);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
-  const [copiedCustom, setCopiedCustom] = useState(false);
 
-  const stackPrompts: Record<string, { title: string; desc: string; prompt: string }> = {
-    universal: {
-      title: 'Prompt Universal (Adaptar qualquer projeto Vercel para AegisPanel)',
-      desc: 'Use este prompt em qualquer IA (ChatGPT, Claude, Cursor, v0) para converter seu projeto feito para a Vercel em um projeto pronto para deploy conteinerizado no AegisPanel.',
-      prompt: `Estou hospedando meu projeto no painel AegisPanel (uma plataforma Cloud PaaS que roda em VPS Linux com Docker e Caddy).
-A maioria dos meus projetos foi inicialmente desenvolvida para a Vercel, mas agora preciso que você adapte e prepare todo o código para rodar no AegisPanel sem nenhum erro de build ou deploy.
+  const current = findHelpStack(selectedStack);
+  const family = current.family;
+  const familyStacks = stacksForFamily(family);
 
-Por favor, faça as seguintes verificações e ajustes necessários no meu código:
-
-1. SCRIPTS NO PACKAGE.JSON:
-   - Certifique-se de que os scripts "build" e "start" existem e funcionam corretamente.
-   - O script "start" deve iniciar o servidor de produção (ex: "next start", "node dist/index.js", etc.).
-   - Se for uma SPA (Vite/React), certifique-se de que "build" gera a pasta "dist".
-
-2. HOST E PORTA (BINDING):
-   - Certifique-se de que o servidor escuta no host '0.0.0.0' (e NÃO apenas em 'localhost' ou '127.0.0.1').
-   - Use a porta fornecida pela variável de ambiente: \`process.env.PORT || 3000\`.
-
-3. DEPENDÊNCIAS E COMPATIBILIDADE:
-   - Mova ferramentas de compilação essenciais (como typescript, vite, tailwindcss, etc.) para "dependencies" ou garanta que "devDependencies" sejam instaladas no build.
-   - Substitua quaisquer dependências ou adaptadores exclusivos da Vercel Edge/Serverless por equivalentes universais padrão Node.js.
-
-4. VARIÁVEIS DE AMBIENTE:
-   - Liste quais variáveis de ambiente (.env) meu projeto precisa para funcionar em produção.
-
-Revise meus arquivos de configuração e me entregue o código pronto para eu commitar no Git e fazer o deploy no AegisPanel!`
-    },
-    nextjs: {
-      title: 'Next.js (App Router & Pages Router)',
-      desc: 'Otimizações essenciais para Next.js rodar com alta performance e sem travas no AegisPanel.',
-      prompt: `Estou hospedando minha aplicação Next.js no AegisPanel (VPS Docker PaaS).
-Por favor, prepare meu projeto Next.js para rodar perfeitamente fora da Vercel:
-
-1. NEXT.CONFIG.JS:
-   - Adicione \`output: 'standalone'\` no \`next.config.js\` (ou \`next.config.mjs\`) para builds ultraleves.
-   - Certifique-se de que não há dependências de Vercel Serverless Functions proprietárias.
-
-2. SCRIPTS NO PACKAGE.JSON:
-   - "scripts": {
-       "build": "next build",
-       "start": "next start -H 0.0.0.0 -p \${PORT:-3000}"
-     }
-
-3. VARIÁVEIS DE AMBIENTE:
-   - Variáveis públicas devem iniciar com \`NEXT_PUBLIC_\`.
-   - Liste todas as variáveis necessárias para produção.
-
-Me entregue as alterações prontas para que o deploy no AegisPanel suba de primeira!`
-    },
-    vite: {
-      title: 'Vite / React / Vue / Svelte (SPA)',
-      desc: 'Garante que o build gere os assets corretos e rotas do React Router funcionem sem erro 404.',
-      prompt: `Estou hospedando meu frontend SPA (Vite/React) no AegisPanel.
-O AegisPanel compila o projeto com "npm run build" e serve a pasta "dist".
-
-Por favor, faça as seguintes verificações:
-1. VITE.CONFIG:
-   - Certifique-se de que \`base: '/'\` está configurado para rotas absolutas.
-   - Verifique se não há variáveis de ambiente secretas expostas no build (use \`VITE_\` para as públicas).
-
-2. PACKAGE.JSON:
-   - Verifique se "build" executa "vite build" ou "tsc && vite build".
-   - Verifique se todas as bibliotecas usadas nos componentes estão presentes nas dependências.
-
-3. ROTAS:
-   - Se uso react-router-dom, garanta que não há caminhos relativos quebrados.
-
-Entregue o código ajustado para deploy imediato no AegisPanel!`
-    },
-    nodeapi: {
-      title: 'Node.js / Express / Fastify / NestJS API',
-      desc: 'Ajuste de portas dinâmicas, host 0.0.0.0 e tratamento de encerramento seguro.',
-      prompt: `Estou hospedando minha API Backend (Node.js) no AegisPanel.
-Por favor, revise o código do servidor para garantir que ele rode no Docker:
-
-1. BINDING DO SERVIDOR:
-   - O servidor DEVE escutar em \`0.0.0.0\` (ex: \`app.listen(PORT, '0.0.0.0', ...)\` ou \`fastify.listen({ port: PORT, host: '0.0.0.0' })\`).
-   - A porta deve ser dinâmica: \`const PORT = process.env.PORT || 3000;\`.
-
-2. SCRIPT DE START:
-   - Se o projeto usa TypeScript, garanta que o script "build" compila para "dist" e o "start" executa "node dist/index.js" (ou "node server.js").
-
-3. BANCO DE DADOS:
-   - Suporte a conexões via variável \`DATABASE_URL\` para os bancos PostgreSQL/MySQL criados no AegisPanel.
-
-Me forneça as correções necessárias para fazer o commit e deploy!`
-    }
+  const selectFamily = (next: HelpFamily) => {
+    if (next === family) return;
+    const first = stacksForFamily(next)[0];
+    if (first) setSelectedStack(first.id);
   };
 
-  const copyToClipboard = (text: string, isCustom = false) => {
-    navigator.clipboard.writeText(text);
-    if (isCustom) {
-      setCopiedCustom(true);
-      setTimeout(() => setCopiedCustom(false), 2000);
-    } else {
-      setCopiedPrompt(true);
-      setTimeout(() => setCopiedPrompt(false), 2000);
-    }
+  const copyPrompt = () => {
+    void navigator.clipboard.writeText(current.prompt);
+    setCopiedPrompt(true);
+    setTimeout(() => setCopiedPrompt(false), 2000);
   };
 
   return (
     <div className="space-y-8 max-w-5xl">
-      {/* Header */}
       <div>
         <h2 className="text-2xl font-bold text-white flex items-center gap-2.5">
           <HelpCircle className="w-6 h-6 text-primary" />
-          Central de Ajuda & Assistente de Prompts para IAs
+          Central de Ajuda
         </h2>
         <p className="text-sm text-on-surface-variant mt-1">
-          Copie os prompts prontos e envie para a sua IA (ChatGPT, Claude, Cursor, v0) preparar seu código e garantir deploys 100% perfeitos no AegisPanel.
+          O AegisPanel hospeda Node, SPAs e Python (Flask, FastAPI, Django) no mesmo fluxo de Git + Docker.
+          Copie um prompt para a sua IA ou siga o checklist do runtime.
         </p>
       </div>
 
-      {/* Stack Selector Pills */}
-      <div className="flex flex-wrap gap-2.5">
-        {[
-          { id: 'universal', label: 'Universal (Vercel ➔ Aegis)', icon: Sparkles },
-          { id: 'nextjs', label: 'Next.js', icon: Zap },
-          { id: 'vite', label: 'Vite / React SPA', icon: Code2 },
-          { id: 'nodeapi', label: 'Express / Nest / Node API', icon: Server },
-        ].map((tab) => {
-          const Icon = tab.icon;
-          const isSelected = selectedStack === tab.id;
+      <div className="flex flex-wrap gap-2">
+        {FAMILY_TABS.map((tab) => {
+          const selected = family === tab.id;
           return (
             <button
               key={tab.id}
-              onClick={() => setSelectedStack(tab.id)}
+              type="button"
+              aria-label={tab.label}
+              aria-pressed={selected}
+              onClick={() => selectFamily(tab.id)}
+              className={`px-4 py-2.5 rounded-lg text-xs font-semibold border transition-all text-left ${
+                selected
+                  ? 'bg-primary-container border-primary text-white'
+                  : 'bg-surface-container border-outline-variant text-on-surface-variant hover:bg-surface-container-high/80 hover:text-white'
+              }`}
+            >
+              <span className="block">{tab.label}</span>
+              <span className={`block text-[10px] font-medium mt-0.5 ${selected ? 'text-white/70' : 'text-on-surface-variant/80'}`}>
+                {tab.hint}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-wrap gap-2.5">
+        {familyStacks.map((stack) => {
+          const Icon = STACK_ICONS[stack.id] ?? FileCode;
+          const isSelected = selectedStack === stack.id;
+          return (
+            <button
+              key={stack.id}
+              type="button"
+              aria-pressed={isSelected}
+              onClick={() => setSelectedStack(stack.id)}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold border transition-all ${
                 isSelected
                   ? 'bg-primary-container border-primary text-white'
@@ -156,103 +114,162 @@ Me forneça as correções necessárias para fazer o commit e deploy!`
               }`}
             >
               <Icon className="w-4 h-4" />
-              <span>{tab.label}</span>
+              <span>{stack.label}</span>
             </button>
           );
         })}
       </div>
 
-      {/* Main Prompt Box */}
-      <div className="bg-surface-container/95 rounded-lg p-6 border border-primary/30 space-y-4">
+      <Panel className="p-6 border-primary/30 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h3 className="font-bold text-white text-base flex items-center gap-2">
-              <Bot className="w-5 h-5 text-primary" />
-              {stackPrompts[selectedStack]?.title}
-            </h3>
-            <p className="text-xs text-on-surface-variant mt-0.5">
-              {stackPrompts[selectedStack]?.desc}
-            </p>
-          </div>
-
+          <SectionHeader
+            icon={<Bot className="w-5 h-5" />}
+            title={current.title}
+            subtitle={current.desc}
+          />
           <button
-            onClick={() => copyToClipboard(stackPrompts[selectedStack]?.prompt)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded bg-primary-container hover:from-indigo-500 hover:to-emerald-500 text-white font-semibold text-xs transition-all active:scale-95 shrink-0"
+            type="button"
+            onClick={copyPrompt}
+            className="flex items-center gap-2 px-4 py-2.5 rounded bg-primary-container text-white font-semibold text-xs transition-all active:scale-95 shrink-0"
           >
             {copiedPrompt ? (
               <>
                 <Check className="w-4 h-4 text-white" />
-                <span>Prompt Copiado com Sucesso!</span>
+                <span>Prompt copiado com sucesso!</span>
               </>
             ) : (
               <>
                 <Copy className="w-4 h-4" />
-                <span>Copiar Prompt para Minha IA</span>
+                <span>Copiar prompt para minha IA</span>
               </>
             )}
           </button>
         </div>
+        <textarea
+          readOnly
+          rows={12}
+          aria-label={`Prompt ${current.label}`}
+          value={current.prompt}
+          className="w-full bg-surface-container-lowest/90 border border-outline-variant rounded-lg p-4 text-xs font-mono text-on-surface focus:outline-none select-all custom-scrollbar leading-relaxed"
+        />
+      </Panel>
 
-        {/* Prompt Content */}
-        <div className="relative">
-          <textarea
-            readOnly
-            rows={12}
-            value={stackPrompts[selectedStack]?.prompt}
-            className="w-full bg-surface-container-lowest/90 border border-outline-variant rounded-lg p-4 text-xs font-mono text-on-surface focus:outline-none select-all custom-scrollbar leading-relaxed"
-          />
-        </div>
-      </div>
-
-      {/* Checklist de Compatibilidade */}
-      <div className="bg-surface-container rounded-lg p-6 border border-outline-variant space-y-4">
-        <h3 className="font-bold text-white text-base flex items-center gap-2">
-          <ShieldCheck className="w-5 h-5 text-ok" />
-          Checklist Rápido: Vercel vs AegisPanel
-        </h3>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-          <div className="p-4 rounded-lg bg-surface-container-lowest border border-outline-variant space-y-2">
-            <div className="flex items-center gap-2 text-primary font-bold text-sm">
-              <Cpu className="w-4 h-4" />
-              <span>1. Host & Portas</span>
-            </div>
-            <p className="text-on-surface-variant">
-              Na Vercel, a porta é gerenciada automaticamente por funções serverless. No AegisPanel, seu servidor Node/API deve escutar em <strong className="text-ok font-mono">0.0.0.0</strong> usando <strong className="text-primary font-mono">process.env.PORT</strong>.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-lg bg-surface-container-lowest border border-outline-variant space-y-2">
-            <div className="flex items-center gap-2 text-primary font-bold text-sm">
-              <FileCode className="w-4 h-4" />
-              <span>2. Scripts no Package.json</span>
-            </div>
-            <p className="text-on-surface-variant">
-              Certifique-se de que o <strong className="text-white font-mono">"scripts"</strong> do seu <strong className="text-white font-mono">package.json</strong> possui um comando <strong className="text-primary font-mono">"build"</strong> e um comando <strong className="text-ok font-mono">"start"</strong> claros.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-lg bg-surface-container-lowest border border-outline-variant space-y-2">
-            <div className="flex items-center gap-2 text-primary font-bold text-sm">
-              <Zap className="w-4 h-4" />
-              <span>3. Next.js Standalone</span>
-            </div>
-            <p className="text-on-surface-variant">
-              Para projetos Next.js, adicione <strong className="text-warn font-mono">output: 'standalone'</strong> no seu <strong className="text-white font-mono">next.config.js</strong> para compilação super rápida com menos consumo de RAM.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-lg bg-surface-container-lowest border border-outline-variant space-y-2">
-            <div className="flex items-center gap-2 text-primary font-bold text-sm">
-              <CheckCircle2 className="w-4 h-4" />
-              <span>4. SPAs (Vite / React)</span>
-            </div>
-            <p className="text-on-surface-variant">
-              Projetos Vite/React são detectados automaticamente pelo AegisPanel e servidos com alta velocidade através do servidor integrado com Healthcheck ativo.
-            </p>
-          </div>
-        </div>
-      </div>
+      {family === 'python' ? <PythonGuide /> : <NodeChecklist />}
     </div>
   );
 };
+
+const NodeChecklist: React.FC = () => (
+  <Panel className="p-6 space-y-4">
+    <SectionHeader
+      icon={<ShieldCheck className="w-5 h-5" />}
+      title="Checklist: Vercel vs AegisPanel"
+      subtitle="O que muda quando o app deixa de ser serverless e vira container."
+    />
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+      <GuideCard icon={Cpu} title="1. Host e portas">
+        Na Vercel a porta é da função serverless. No Aegis o servidor Node deve escutar em{' '}
+        <strong className="text-ok font-mono">0.0.0.0</strong> usando{' '}
+        <strong className="text-primary font-mono">process.env.PORT</strong>.
+      </GuideCard>
+      <GuideCard icon={FileCode} title="2. Scripts no package.json">
+        O <strong className="text-white font-mono">package.json</strong> precisa de{' '}
+        <strong className="text-primary font-mono">build</strong> e{' '}
+        <strong className="text-ok font-mono">start</strong> claros.
+      </GuideCard>
+      <GuideCard icon={Zap} title="3. Next.js standalone">
+        Adicione <strong className="text-warn font-mono">output: &apos;standalone&apos;</strong> no{' '}
+        <strong className="text-white font-mono">next.config</strong> para imagem menor e menos RAM.
+      </GuideCard>
+      <GuideCard icon={CheckCircle2} title="4. SPAs (Vite / React)">
+        Vite/React são detectados e servidos pela pasta <span className="font-mono">dist</span> com healthcheck.
+      </GuideCard>
+    </div>
+  </Panel>
+);
+
+const PythonGuide: React.FC = () => (
+  <div className="space-y-6">
+    <Panel className="p-6 space-y-4">
+      <SectionHeader
+        icon={<Package className="w-5 h-5" />}
+        title="Como o Aegis hospeda Python"
+        subtitle="O detector propõe. O aegis.toml decide. Você confirma no painel."
+      />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+        <GuideCard icon={FileCode} title="Detecção automática">
+          Reconhece <span className="font-mono text-white">requirements.txt</span>,{' '}
+          <span className="font-mono text-white">pyproject.toml</span>,{' '}
+          <span className="font-mono text-white">Pipfile</span>,{' '}
+          <span className="font-mono text-white">uv.lock</span> e arquivos{' '}
+          <span className="font-mono text-white">*.py</span>. Frameworks:{' '}
+          <strong className="text-white">Flask</strong>, <strong className="text-white">FastAPI</strong> e{' '}
+          <strong className="text-white">Django</strong>.
+        </GuideCard>
+        <GuideCard icon={Layers} title="Gerenciadores e versão">
+          Instala com <strong className="text-white">pip</strong>, <strong className="text-white">poetry</strong>,{' '}
+          <strong className="text-white">uv</strong> ou <strong className="text-white">pipenv</strong>. Python{' '}
+          <strong className="text-primary font-mono">3.10–3.13</strong> (padrão 3.12). Respeita{' '}
+          <span className="font-mono">requires-python</span> do pyproject.
+        </GuideCard>
+        <GuideCard icon={Cpu} title="Host, porta e start">
+          Sempre <strong className="text-ok font-mono">0.0.0.0</strong>. FastAPI/Django usam porta{' '}
+          <strong className="text-primary font-mono">8000</strong> (uvicorn / gunicorn). Flask costuma usar{' '}
+          <strong className="text-primary font-mono">5000</strong>. Inclua gunicorn ou uvicorn nas dependências.
+        </GuideCard>
+        <GuideCard icon={ShieldCheck} title="Release, worker e banco">
+          Django: <span className="font-mono text-white">migrate</span> no processo{' '}
+          <strong className="text-white">release</strong>, não no start. Celery/RQ sobe como worker da mesma
+          imagem. Bancos do painel entram por <span className="font-mono">DATABASE_URL</span>.
+        </GuideCard>
+      </div>
+    </Panel>
+
+    <Panel className="p-6 space-y-3">
+      <SectionHeader
+        icon={<CheckCircle2 className="w-5 h-5" />}
+        title="Checklist rápido Python"
+        subtitle="O que costuma quebrar o primeiro deploy."
+      />
+      <ul className="text-xs text-on-surface-variant space-y-2 leading-relaxed">
+        <li>
+          • O app escuta em <span className="font-mono text-ok">0.0.0.0</span> e lê{' '}
+          <span className="font-mono text-primary">PORT</span>.
+        </li>
+        <li>
+          • Há manifesto de dependências e o servidor de produção (gunicorn ou uvicorn) está listado nele.
+        </li>
+        <li>
+          • FastAPI exporta <span className="font-mono text-white">app</span> em{' '}
+          <span className="font-mono text-white">main.py</span> (healthcheck em <span className="font-mono">/docs</span>).
+        </li>
+        <li>
+          • Django: módulo WSGI correto (o padrão do detector é{' '}
+          <span className="font-mono text-white">core.wsgi:application</span>) e{' '}
+          <span className="font-mono">ALLOWED_HOSTS</span> do domínio.
+        </li>
+        <li>
+          • Migrações no release; start só sobe o HTTP. Worker Celery é processo extra, não um segundo app.
+        </li>
+        <li>
+          • Opcional: <span className="font-mono text-white">aegis.toml</span> na raiz para fixar runtime, start e
+          processos junto com o código.
+        </li>
+      </ul>
+    </Panel>
+  </div>
+);
+
+const GuideCard: React.FC<{
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  children: React.ReactNode;
+}> = ({ icon: Icon, title, children }) => (
+  <div className="p-4 rounded-lg bg-surface-container-lowest border border-outline-variant space-y-2">
+    <div className="flex items-center gap-2 text-primary font-bold text-sm">
+      <Icon className="w-4 h-4" />
+      <span>{title}</span>
+    </div>
+    <p className="text-on-surface-variant">{children}</p>
+  </div>
+);
