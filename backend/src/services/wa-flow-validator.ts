@@ -198,6 +198,31 @@ export function validateFlowGraph(nodes: WaFlowNode[], edges: WaFlowEdge[]): Val
       if (d.maxTokens && (d.maxTokens < 1 || d.maxTokens > 1024)) {
         errors.push({ nodeId: node.id, message: 'maxTokens do agente deve estar entre 1 e 1024.' });
       }
+
+      // A tool pointing at a block that was renamed or deleted fails only
+      // when a customer triggers it, and the model reports it as its own
+      // confusion rather than as a broken flow.
+      const seenTools = new Set<string>();
+      for (const tool of d.agentTools || []) {
+        const target = nodeMap.get(tool.nodeId);
+        if (!target) {
+          errors.push({ nodeId: node.id, message: `Ferramenta "${tool.name}" aponta para um bloco que não existe.` });
+          continue;
+        }
+        if (target.type !== 'http' && target.type !== 'sql') {
+          errors.push({
+            nodeId: node.id,
+            message: `Ferramenta "${tool.name}" só pode apontar para um bloco HTTP ou SQL, não ${target.type}.`,
+          });
+        }
+        if (!/^[a-zA-Z0-9_-]{1,48}$/.test(tool.name || '')) {
+          errors.push({ nodeId: node.id, message: `Nome de ferramenta inválido: "${tool.name}"` });
+        }
+        if (seenTools.has(tool.name)) {
+          errors.push({ nodeId: node.id, message: `Ferramenta duplicada: "${tool.name}"` });
+        }
+        seenTools.add(tool.name);
+      }
     }
 
     if (node.type === 'http') {
@@ -235,6 +260,41 @@ export function validateFlowGraph(nodes: WaFlowNode[], edges: WaFlowEdge[]): Val
       }
     }
 
+    if (node.type === 'send_media') {
+      if (!d.mediaUrl?.trim()) {
+        errors.push({ nodeId: node.id, message: 'Bloco de mídia exige a URL do arquivo.' });
+      } else if (!/\{\{/.test(d.mediaUrl)) {
+        // A URL built from a variable can only be checked at runtime.
+        try {
+          const parsed = new URL(d.mediaUrl.trim());
+          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            errors.push({ nodeId: node.id, message: 'URL da mídia deve usar http:// ou https://' });
+          }
+        } catch {
+          errors.push({ nodeId: node.id, message: `URL de mídia inválida: "${d.mediaUrl}"` });
+        }
+      }
+      if (d.mediaKind === 'document' && !d.mediaFileName?.trim()) {
+        errors.push({ nodeId: node.id, message: 'Documento precisa de um nome de arquivo para o cliente ver.' });
+      }
+    }
+
+    if (node.type === 'contact') {
+      const attrs = Array.isArray(d.contactAttrs) ? d.contactAttrs : [];
+      const tags = [...(d.addTags || []), ...(d.removeTags || [])];
+      if (attrs.length === 0 && tags.length === 0) {
+        errors.push({ nodeId: node.id, message: 'Bloco de contato precisa gravar um atributo ou uma etiqueta.' });
+      }
+      for (const attr of attrs) {
+        if (!/^[a-z_][a-z0-9_]{0,31}$/.test(String(attr?.key || ''))) {
+          errors.push({
+            nodeId: node.id,
+            message: `Atributo de contato inválido "${attr?.key}". Use letras minúsculas e _ (máx 32).`,
+          });
+        }
+      }
+    }
+
     if (node.type === 'delay') {
       const sec = Number(d.delaySeconds);
       if (Number.isFinite(sec) && (sec < 0 || sec > 10)) {
@@ -263,6 +323,41 @@ export function validateFlowGraph(nodes: WaFlowNode[], edges: WaFlowEdge[]): Val
           message: `Bloco "${node.id}" (${node.type}) não tem saída conectada e não encerra o fluxo (use "Encerrar" ou "Passe para um humano").`,
         });
       }
+    }
+  }
+
+  // 5. A cycle with no waiting node inside it spins until the step cap ends
+  // the turn, so the customer gets a burst of repeated messages and then
+  // silence. Only cycles that never pause are a defect; a menu looping back
+  // on itself is a perfectly ordinary flow.
+  for (const start of nodes) {
+    if (!reachable.has(start.id)) continue;
+    if (WAITING_TYPES.has(start.type)) continue;
+
+    const stack = [start.id];
+    const seen = new Set<string>();
+    let looped = false;
+
+    while (stack.length && !looped) {
+      const currId = stack.pop()!;
+      for (const edge of outgoingMap.get(currId) || []) {
+        if (edge.target === start.id) {
+          looped = true;
+          break;
+        }
+        const target = nodeMap.get(edge.target);
+        if (!target || seen.has(edge.target) || WAITING_TYPES.has(target.type)) continue;
+        seen.add(edge.target);
+        stack.push(edge.target);
+      }
+    }
+
+    if (looped) {
+      errors.push({
+        nodeId: start.id,
+        message: `Bloco "${start.id}" faz parte de um ciclo sem nenhuma pausa. Inclua um bloco que espere o cliente ("Espere a resposta", menu ou captura).`,
+      });
+      break;
     }
   }
 

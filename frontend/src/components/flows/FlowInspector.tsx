@@ -1,17 +1,36 @@
 import React from 'react';
 import { Plus, Trash2, HelpCircle } from 'lucide-react';
-import type { WaFlowNode, WaPanelEvent } from '../../types/index.js';
-import { BLOCK_META, EVENT_LABELS } from './flow-blocks.js';
+import type { WaAgentTool, WaFlowNode, WaPanelEvent } from '../../types/index.js';
+import { BLOCK_META, EVENT_LABELS, MEDIA_LABELS } from './flow-blocks.js';
 
 interface FlowInspectorProps {
   node: WaFlowNode | null;
+  /** Every block on the canvas, so an agent tool can point at one of them. */
+  nodes?: WaFlowNode[];
   onChange: (node: WaFlowNode) => void;
   onDelete: (id: string) => void;
 }
 
-const COMMON_VARS = ['nome', 'telefone_final', 'instancia', 'app', 'evento', 'ultima_mensagem', 'agora'];
+const COMMON_VARS = [
+  'nome',
+  'telefone_final',
+  'instancia',
+  'app',
+  'evento',
+  'ultima_mensagem',
+  'agora',
+  'midia_tipo',
+  'midia_transcricao',
+];
 
-export const FlowInspector: React.FC<FlowInspectorProps> = ({ node, onChange, onDelete }) => {
+function splitTags(value: string): string[] {
+  return value
+    .split(',')
+    .map((t) => t.trim().toLowerCase().replace(/[^a-z0-9_-]/g, ''))
+    .filter(Boolean);
+}
+
+export const FlowInspector: React.FC<FlowInspectorProps> = ({ node, nodes = [], onChange, onDelete }) => {
   if (!node) {
     return (
       <div className="p-4 text-xs text-on-surface-variant flex flex-col items-center justify-center h-full text-center">
@@ -24,6 +43,13 @@ export const FlowInspector: React.FC<FlowInspectorProps> = ({ node, onChange, on
 
   const meta = BLOCK_META[node.type] || BLOCK_META.send_text;
   const patch = (data: Partial<WaFlowNode['data']>) => onChange({ ...node, data: { ...node.data, ...data } });
+
+  const toolTargets = nodes.filter((n) => n.type === 'http' || n.type === 'sql');
+  const updateTool = (index: number, changes: Partial<WaAgentTool>) => {
+    const next = [...(node.data.agentTools || [])];
+    next[index] = { ...next[index], ...changes };
+    patch({ agentTools: next });
+  };
 
   const insertVar = (v: string) => {
     const current = node.data.text || '';
@@ -138,6 +164,61 @@ export const FlowInspector: React.FC<FlowInspectorProps> = ({ node, onChange, on
         </div>
       )}
 
+      {/* 3b. send_media */}
+      {node.type === 'send_media' && (
+        <div className="space-y-3">
+          <label className="block text-on-surface-variant">
+            Tipo de arquivo
+            <select
+              className="mt-1 w-full bg-surface-container-low border border-outline-variant rounded-lg px-2.5 py-1.5 text-white text-xs"
+              value={node.data.mediaKind || 'image'}
+              onChange={(e) => patch({ mediaKind: e.target.value as any })}
+            >
+              {Object.entries(MEDIA_LABELS).map(([key, label]) => (
+                <option key={key} value={key}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-on-surface-variant">
+            URL do arquivo
+            <input
+              className="mt-1 w-full bg-surface-container-low border border-outline-variant rounded-lg px-2.5 py-1.5 text-white text-xs font-mono"
+              placeholder="https://... ou {{url_do_boleto}}"
+              value={node.data.mediaUrl || ''}
+              onChange={(e) => patch({ mediaUrl: e.target.value })}
+            />
+          </label>
+          {node.data.mediaKind === 'document' && (
+            <label className="block text-on-surface-variant">
+              Nome do arquivo
+              <input
+                className="mt-1 w-full bg-surface-container-low border border-outline-variant rounded-lg px-2.5 py-1.5 text-white text-xs font-mono"
+                placeholder="boleto-outubro.pdf"
+                value={node.data.mediaFileName || ''}
+                onChange={(e) => patch({ mediaFileName: e.target.value })}
+              />
+            </label>
+          )}
+          {node.data.mediaKind !== 'audio' && (
+            <label className="block text-on-surface-variant">
+              Legenda (opcional)
+              <textarea
+                className="mt-1 w-full bg-surface-container-low border border-outline-variant rounded-lg p-2 text-white text-xs min-h-[60px]"
+                placeholder="Segue o seu comprovante, {{nome}}."
+                value={node.data.text || ''}
+                onChange={(e) => patch({ text: e.target.value })}
+              />
+            </label>
+          )}
+          <p className="text-[10px] text-on-surface-variant leading-relaxed">
+            O áudio sai como mensagem de voz. Diferente de botões nativos, mídia aparece em qualquer
+            WhatsApp — se a Evolution aceitar, o cliente vê.
+          </p>
+        </div>
+      )}
+
       {/* 4. menu */}
       {node.type === 'menu' && (
         <div className="space-y-3">
@@ -237,7 +318,9 @@ export const FlowInspector: React.FC<FlowInspectorProps> = ({ node, onChange, on
               onChange={(e) => patch({ saveLead: e.target.checked })}
               className="w-3.5 h-3.5 rounded text-primary focus:ring-0"
             />
-            <span className="text-on-surface-variant text-xs">Salvar como Lead (wa_leads)</span>
+            <span className="text-on-surface-variant text-xs">
+              Guardar no contato (sobrevive ao fim da conversa)
+            </span>
           </label>
         </div>
       )}
@@ -293,6 +376,82 @@ export const FlowInspector: React.FC<FlowInspectorProps> = ({ node, onChange, on
               />
             </label>
           )}
+        </div>
+      )}
+
+      {/* 6b. contact */}
+      {node.type === 'contact' && (
+        <div className="space-y-3">
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-on-surface-variant">Atributos</span>
+              <button
+                type="button"
+                onClick={() => patch({ contactAttrs: [...(node.data.contactAttrs || []), { key: '', value: '' }] })}
+                className="text-[10px] text-primary hover:underline flex items-center gap-1"
+              >
+                <Plus className="w-3 h-3" /> Adicionar
+              </button>
+            </div>
+            <div className="space-y-1.5">
+              {(node.data.contactAttrs || []).map((attr, index) => (
+                <div key={index} className="flex items-center gap-1.5">
+                  <input
+                    className="w-1/3 bg-surface-container-low border border-outline-variant rounded-lg px-2 py-1.5 text-white text-xs font-mono"
+                    placeholder="plano"
+                    value={attr.key}
+                    onChange={(e) => {
+                      const next = [...(node.data.contactAttrs || [])];
+                      next[index] = { ...attr, key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '') };
+                      patch({ contactAttrs: next });
+                    }}
+                  />
+                  <input
+                    className="flex-1 bg-surface-container-low border border-outline-variant rounded-lg px-2 py-1.5 text-white text-xs"
+                    placeholder="premium ou {{plano_escolhido}}"
+                    value={attr.value}
+                    onChange={(e) => {
+                      const next = [...(node.data.contactAttrs || [])];
+                      next[index] = { ...attr, value: e.target.value };
+                      patch({ contactAttrs: next });
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      patch({ contactAttrs: (node.data.contactAttrs || []).filter((_, i) => i !== index) })
+                    }
+                    className="p-1 rounded text-crit hover:bg-crit/10"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <label className="block text-on-surface-variant">
+            Adicionar etiquetas
+            <input
+              className="mt-1 w-full bg-surface-container-low border border-outline-variant rounded-lg px-2.5 py-1.5 text-white text-xs font-mono"
+              placeholder="lead-quente, orcamento"
+              value={(node.data.addTags || []).join(', ')}
+              onChange={(e) => patch({ addTags: splitTags(e.target.value) })}
+            />
+          </label>
+          <label className="block text-on-surface-variant">
+            Remover etiquetas
+            <input
+              className="mt-1 w-full bg-surface-container-low border border-outline-variant rounded-lg px-2.5 py-1.5 text-white text-xs font-mono"
+              placeholder="lead-frio"
+              value={(node.data.removeTags || []).join(', ')}
+              onChange={(e) => patch({ removeTags: splitTags(e.target.value) })}
+            />
+          </label>
+          <p className="text-[10px] text-on-surface-variant leading-relaxed">
+            Etiquetas e atributos ficam no contato, não na sessão: continuam lá quando o cliente
+            voltar semana que vem, e são o que um disparo por segmento vai usar.
+          </p>
         </div>
       )}
 
@@ -360,6 +519,90 @@ export const FlowInspector: React.FC<FlowInspectorProps> = ({ node, onChange, on
                 onChange={(e) => patch({ memoryTurns: parseInt(e.target.value, 10) || 12 })}
               />
             </label>
+          </div>
+
+          <div className="pt-2 border-t border-outline-variant/60">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-on-surface-variant">Ferramentas</span>
+              <button
+                type="button"
+                disabled={toolTargets.length === 0}
+                onClick={() =>
+                  patch({
+                    agentTools: [
+                      ...(node.data.agentTools || []),
+                      { nodeId: toolTargets[0].id, name: '', description: '', parameters: [] },
+                    ],
+                  })
+                }
+                className="text-[10px] text-primary hover:underline flex items-center gap-1 disabled:opacity-40 disabled:no-underline"
+              >
+                <Plus className="w-3 h-3" /> Adicionar
+              </button>
+            </div>
+
+            {toolTargets.length === 0 ? (
+              <p className="text-[10px] text-on-surface-variant leading-relaxed">
+                Adicione um bloco HTTP ou SQL ao fluxo para que a IA possa consultá-lo. A IA escolhe
+                <em> quando </em>chamar; o bloco continua decidindo o que ela pode alcançar.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {(node.data.agentTools || []).map((tool, index) => (
+                  <div key={index} className="rounded-lg border border-outline-variant/60 p-2 space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        className="flex-1 bg-surface-container-low border border-outline-variant rounded-lg px-2 py-1.5 text-white text-xs font-mono"
+                        placeholder="consultar_pedido"
+                        value={tool.name}
+                        onChange={(e) => updateTool(index, { name: e.target.value.replace(/[^a-zA-Z0-9_-]/g, '') })}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => patch({ agentTools: (node.data.agentTools || []).filter((_, i) => i !== index) })}
+                        className="p-1 rounded text-crit hover:bg-crit/10"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <select
+                      className="w-full bg-surface-container-low border border-outline-variant rounded-lg px-2 py-1.5 text-white text-xs"
+                      value={tool.nodeId}
+                      onChange={(e) => updateTool(index, { nodeId: e.target.value })}
+                    >
+                      {toolTargets.map((target) => (
+                        <option key={target.id} value={target.id}>
+                          {target.type.toUpperCase()} · {target.id}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      className="w-full bg-surface-container-low border border-outline-variant rounded-lg px-2 py-1.5 text-white text-xs"
+                      placeholder="Busca o status de um pedido pelo número"
+                      value={tool.description || ''}
+                      onChange={(e) => updateTool(index, { description: e.target.value })}
+                    />
+                    <input
+                      className="w-full bg-surface-container-low border border-outline-variant rounded-lg px-2 py-1.5 text-white text-xs font-mono"
+                      placeholder="parâmetros: numero_pedido, cpf"
+                      value={(tool.parameters || []).map((p) => p.name).join(', ')}
+                      onChange={(e) =>
+                        updateTool(index, {
+                          parameters: e.target.value
+                            .split(',')
+                            .map((n) => n.trim().replace(/[^a-zA-Z0-9_]/g, ''))
+                            .filter(Boolean)
+                            .map((name) => ({ name, required: true })),
+                        })
+                      }
+                    />
+                    <p className="text-[10px] text-on-surface-variant">
+                      Os parâmetros viram variáveis dentro do bloco {'{{assim}}'} só durante a chamada.
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -12,6 +12,7 @@ const TABS: NavTab[] = [
   'filemanager',
   'cron',
   'flows',
+  'contacts',
   'containers',
   'domains',
   'firewall',

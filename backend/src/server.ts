@@ -39,6 +39,8 @@ import { templateRouter } from './routes/template.routes.js';
 import { cronRouter } from './routes/cron.routes.js';
 import { analyticsRouter } from './routes/analytics.routes.js';
 import { waFlowRouter } from './routes/wa-flow.routes.js';
+import { waContactRouter } from './routes/wa-contact.routes.js';
+import { closeWaDb } from './utils/wa-db.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -148,6 +150,7 @@ app.use('/api/webhooks', webhookRouter);
 app.use('/api/nodes', nodeRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/wa-flows', waFlowRouter);
+app.use('/api/wa-contacts', waContactRouter);
 
 // WebSocket Setup
 io.on('connection', (socket) => {
@@ -402,6 +405,9 @@ function shutdown(signal: string) {
   // self-update restarts this container, so the tail since the last flush
   // would otherwise be lost every time the panel updates itself.
   WaFlowService.flushStats();
+  // WAL checkpoint before the handle goes: a hard kill mid-write would leave
+  // the conversation database recovering on next boot instead of ready.
+  closeWaDb();
   clearInterval(metricsTimer);
   clearInterval(storageTimer);
   clearInterval(sessionWatchTimer);

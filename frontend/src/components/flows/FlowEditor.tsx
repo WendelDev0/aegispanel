@@ -116,6 +116,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
   const [priority, setPriority] = useState(0);
   const [sessionTtlMinutes, setSessionTtlMinutes] = useState(30);
   const [aiBudgetTokensPerDay, setAiBudgetTokensPerDay] = useState(50_000);
+  const [transcribeAudio, setTranscribeAudio] = useState(true);
 
   const [availableInstances, setAvailableInstances] = useState<EvolutionInstanceInfo[]>([]);
   const [managerUrl, setManagerUrl] = useState<string | null>(null);
@@ -189,6 +190,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
       setPriority(next.priority || 0);
       setSessionTtlMinutes(next.sessionTtlMinutes || 30);
       setAiBudgetTokensPerDay(next.aiBudgetTokensPerDay ?? 50_000);
+      setTranscribeAudio(next.transcribeAudio !== false);
       setNodes(toRfNodes(next.nodes));
       setEdges(toRfEdges(next.edges));
       setIsDirty(false);
@@ -257,6 +259,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
         priority,
         sessionTtlMinutes,
         aiBudgetTokensPerDay,
+        transcribeAudio,
         ...graph,
       });
       setFlow(res.data);
@@ -351,10 +354,14 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   });
 
+  // The canvas, not the saved record: an agent tool must be able to point at
+  // an HTTP block the operator added in this session but has not saved yet.
+  const flowNodes = useMemo(() => fromRf(nodes, edges).nodes, [edges, nodes]);
+
   const selectedNode = useMemo(() => {
     if (!selectedId) return null;
-    return fromRf(nodes, edges).nodes.find((n) => n.id === selectedId) || null;
-  }, [edges, nodes, selectedId]);
+    return flowNodes.find((n) => n.id === selectedId) || null;
+  }, [flowNodes, selectedId]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -590,6 +597,23 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
                     className="mt-1 w-full bg-surface-container-low border border-outline-variant rounded px-2 py-1 text-xs text-white font-mono"
                   />
                 </label>
+                <label className="flex items-start gap-2 cursor-pointer text-[11px] text-on-surface-variant">
+                  <input
+                    type="checkbox"
+                    checked={transcribeAudio}
+                    onChange={(e) => {
+                      setTranscribeAudio(e.target.checked);
+                      setIsDirty(true);
+                    }}
+                    className="mt-0.5 w-3.5 h-3.5 rounded text-primary focus:ring-0"
+                  />
+                  <span>
+                    Transcrever áudios
+                    <span className="block text-[10px] opacity-70">
+                      Áudio vira texto e segue o fluxo normal. Desligado, chega como “[áudio]”.
+                    </span>
+                  </span>
+                </label>
                 <button
                   type="button"
                   onClick={() => setShowConfigPopover(false)}
@@ -773,6 +797,7 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flowId, onBack }) => {
               <div className="flex-1 overflow-y-auto">
                 <FlowInspector
                   node={selectedNode}
+                  nodes={flowNodes}
                   onChange={updateSelected}
                   onDelete={deleteNode}
                 />

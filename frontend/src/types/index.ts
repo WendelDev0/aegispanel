@@ -307,10 +307,12 @@ export type WaFlowNodeType =
   | 'trigger_message'
   | 'trigger_event'
   | 'send_text'
+  | 'send_media'
   | 'menu'
   | 'wait_reply'
   | 'capture'
   | 'condition'
+  | 'contact'
   | 'agent'
   | 'http'
   | 'sql'
@@ -335,6 +337,15 @@ export interface WaFlowNodeData {
   // capture
   captureType?: 'text' | 'number' | 'phone' | 'email';
   saveLead?: boolean;
+  // send_media
+  mediaKind?: 'image' | 'video' | 'document' | 'audio';
+  mediaUrl?: string;
+  mediaFileName?: string;
+  mediaMimetype?: string;
+  // contact
+  contactAttrs?: Array<{ key: string; value: string }>;
+  addTags?: string[];
+  removeTags?: string[];
   // agent
   provider?: 'openai' | 'openrouter';
   model?: string;
@@ -342,6 +353,7 @@ export interface WaFlowNodeData {
   maxTokens?: number;
   memoryTurns?: number;
   fallbackText?: string;
+  agentTools?: WaAgentTool[];
   // http
   httpMethod?: 'GET' | 'POST';
   httpUrl?: string;
@@ -359,6 +371,14 @@ export interface WaFlowNodeData {
   resumeMinutes?: number;
   // delay
   delaySeconds?: number;
+}
+
+export interface WaAgentTool {
+  /** Id of an `http` or `sql` block in the same flow. */
+  nodeId: string;
+  name: string;
+  description?: string;
+  parameters?: Array<{ name: string; description?: string; required?: boolean }>;
 }
 
 export interface WaFlowNode {
@@ -393,6 +413,7 @@ export interface WaFlowRecord {
   priority: number;
   sessionTtlMinutes: number;
   aiBudgetTokensPerDay: number;
+  transcribeAudio?: boolean;
   dataBinding?: {
     postgresDatabaseId?: string;
     redisDatabaseId?: string;
@@ -590,4 +611,23 @@ export interface OverviewData {
     error?: string;
     stale: boolean;
   } | null;
+}
+
+export interface WaContact {
+  instance: string;
+  phoneHash: string;
+  phoneTail: string;
+  pushName: string;
+  attrs: Record<string, string>;
+  tags: string[];
+  firstSeen: string;
+  lastSeen: string;
+  lastFlowId?: string;
+  inboundCount: number;
+  optedOut: boolean;
+}
+
+export interface WaContactHistoryEntry {
+  role: 'user' | 'assistant';
+  content: string;
 }

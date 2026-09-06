@@ -277,10 +277,12 @@ export type WaFlowNodeType =
   | 'trigger_message'
   | 'trigger_event'
   | 'send_text'
+  | 'send_media'
   | 'menu'
   | 'wait_reply'
   | 'capture'
   | 'condition'
+  | 'contact'
   | 'agent'
   | 'http'
   | 'sql'
@@ -305,6 +307,15 @@ export interface WaFlowNodeData {
   // capture
   captureType?: 'text' | 'number' | 'phone' | 'email';
   saveLead?: boolean;
+  // send_media
+  mediaKind?: 'image' | 'video' | 'document' | 'audio';
+  mediaUrl?: string;
+  mediaFileName?: string;
+  mediaMimetype?: string;
+  // contact
+  contactAttrs?: Array<{ key: string; value: string }>;
+  addTags?: string[];
+  removeTags?: string[];
   // agent
   provider?: 'openai' | 'openrouter';
   model?: string;
@@ -312,6 +323,17 @@ export interface WaFlowNodeData {
   maxTokens?: number;
   memoryTurns?: number;
   fallbackText?: string;
+  /**
+   * Tools the model may call, each pointing at an `http` or `sql` block that
+   * already exists in this flow. The model chooses when to call one and with
+   * what arguments; it never chooses what it is allowed to reach.
+   */
+  agentTools?: Array<{
+    nodeId: string;
+    name: string;
+    description?: string;
+    parameters?: Array<{ name: string; description?: string; required?: boolean }>;
+  }>;
   // http
   httpMethod?: 'GET' | 'POST';
   httpUrl?: string;
@@ -363,6 +385,8 @@ export interface WaFlowRecord {
   priority: number;
   sessionTtlMinutes: number;
   aiBudgetTokensPerDay: number;
+  /** Voice notes reach the flow as text. Off means they arrive as `[áudio]`. */
+  transcribeAudio?: boolean;
   dataBinding?: {
     postgresDatabaseId?: string;
     redisDatabaseId?: string;

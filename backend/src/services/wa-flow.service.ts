@@ -84,10 +84,12 @@ const NODE_TYPES = new Set([
   'trigger_message',
   'trigger_event',
   'send_text',
+  'send_media',
   'menu',
   'wait_reply',
   'capture',
   'condition',
+  'contact',
   'agent',
   'http',
   'sql',
@@ -104,6 +106,7 @@ export interface CreateFlowInput {
   priority?: number;
   sessionTtlMinutes?: number;
   aiBudgetTokensPerDay?: number;
+  transcribeAudio?: boolean;
   dataBinding?: {
     postgresDatabaseId?: string;
     redisDatabaseId?: string;
@@ -119,6 +122,7 @@ export interface UpdateFlowInput {
   priority?: number;
   sessionTtlMinutes?: number;
   aiBudgetTokensPerDay?: number;
+  transcribeAudio?: boolean;
   dataBinding?: {
     postgresDatabaseId?: string;
     redisDatabaseId?: string;
@@ -169,6 +173,7 @@ export class WaFlowService {
       priority: Number.isFinite(input.priority) ? Number(input.priority) : 0,
       sessionTtlMinutes: Math.max(5, Math.min(1440, Number(input.sessionTtlMinutes) || 30)),
       aiBudgetTokensPerDay: Math.max(0, Number(input.aiBudgetTokensPerDay) || 50_000),
+      transcribeAudio: input.transcribeAudio !== false,
       dataBinding: input.dataBinding,
       stats: {
         runsToday: 0,
@@ -204,6 +209,9 @@ export class WaFlowService {
       aiBudgetTokensPerDay: patch.aiBudgetTokensPerDay !== undefined
         ? Math.max(0, Number(patch.aiBudgetTokensPerDay) || 0)
         : current.aiBudgetTokensPerDay,
+      transcribeAudio: patch.transcribeAudio !== undefined
+        ? Boolean(patch.transcribeAudio)
+        : current.transcribeAudio !== false,
       dataBinding: patch.dataBinding !== undefined ? patch.dataBinding : current.dataBinding,
       updatedAt: new Date().toISOString(),
     };
@@ -695,6 +703,30 @@ export class WaFlowService {
               ? d.captureType
               : 'text',
           saveLead: Boolean(d.saveLead),
+          // send_media
+          mediaKind:
+            d.mediaKind === 'video' || d.mediaKind === 'document' || d.mediaKind === 'audio'
+              ? d.mediaKind
+              : 'image',
+          mediaUrl: d.mediaUrl ? String(d.mediaUrl).slice(0, 500) : undefined,
+          mediaFileName: d.mediaFileName ? String(d.mediaFileName).slice(0, 200) : undefined,
+          mediaMimetype: d.mediaMimetype ? String(d.mediaMimetype).slice(0, 100) : undefined,
+          // contact
+          contactAttrs: Array.isArray(d.contactAttrs)
+            ? d.contactAttrs
+                .slice(0, 20)
+                .map((a) => ({
+                  key: String(a?.key || '').slice(0, 32),
+                  value: String(a?.value ?? '').slice(0, 500),
+                }))
+                .filter((a) => a.key)
+            : undefined,
+          addTags: Array.isArray(d.addTags)
+            ? d.addTags.slice(0, 10).map((t) => String(t).trim().toLowerCase().slice(0, 32)).filter(Boolean)
+            : undefined,
+          removeTags: Array.isArray(d.removeTags)
+            ? d.removeTags.slice(0, 10).map((t) => String(t).trim().toLowerCase().slice(0, 32)).filter(Boolean)
+            : undefined,
           // agent
           provider: d.provider === 'openrouter' ? 'openrouter' : 'openai',
           model: d.model ? String(d.model).slice(0, 80) : undefined,
@@ -702,6 +734,26 @@ export class WaFlowService {
           maxTokens: Number.isFinite(d.maxTokens) ? Math.max(1, Math.min(1024, Number(d.maxTokens))) : 512,
           memoryTurns: Number.isFinite(d.memoryTurns) ? Math.max(1, Math.min(30, Number(d.memoryTurns))) : 12,
           fallbackText: d.fallbackText ? String(d.fallbackText).slice(0, 500) : undefined,
+          // A tool always points at a block in the same flow, so the guards
+          // that block already carries (SSRF allowlist, read/write mode, the
+          // bound database) still decide what the model can actually reach.
+          agentTools: Array.isArray(d.agentTools)
+            ? d.agentTools
+                .slice(0, 6)
+                .map((t) => ({
+                  nodeId: String(t?.nodeId || '').slice(0, 64),
+                  name: String(t?.name || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48),
+                  description: t?.description ? String(t.description).slice(0, 300) : undefined,
+                  parameters: Array.isArray(t?.parameters)
+                    ? t.parameters.slice(0, 8).map((p) => ({
+                        name: String(p?.name || '').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 32),
+                        description: p?.description ? String(p.description).slice(0, 200) : undefined,
+                        required: p?.required !== false,
+                      })).filter((p) => p.name)
+                    : undefined,
+                }))
+                .filter((t) => t.nodeId && t.name)
+            : undefined,
           // http
           httpMethod: d.httpMethod === 'POST' ? 'POST' : 'GET',
           httpUrl: d.httpUrl ? String(d.httpUrl).slice(0, 500) : undefined,

@@ -152,6 +152,117 @@ export async function evolutionSendButtons(
   return evolutionSendText(creds, number, numbered);
 }
 
+/**
+ * Image, video, document and voice notes.
+ *
+ * Unlike interactive buttons, media renders on every WhatsApp client — this
+ * is not a message type the account is denied, so a 2xx here means the
+ * recipient can actually see it. Audio goes through `/message/sendWhatsAppAudio`
+ * because that is the endpoint that produces a playable voice note; posting
+ * an audio file through sendMedia delivers it as a document instead.
+ */
+export async function evolutionSendMedia(
+  creds: EvolutionCredentials,
+  number: string,
+  options: {
+    kind: 'image' | 'video' | 'document' | 'audio';
+    media: string;
+    caption?: string;
+    fileName?: string;
+    mimetype?: string;
+  }
+): Promise<EvolutionSendResult> {
+  if (evolutionOutboundBlocked()) return { ok: false, skipped: 'local_mode' };
+  const apiKey = revealEvolutionKey(creds.apiKey);
+  const instance = creds.instance?.trim();
+  const phone = digits(number);
+  if (!creds.apiUrl || !apiKey || !instance || !phone || !options.media) {
+    return { ok: false, skipped: 'missing' };
+  }
+
+  const isAudio = options.kind === 'audio';
+  const pathname = isAudio
+    ? `/message/sendWhatsAppAudio/${encodeURIComponent(instance)}`
+    : `/message/sendMedia/${encodeURIComponent(instance)}`;
+
+  const body = isAudio
+    ? { number: phone, audio: options.media, delay: 800 }
+    : {
+        number: phone,
+        mediatype: options.kind,
+        media: options.media,
+        ...(options.caption ? { caption: options.caption } : {}),
+        ...(options.fileName ? { fileName: options.fileName } : {}),
+        ...(options.mimetype ? { mimetype: options.mimetype } : {}),
+        delay: 800,
+      };
+
+  try {
+    const res = await requestJson(creds.apiUrl, apiKey, 'POST', pathname, body);
+    if (res.status >= 200 && res.status < 300) return { ok: true };
+    return { ok: false, error: res.text.slice(0, 400) || `HTTP ${res.status}` };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Pulls the bytes of an inbound attachment.
+ *
+ * The alternative was turning `webhookBase64` on when registering the
+ * webhook, which inlines every attachment into every payload — a photo album
+ * sent to the operator's line would then travel through the panel's request
+ * body whether or not any flow wanted it. Fetching on demand keeps the
+ * webhook small and only pays for media a flow actually reads.
+ */
+export async function evolutionFetchMediaBase64(
+  creds: EvolutionCredentials,
+  message: { messageId?: string; raw?: unknown }
+): Promise<{ base64: string; mimetype?: string }> {
+  if (evolutionOutboundBlocked()) {
+    throw new Error('Modo local: download de mídia bloqueado. Defina AEGIS_ALLOW_OUTBOUND_ALERTS=true para permitir.');
+  }
+  const apiKey = revealEvolutionKey(creds.apiKey);
+  const instance = creds.instance?.trim();
+  if (!creds.apiUrl || !apiKey || !instance) {
+    throw new Error('Evolution API não configurada para baixar a mídia.');
+  }
+
+  const raw = message.raw && typeof message.raw === 'object' ? firstMessageRecord(message.raw as any) : null;
+  // Evolution accepts either the whole message record or just its key; the
+  // record is preferred because a key alone fails on multi-device payloads.
+  const payload = raw?.key
+    ? { message: { key: raw.key } }
+    : message.messageId
+      ? { message: { key: { id: message.messageId } } }
+      : null;
+  if (!payload) throw new Error('A mensagem não trouxe identificação suficiente para baixar a mídia.');
+
+  const res = await requestJson(
+    creds.apiUrl,
+    apiKey,
+    'POST',
+    `/chat/getBase64FromMediaMessage/${encodeURIComponent(instance)}`,
+    { ...payload, convertToMp4: false }
+  );
+
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`A Evolution recusou o download da mídia: HTTP ${res.status} ${res.text.slice(0, 200)}`);
+  }
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(res.text);
+  } catch {
+    throw new Error('A Evolution respondeu o download da mídia em formato inesperado.');
+  }
+
+  const base64 = String(parsed?.base64 || parsed?.data?.base64 || '');
+  if (!base64) throw new Error('A Evolution respondeu o download da mídia sem conteúdo.');
+
+  return { base64, mimetype: parsed?.mimetype || parsed?.data?.mimetype };
+}
+
 export async function evolutionSetWebhook(
   creds: EvolutionCredentials,
   webhookUrl: string,
@@ -200,6 +311,20 @@ export async function evolutionClearWebhook(creds: EvolutionCredentials): Promis
   }
 }
 
+export type InboundMediaKind = 'audio' | 'image' | 'video' | 'document' | 'location';
+
+export interface InboundMedia {
+  kind: InboundMediaKind;
+  mimetype?: string;
+  fileName?: string;
+  /** Voice notes carry a length; useful to refuse transcribing a 20-minute one. */
+  seconds?: number;
+  /** Evolution only inlines this when the instance has webhookBase64 on. */
+  base64?: string;
+  latitude?: number;
+  longitude?: number;
+}
+
 export interface InboundWaMessage {
   instance: string;
   phone: string;
@@ -208,6 +333,14 @@ export interface InboundWaMessage {
   fromMe: boolean;
   /** WhatsApp's own id (`key.id`), used to recognise a retried webhook. */
   messageId?: string;
+  /**
+   * The attachment, when the customer sent one instead of typing.
+   *
+   * Stickers are deliberately not here: they carry nothing a flow can act on,
+   * and they must keep landing on the inbound strip as `no_text` so the
+   * operator still sees that someone wrote and got nothing back.
+   */
+  media?: InboundMedia;
 }
 
 function firstMessageRecord(root: Record<string, any>): Record<string, any> {
@@ -262,6 +395,49 @@ function extractWaText(message: Record<string, any>): string {
     textFromInteractive(m) ||
     ''
   );
+}
+
+function extractWaMedia(message: Record<string, any>): InboundMedia | undefined {
+  const m = unwrapWaMessage(message);
+
+  if (m.audioMessage) {
+    return {
+      kind: 'audio',
+      mimetype: String(m.audioMessage.mimetype || 'audio/ogg'),
+      seconds: Number(m.audioMessage.seconds) || undefined,
+      base64: typeof m.audioMessage.base64 === 'string' ? m.audioMessage.base64 : undefined,
+    };
+  }
+  if (m.imageMessage) {
+    return {
+      kind: 'image',
+      mimetype: String(m.imageMessage.mimetype || 'image/jpeg'),
+      base64: typeof m.imageMessage.base64 === 'string' ? m.imageMessage.base64 : undefined,
+    };
+  }
+  if (m.videoMessage) {
+    return {
+      kind: 'video',
+      mimetype: String(m.videoMessage.mimetype || 'video/mp4'),
+      seconds: Number(m.videoMessage.seconds) || undefined,
+    };
+  }
+  if (m.documentMessage) {
+    return {
+      kind: 'document',
+      mimetype: String(m.documentMessage.mimetype || 'application/octet-stream'),
+      fileName: String(m.documentMessage.fileName || '').slice(0, 200) || undefined,
+    };
+  }
+  if (m.locationMessage) {
+    return {
+      kind: 'location',
+      latitude: Number(m.locationMessage.degreesLatitude) || undefined,
+      longitude: Number(m.locationMessage.degreesLongitude) || undefined,
+    };
+  }
+
+  return undefined;
 }
 
 export type WaJidKind = 'group' | 'broadcast' | 'newsletter' | 'direct' | 'unknown';
@@ -330,10 +506,14 @@ export function classifyEvolutionInbound(body: unknown): EvolutionInbound {
   const phone = phoneFromKey(key);
   if (!phone) return { kind: 'skipped', reason: 'no_phone', instance };
 
-  // A sticker or a caption-less image in a 1:1 chat reaches a real person's
-  // conversation and still moves no flow. That one belongs on the strip.
   const trimmed = String(extractWaText(data.message || {})).trim();
-  if (!trimmed) return { kind: 'skipped', reason: 'no_text', instance, phone };
+  const media = extractWaMedia(data.message || {});
+
+  // A sticker in a 1:1 chat reaches a real person's conversation and still
+  // moves no flow. That one belongs on the strip. An attachment does not:
+  // the engine can transcribe a voice note or branch on the file type, so it
+  // travels on even with no caption and the engine decides.
+  if (!trimmed && !media) return { kind: 'skipped', reason: 'no_text', instance, phone };
 
   return {
     kind: 'message',
@@ -344,6 +524,7 @@ export function classifyEvolutionInbound(body: unknown): EvolutionInbound {
       pushName: String(data.pushName || key.pushName || ''),
       fromMe: false,
       messageId: String(key.id || '').trim() || undefined,
+      media,
     },
   };
 }

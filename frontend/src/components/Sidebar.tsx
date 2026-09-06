@@ -19,6 +19,7 @@ import {
   HelpCircle,
   Globe2,
   MessageCircle,
+  Users,
   X
 } from 'lucide-react';
 
@@ -33,6 +34,7 @@ export type NavTab =
   | 'filemanager'
   | 'cron'
   | 'flows'
+  | 'contacts'
   | 'containers'
   | 'domains'
   | 'firewall'
@@ -126,6 +128,12 @@ const NAV_SECTIONS: NavSection[] = [
         label: 'Fluxos WhatsApp',
         icon: MessageCircle,
         tooltip: 'Construtor visual de fluxos para atendimento e alertas no WhatsApp',
+      },
+      {
+        id: 'contacts',
+        label: 'Contatos',
+        icon: Users,
+        tooltip: 'Quem já falou com o bot: atributos, etiquetas e histórico da conversa',
       },
       {
         id: 'analytics',

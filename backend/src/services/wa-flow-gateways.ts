@@ -3,13 +3,21 @@ import { dbStorage } from '../db/storage.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { assertSafeFlowHttpUrl } from '../utils/flow-http-guard.js';
 import { containerNameForDatabase } from '../utils/naming.js';
+import { evolutionFetchMediaBase64 } from '../utils/evolution.client.js';
+import { WaContactStore } from '../utils/wa-contact.store.js';
+import { phoneHash } from '../utils/phone.js';
 import type {
   AiCompletionRequest,
   AiCompletionResponse,
+  AiMessage,
+  AiToolCall,
+  AiToolDefinition,
   AiProvider,
+  FlowContactStore,
   HttpGateway,
   HttpRequestOptions,
   HttpResponse,
+  MediaGateway,
   SqlGateway,
   SqlQueryOptions,
 } from './wa-flow-ports.js';
@@ -37,6 +45,83 @@ function outboundBlocked(): boolean {
   return CONFIG.LOCAL_MODE && !CONFIG.ALLOW_OUTBOUND_ALERTS;
 }
 
+function aiCredentials(provider: 'openai' | 'openrouter', model?: string): string {
+  const providers = dbStorage.getSettings().aiProviders;
+  const stored = provider === 'openai' ? providers?.openaiKey : providers?.openrouterKey;
+  if (!stored) {
+    throw new Error(`Chave da API ${provider} não configurada em Configurações.`);
+  }
+
+  // An allowlist that is empty means "no restriction"; the operator only
+  // fills it to stop a flow from reaching for an expensive model.
+  const allowed = providers?.allowedModels || [];
+  if (model && allowed.length && !allowed.includes(model)) {
+    throw new Error(`Modelo "${model}" não está na lista de modelos permitidos.`);
+  }
+
+  return EncryptionService.tryDecrypt(stored) ?? stored;
+}
+
+/** Chat-completions function-calling shape, which OpenRouter mirrors. */
+function toolsPayload(tools: AiToolDefinition[]): unknown[] {
+  return tools.map((tool) => ({
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: {
+        type: 'object',
+        properties: Object.fromEntries(
+          tool.parameters.map((p) => [p.name, { type: 'string', description: p.description || p.name }])
+        ),
+        required: tool.parameters.filter((p) => p.required !== false).map((p) => p.name),
+      },
+    },
+  }));
+}
+
+function messagesPayload(messages: AiMessage[]): unknown[] {
+  return messages.map((m) => {
+    if (m.role === 'tool') {
+      return { role: 'tool', content: m.content, tool_call_id: m.toolCallId };
+    }
+    if (m.role === 'assistant' && m.toolCalls?.length) {
+      return {
+        role: 'assistant',
+        content: m.content || null,
+        tool_calls: m.toolCalls.map((c) => ({
+          id: c.id,
+          type: 'function',
+          function: { name: c.name, arguments: JSON.stringify(c.arguments) },
+        })),
+      };
+    }
+    return { role: m.role, content: m.content };
+  });
+}
+
+function parseToolCalls(raw: unknown): AiToolCall[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const calls: AiToolCall[] = [];
+  for (const item of raw) {
+    const name = String((item as any)?.function?.name || '').trim();
+    if (!name) continue;
+    let args: Record<string, string> = {};
+    try {
+      const parsed = JSON.parse(String((item as any)?.function?.arguments || '{}'));
+      if (parsed && typeof parsed === 'object') {
+        // Coerced to strings: arguments are interpolated into a URL or bound
+        // as SQL parameters, and both want text.
+        args = Object.fromEntries(Object.entries(parsed).map(([k, v]) => [k, String(v ?? '')]));
+      }
+    } catch {
+      /* a model that emits malformed arguments still gets its tool run empty */
+    }
+    calls.push({ id: String((item as any)?.id || name), name, arguments: args });
+  }
+  return calls.length ? calls : undefined;
+}
+
 export function createAiProvider(): AiProvider {
   return {
     async complete(req: AiCompletionRequest): Promise<AiCompletionResponse> {
@@ -44,20 +129,7 @@ export function createAiProvider(): AiProvider {
         throw new Error('Modo local: chamada de IA bloqueada. Defina AEGIS_ALLOW_OUTBOUND_ALERTS=true para permitir.');
       }
 
-      const providers = dbStorage.getSettings().aiProviders;
-      const stored = req.provider === 'openai' ? providers?.openaiKey : providers?.openrouterKey;
-      if (!stored) {
-        throw new Error(`Chave da API ${req.provider} não configurada em Configurações.`);
-      }
-
-      // An allowlist that is empty means "no restriction"; the operator only
-      // fills it to stop a flow from reaching for an expensive model.
-      const allowed = providers?.allowedModels || [];
-      if (allowed.length && !allowed.includes(req.model)) {
-        throw new Error(`Modelo "${req.model}" não está na lista de modelos permitidos.`);
-      }
-
-      const apiKey = EncryptionService.tryDecrypt(stored) ?? stored;
+      const apiKey = aiCredentials(req.provider, req.model);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 20_000);
 
@@ -67,8 +139,9 @@ export function createAiProvider(): AiProvider {
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
           body: JSON.stringify({
             model: req.model,
-            messages: req.messages,
+            messages: messagesPayload(req.messages),
             max_tokens: Math.max(16, Math.min(2000, req.maxTokens || 512)),
+            ...(req.tools?.length ? { tools: toolsPayload(req.tools), tool_choice: 'auto' } : {}),
           }),
           signal: controller.signal,
         });
@@ -79,11 +152,17 @@ export function createAiProvider(): AiProvider {
         }
 
         const data: any = await res.json();
-        const text = String(data?.choices?.[0]?.message?.content || '').trim();
-        if (!text) throw new Error('O provedor de IA respondeu sem conteúdo.');
+        const message = data?.choices?.[0]?.message;
+        const text = String(message?.content || '').trim();
+        const toolCalls = parseToolCalls(message?.tool_calls);
+
+        // A tool round legitimately answers with no prose, so emptiness is
+        // only a failure when the model also asked for nothing.
+        if (!text && !toolCalls) throw new Error('O provedor de IA respondeu sem conteúdo.');
 
         return {
           text,
+          toolCalls,
           tokensIn: Number(data?.usage?.prompt_tokens) || 0,
           tokensOut: Number(data?.usage?.completion_tokens) || 0,
         };
@@ -91,7 +170,93 @@ export function createAiProvider(): AiProvider {
         clearTimeout(timer);
       }
     },
+
+    /**
+     * Voice notes are how most of this market writes.
+     *
+     * Without this an audio message reached `no_text` and the flow answered
+     * nothing at all — the customer saw two ticks and silence. Transcribing
+     * turns the voice note into the same string a typed message produces, so
+     * every existing block downstream works unchanged.
+     */
+    async transcribe(audio): Promise<string> {
+      if (outboundBlocked()) {
+        throw new Error('Modo local: transcrição bloqueada. Defina AEGIS_ALLOW_OUTBOUND_ALERTS=true para permitir.');
+      }
+
+      // Whisper is an OpenAI endpoint; OpenRouter does not proxy it, so the
+      // OpenAI key is required even for a flow whose agent runs elsewhere.
+      const apiKey = aiCredentials('openai');
+      const model = audio.model || 'whisper-1';
+      const bytes = Buffer.from(audio.base64, 'base64');
+      if (!bytes.length) throw new Error('O áudio recebido estava vazio.');
+
+      const form = new FormData();
+      form.append('file', new Blob([bytes], { type: audio.mimetype || 'audio/ogg' }), 'audio.ogg');
+      form.append('model', model);
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30_000);
+      try {
+        const res = await fetch(`${AI_BASE_URL.openai}/audio/transcriptions`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}` },
+          body: form,
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const detail = (await res.text()).slice(0, 200);
+          throw new Error(`A transcrição respondeu HTTP ${res.status}: ${detail}`);
+        }
+        const data: any = await res.json();
+        const text = String(data?.text || '').trim();
+        if (!text) throw new Error('A transcrição voltou vazia.');
+        return text;
+      } finally {
+        clearTimeout(timer);
+      }
+    },
   };
+}
+
+export function createMediaGateway(): MediaGateway {
+  return {
+    fetchBase64: (creds, message) => evolutionFetchMediaBase64(creds, message),
+  };
+}
+
+/** The live contact roster, behind the port the simulator replaces. */
+export function createContactStore(): FlowContactStore {
+  return {
+    load(instance, phone, pushName) {
+      const contact = WaContactStore.touch(instance, phone, { pushName });
+      return {
+        phoneHash: contact.phoneHash,
+        phoneTail: contact.phoneTail,
+        pushName: contact.pushName,
+        attrs: contact.attrs,
+        tags: contact.tags,
+        inboundCount: contact.inboundCount,
+        optedOut: contact.optedOut,
+      };
+    },
+    saveAttrs: (instance, pHash, patch) => {
+      WaContactStore.setAttrs(instance, pHash, patch);
+    },
+    setTags: (instance, pHash, tags) => {
+      WaContactStore.setTags(instance, pHash, tags);
+    },
+    appendMessage: (instance, pHash, role, content, flowId) => {
+      WaContactStore.appendMessage(instance, pHash, role, content, flowId);
+    },
+    history: (instance, pHash, limit) =>
+      WaContactStore.history(instance, pHash, limit).map((h) => ({ role: h.role, content: h.content })),
+  };
+}
+
+/** Test seam: the panel-event path has no inbound phone to hash. */
+export function contactHashFor(phone: string): string {
+  return phoneHash(phone);
 }
 
 export function createHttpGateway(): HttpGateway {
@@ -191,4 +356,6 @@ export const liveFlowGateways = {
   ai: createAiProvider(),
   http: createHttpGateway(),
   sql: createSqlGateway(),
+  media: createMediaGateway(),
+  contacts: createContactStore(),
 };

@@ -55,6 +55,22 @@ export const BLOCK_META: Record<WaFlowNodeType, BlockMeta> = {
     minimap: '#34d399',
     preview: (d) => String(d.text || 'Sem texto definido').slice(0, 48),
   },
+  send_media: {
+    label: 'Mande um arquivo',
+    verb: 'Enviar mídia',
+    hint: 'Imagem, vídeo, documento ou áudio por URL',
+    tone: 'border-lime-500/50',
+    badgeTone: 'bg-lime-500/15 text-lime-300 border-lime-500/35',
+    bar: 'bg-lime-400',
+    header: 'bg-lime-500/10',
+    handle: '!bg-lime-400',
+    minimap: '#a3e635',
+    preview: (d) => {
+      const kind = String(d.mediaKind || 'image');
+      const label = MEDIA_LABELS[kind] || kind;
+      return `${label}: ${String(d.mediaUrl || 'sem URL').slice(0, 34)}`;
+    },
+  },
   menu: {
     label: 'Pergunte com opções',
     verb: 'Menu interativo',
@@ -107,6 +123,26 @@ export const BLOCK_META: Record<WaFlowNodeType, BlockMeta> = {
     preview: (d) => {
       const src = d.source === 'var' ? `{{${String(d.varName || '')}}}` : 'mensagem';
       return `${src} ${String(d.operator || 'contém')} "${String(d.value || '')}"`;
+    },
+  },
+  contact: {
+    label: 'Marque o contato',
+    verb: 'Gravar no contato',
+    hint: 'Atributos e etiquetas que sobrevivem à conversa',
+    tone: 'border-pink-500/50',
+    badgeTone: 'bg-pink-500/15 text-pink-300 border-pink-500/35',
+    bar: 'bg-pink-400',
+    header: 'bg-pink-500/10',
+    handle: '!bg-pink-400',
+    minimap: '#f472b6',
+    preview: (d) => {
+      const attrs = Array.isArray(d.contactAttrs) ? d.contactAttrs : [];
+      const add = Array.isArray(d.addTags) ? d.addTags : [];
+      const parts = [
+        ...attrs.map((a: { key?: string }) => a.key).filter(Boolean),
+        ...add.map((t: string) => `#${t}`),
+      ];
+      return parts.join(' · ').slice(0, 48) || 'Nada configurado';
     },
   },
   agent: {
@@ -183,6 +219,13 @@ export const BLOCK_META: Record<WaFlowNodeType, BlockMeta> = {
   },
 };
 
+export const MEDIA_LABELS: Record<string, string> = {
+  image: 'Imagem',
+  video: 'Vídeo',
+  document: 'Documento',
+  audio: 'Áudio',
+};
+
 export const EVENT_LABELS: Record<WaPanelEvent, string> = {
   deploy_fail: 'Deploy falhou',
   deploy_ok: 'Deploy ok',
@@ -194,10 +237,12 @@ export const PALETTE: WaFlowNodeType[] = [
   'trigger_message',
   'trigger_event',
   'send_text',
+  'send_media',
   'menu',
   'wait_reply',
   'capture',
   'condition',
+  'contact',
   'agent',
   'http',
   'sql',

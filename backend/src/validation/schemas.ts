@@ -359,6 +359,7 @@ export const upsertWaFlowBodySchema = z
     priority: z.number().int().min(-100).max(100).optional(),
     sessionTtlMinutes: z.number().int().min(5).max(1440).optional(),
     aiBudgetTokensPerDay: z.number().int().min(0).max(10_000_000).optional(),
+    transcribeAudio: z.boolean().optional(),
     dataBinding: z
       .object({
         postgresDatabaseId: z.string().optional(),
@@ -366,6 +367,15 @@ export const upsertWaFlowBodySchema = z
       })
       .optional(),
     templateId: z.string().max(80).optional(),
+  })
+  .strict();
+
+/** Contact edits from the roster page. Attribute values may be cleared. */
+export const updateWaContactBodySchema = z
+  .object({
+    attrs: z.record(z.string().max(500)).optional(),
+    tags: z.array(z.string().max(32)).max(20).optional(),
+    optedOut: z.boolean().optional(),
   })
   .strict();
 

@@ -33,6 +33,7 @@ const FirewallPage = lazy(() => import('./pages/FirewallPage.js').then(m => ({ d
 const BackupsPage = lazy(() => import('./pages/BackupsPage.js').then(m => ({ default: m.BackupsPage })));
 const CronPage = lazy(() => import('./pages/CronPage.js').then(m => ({ default: m.CronPage })));
 const FlowsPage = lazy(() => import('./pages/FlowsPage.js').then(m => ({ default: m.FlowsPage })));
+const ContactsPage = lazy(() => import('./pages/ContactsPage.js').then(m => ({ default: m.ContactsPage })));
 
 const PageFallback = () => (
   <div className="flex items-center justify-center h-64">
@@ -198,6 +199,8 @@ export function App() {
         return <CronPage />;
       case 'flows':
         return <FlowsPage flowId={routeParam} onOpen={(id) => setActiveTab('flows', id)} />;
+      case 'contacts':
+        return <ContactsPage />;
       case 'containers':
         return <ContainersPage />;
       case 'domains':

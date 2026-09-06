@@ -1,9 +1,9 @@
-import type { WaFlowEdge, WaFlowNode, WaFlowRecord, WaPanelEvent } from '../db/storage.js';
+import type { WaFlowNode, WaFlowRecord, WaPanelEvent } from '../db/storage.js';
 import { dbStorage } from '../db/storage.js';
 import {
   classifyEvolutionInbound,
   evolutionSendButtons,
-  evolutionSendFailed,
+  evolutionSendMedia,
   evolutionSendText,
   type InboundWaMessage,
   type EvolutionCredentials,
@@ -14,239 +14,66 @@ import { WaLogStore } from '../utils/wa-log.store.js';
 import { WaInboundStore } from '../utils/wa-inbound.store.js';
 import { isDuplicateMessage } from '../utils/wa-dedupe.js';
 import { runSerial } from '../utils/serial-queue.js';
-import { WaHandoffStore } from '../utils/wa-handoff.store.js';
 import { liveFlowGateways } from './wa-flow-gateways.js';
+import { HandoffManager } from './wa-flow-handoff.js';
+import { NODE_HANDLERS } from './wa-flow-handlers.js';
+import {
+  applyVars,
+  flowBoundToInstance,
+  matchesTrigger,
+  nodeById,
+  outgoing,
+  pickMenuHandle,
+  sessionAt,
+  validateCaptureValue,
+} from './wa-flow-graph.js';
+import { deliverButtons, deliverText } from './wa-flow-io.js';
 import { WaFlowService } from './wa-flow.service.js';
 import type {
   EvolutionSender,
+  FlowContext,
   FlowPorts,
-  FlowSessionStore,
-  FlowLogStore,
   WaSession,
-  WaTurnLog,
 } from './wa-flow-ports.js';
 
-export interface FlowContext {
-  instance: string;
-  phone: string;
-  phoneHash: string;
-  phoneTail: string;
-  text: string;
-  vars: Record<string, string>;
-  stepsCount: number;
-  sendError?: string;
-}
+export type { FlowContext };
+export { HandoffManager };
+export { applyVars };
 
-const emptyCreds: EvolutionCredentials = { apiUrl: '', apiKey: '', instance: '' };
+/** A flow cannot walk forever; a cycle without a waiting node would spin. */
+const MAX_STEPS = 40;
 
 const defaultSender: EvolutionSender = {
   sendText: evolutionSendText,
   sendButtons: evolutionSendButtons,
+  sendMedia: evolutionSendMedia,
 };
 
 /**
- * The agent, http and sql gateways belong here, not only in the simulator.
- * Leaving them out made `ports.ai` undefined in production, so an AI block
- * took its error branch without a word while the same flow answered fine in
- * the preview — the simulator was the only place those blocks ever ran.
+ * The agent, http, sql, media and contact gateways belong here, not only in
+ * the simulator. Leaving them out made `ports.ai` undefined in production, so
+ * an AI block took its error branch without a word while the same flow
+ * answered fine in the preview — the simulator was the only place those
+ * blocks ever ran.
  */
 const defaultPorts: FlowPorts = {
   sender: defaultSender,
   sessions: new WaSessionStore(),
   logs: new WaLogStore(),
+  contacts: liveFlowGateways.contacts,
   ai: liveFlowGateways.ai,
   http: liveFlowGateways.http,
   sql: liveFlowGateways.sql,
+  media: liveFlowGateways.media,
 };
 
 /**
- * Active human handoffs. Backed by disk: a restart used to drop them all and
- * the bot resumed talking over an attendant mid-conversation, with nothing in
- * the logs to say why.
- */
-export class HandoffManager {
-  static set(instance: string, pHash: string, minutes = 120): void {
-    const expiresAt = Date.now() + Math.max(5, Math.min(1440, minutes)) * 60 * 1000;
-    WaHandoffStore.set(instance, pHash, expiresAt);
-  }
-
-  static isActive(instance: string, pHash: string): boolean {
-    return WaHandoffStore.isActive(instance, pHash);
-  }
-
-  static release(instance: string, pHash: string): boolean {
-    return WaHandoffStore.release(instance, pHash);
-  }
-
-  static list(): Array<{ instance: string; phoneHash: string; expiresAt: string }> {
-    return WaHandoffStore.list();
-  }
-
-  static clear(): void {
-    WaHandoffStore.clear();
-  }
-}
-
-export function applyVars(text: string, vars: Record<string, string>): string {
-  return text.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key: string) => vars[key] ?? '');
-}
-
-function outgoing(flow: WaFlowRecord, nodeId: string, handle?: string): WaFlowEdge | undefined {
-  const edges = flow.edges.filter((e) => e.source === nodeId);
-  if (handle) {
-    return edges.find((e) => e.sourceHandle === handle) || edges.find((e) => !e.sourceHandle);
-  }
-  return edges.find((e) => !e.sourceHandle) || edges[0];
-}
-
-function nodeById(flow: WaFlowRecord, id: string): WaFlowNode | undefined {
-  return flow.nodes.find((n) => n.id === id);
-}
-
-function flowBoundToInstance(flow: WaFlowRecord, instance: string): boolean {
-  const want = instance.trim().toLowerCase();
-  if (!want) return false;
-  return (flow.instanceNames || []).some((name) => String(name).trim().toLowerCase() === want);
-}
-
-function matchesTrigger(node: WaFlowNode, text: string): boolean {
-  if (node.type !== 'trigger_message') return false;
-  const match = node.data.match || 'any';
-  const keyword = (node.data.keyword || '').trim();
-  if (match === 'any' || !keyword) return true;
-  const hay = text.toLowerCase();
-  if (match === 'contains') return hay.includes(keyword.toLowerCase());
-  try {
-    return new RegExp(keyword, 'i').test(text);
-  } catch {
-    return hay.includes(keyword.toLowerCase());
-  }
-}
-
-function evaluateCondition(node: WaFlowNode, ctx: FlowContext): boolean {
-  const sourceVal = node.data.source === 'var' && node.data.varName
-    ? String(ctx.vars[node.data.varName] ?? '')
-    : ctx.text;
-
-  const expected = (node.data.value || '').trim();
-  const op = node.data.operator || 'contains';
-
-  if (op === 'equals') return sourceVal.trim().toLowerCase() === expected.toLowerCase();
-  if (op === 'contains') return sourceVal.toLowerCase().includes(expected.toLowerCase());
-  if (op === 'exists') return sourceVal.trim().length > 0;
-  if (op === 'regex') {
-    try {
-      return new RegExp(expected, 'i').test(sourceVal);
-    } catch {
-      return false;
-    }
-  }
-  if (op === 'gt') {
-    const num = parseFloat(sourceVal);
-    const expNum = parseFloat(expected);
-    return !Number.isNaN(num) && !Number.isNaN(expNum) && num > expNum;
-  }
-  if (op === 'lt') {
-    const num = parseFloat(sourceVal);
-    const expNum = parseFloat(expected);
-    return !Number.isNaN(num) && !Number.isNaN(expNum) && num < expNum;
-  }
-
-  return false;
-}
-
-function pickMenuHandle(node: WaFlowNode, text: string): string | undefined {
-  const buttons = node.data.buttons || [];
-  const trimmed = text.trim();
-  const asIndex = Number(trimmed);
-  if (Number.isInteger(asIndex) && asIndex >= 1 && asIndex <= buttons.length) {
-    return buttons[asIndex - 1].id;
-  }
-  const byId = buttons.find((b) => b.id === trimmed);
-  if (byId) return byId.id;
-  const byLabel = buttons.find((b) => b.label.toLowerCase() === trimmed.toLowerCase());
-  return byLabel?.id;
-}
-
-function validateCaptureValue(type: string, text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  if (type === 'number') {
-    return !Number.isNaN(Number(trimmed));
-  }
-  if (type === 'email') {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
-  }
-  if (type === 'phone') {
-    const d = trimmed.replace(/\D/g, '');
-    return d.length >= 8 && d.length <= 16;
-  }
-  return true;
-}
-
-async function deliverText(
-  ctx: FlowContext,
-  creds: EvolutionCredentials | null,
-  ports: FlowPorts,
-  phone: string,
-  text: string
-): Promise<boolean> {
-  const result = await ports.sender.sendText(creds ?? emptyCreds, phone, text);
-  const err = evolutionSendFailed(result);
-  if (err) {
-    ctx.sendError = err;
-    return false;
-  }
-  return true;
-}
-
-async function deliverButtons(
-  ctx: FlowContext,
-  creds: EvolutionCredentials | null,
-  ports: FlowPorts,
-  phone: string,
-  text: string,
-  buttons: Array<{ id: string; label: string }>
-): Promise<boolean> {
-  const result = await ports.sender.sendButtons(creds ?? emptyCreds, phone, text, buttons);
-  const err = evolutionSendFailed(result);
-  if (err) {
-    ctx.sendError = err;
-    return false;
-  }
-  return true;
-}
-
-/**
- * Records why a gateway block failed.
+ * Walks the graph from one node until it waits, ends or runs out of steps.
  *
- * The customer only ever sees the fallback text, so without this the operator
- * cannot tell a missing API key from a refused model, an unreachable host from
- * one the SSRF guard blocked, or a write rejected by read mode. The flow still
- * follows its error edge — this only makes the reason reach the turn log.
+ * Every block is a handler in `NODE_HANDLERS` that returns where to go next;
+ * this loop only knows how to follow that answer, so a new block never needs
+ * this function edited.
  */
-async function logNodeError(
-  ports: FlowPorts,
-  ctx: FlowContext,
-  flow: WaFlowRecord,
-  node: { id: string; type: string },
-  err: unknown
-): Promise<void> {
-  const message = String((err as Error)?.message || err || 'Falha desconhecida.');
-  await ports.logs.appendTurn({
-    at: new Date().toISOString(),
-    instance: ctx.instance,
-    flowId: flow.id,
-    phoneHash: ctx.phoneHash,
-    phoneTail: ctx.phoneTail,
-    direction: 'out',
-    nodeId: node.id,
-    nodeType: node.type,
-    textExcerpt: `[${node.type}] falhou`,
-    error: message.slice(0, 300),
-  });
-}
-
 async function runFrom(
   flow: WaFlowRecord,
   startId: string,
@@ -256,350 +83,91 @@ async function runFrom(
 ): Promise<WaSession | null> {
   let current = nodeById(flow, startId);
 
-  while (current && ctx.stepsCount < 40) {
+  while (current && ctx.stepsCount < MAX_STEPS) {
     ctx.stepsCount += 1;
 
-    // 1. Trigger nodes
-    if (current.type === 'trigger_message' || current.type === 'trigger_event') {
-      const next = outgoing(flow, current.id);
-      current = next ? nodeById(flow, next.target) : undefined;
+    const handler = NODE_HANDLERS[current.type];
+    const result = handler ? await handler({ flow, node: current, ctx, creds, ports }) : { kind: 'goto' as const };
+
+    if (result.kind === 'stop') return null;
+    if (result.kind === 'wait') return sessionAt(flow, current, ctx);
+
+    if (result.kind === 'jump') {
+      current = nodeById(flow, result.nodeId);
       continue;
     }
 
-    // 2. send_text
-    if (current.type === 'send_text') {
-      const body = applyVars(current.data.text || '', ctx.vars);
-      if (body) {
-        const sent = await deliverText(ctx, creds, ports, ctx.phone, body);
-        if (!sent) {
-          await ports.logs.appendTurn({
-            at: new Date().toISOString(),
-            instance: ctx.instance,
-            flowId: flow.id,
-            phoneHash: ctx.phoneHash,
-            phoneTail: ctx.phoneTail,
-            direction: 'out',
-            nodeId: current.id,
-            nodeType: current.type,
-            textExcerpt: body.slice(0, 240),
-            error: ctx.sendError,
-          });
-          return null;
-        }
-        await ports.logs.appendTurn({
-          at: new Date().toISOString(),
-          instance: ctx.instance,
-          flowId: flow.id,
-          phoneHash: ctx.phoneHash,
-          phoneTail: ctx.phoneTail,
-          direction: 'out',
-          nodeId: current.id,
-          nodeType: current.type,
-          textExcerpt: body.slice(0, 240),
-        });
-      }
-      const next = outgoing(flow, current.id);
-      current = next ? nodeById(flow, next.target) : undefined;
-      continue;
-    }
-
-    // 3. menu
-    if (current.type === 'menu') {
-      const body = applyVars(current.data.text || 'Escolha uma opção:', ctx.vars);
-      const buttons = current.data.buttons || [];
-      const sent = await deliverButtons(ctx, creds, ports, ctx.phone, body, buttons);
-      if (!sent) {
-        await ports.logs.appendTurn({
-          at: new Date().toISOString(),
-          instance: ctx.instance,
-          flowId: flow.id,
-          phoneHash: ctx.phoneHash,
-          phoneTail: ctx.phoneTail,
-          direction: 'out',
-          nodeId: current.id,
-          nodeType: current.type,
-          textExcerpt: body.slice(0, 240),
-          error: ctx.sendError,
-        });
-        return null;
-      }
-      await ports.logs.appendTurn({
-        at: new Date().toISOString(),
-        instance: ctx.instance,
-        flowId: flow.id,
-        phoneHash: ctx.phoneHash,
-        phoneTail: ctx.phoneTail,
-        direction: 'out',
-        nodeId: current.id,
-        nodeType: current.type,
-        textExcerpt: `${body} [${buttons.map((b) => b.label).join(', ')}]`.slice(0, 240),
-      });
-      return {
-        flowId: flow.id,
-        nodeId: current.id,
-        waiting: true,
-        lastText: ctx.text,
-        vars: ctx.vars,
-        attempts: 0,
-        updatedAt: new Date().toISOString(),
-      };
-    }
-
-    // 4. wait_reply
-    if (current.type === 'wait_reply') {
-      return {
-        flowId: flow.id,
-        nodeId: current.id,
-        waiting: true,
-        lastText: ctx.text,
-        vars: ctx.vars,
-        attempts: 0,
-        updatedAt: new Date().toISOString(),
-      };
-    }
-
-    // 5. capture
-    if (current.type === 'capture') {
-      const promptText = current.data.text ? applyVars(current.data.text, ctx.vars) : '';
-      if (promptText) {
-        const sent = await deliverText(ctx, creds, ports, ctx.phone, promptText);
-        if (!sent) return null;
-      }
-      return {
-        flowId: flow.id,
-        nodeId: current.id,
-        waiting: true,
-        lastText: ctx.text,
-        vars: ctx.vars,
-        attempts: 0,
-        updatedAt: new Date().toISOString(),
-      };
-    }
-
-    // 6. condition
-    if (current.type === 'condition') {
-      const pass = evaluateCondition(current, ctx);
-      const handle = pass ? 'yes' : 'no';
-      const next = outgoing(flow, current.id, handle);
-      current = next ? nodeById(flow, next.target) : undefined;
-      continue;
-    }
-
-    // 7. agent (AI)
-    if (current.type === 'agent') {
-      const nodeId = current.id;
-      const fallbackText = current.data.fallbackText || 'Desculpe, ocorreu uma instabilidade temporária. Tente novamente.';
-      const provider = current.data.provider || 'openai';
-      const model = current.data.model || 'gpt-4o-mini';
-      const systemPrompt = applyVars(current.data.systemPrompt || 'Você é um assistente útil e conciso.', ctx.vars);
-
-      const todayTokens = flow.stats?.aiTokensToday || 0;
-      const budget = flow.aiBudgetTokensPerDay ?? 50_000;
-
-      if (budget > 0 && todayTokens >= budget) {
-        // Budget exhausted
-        const fallback = current.data.fallbackText || 'Nosso assistente de IA atingiu a cota diária. Em breve retornaremos!';
-        const sent = await deliverText(ctx, creds, ports, ctx.phone, fallback);
-        if (!sent) return null;
-        const next = outgoing(flow, nodeId, 'error') || outgoing(flow, nodeId);
-        current = next ? nodeById(flow, next.target) : undefined;
-        continue;
-      }
-
-      if (ports.ai) {
-        try {
-          const res = await ports.ai.complete({
-            provider,
-            model,
-            messages: [
-              { role: 'system', content: `${systemPrompt}\n\nContexto:\n${JSON.stringify(ctx.vars)}` },
-              { role: 'user', content: ctx.text },
-            ],
-            maxTokens: current.data.maxTokens || 512,
-          });
-
-          WaFlowService.markRun(flow.id, { aiTokens: (res.tokensIn || 0) + (res.tokensOut || 0) });
-
-          // Send answer, splitting if > 1500 chars
-          const text = res.text.slice(0, 1500);
-          const sent = await deliverText(ctx, creds, ports, ctx.phone, text);
-          if (!sent) return null;
-
-          await ports.logs.appendTurn({
-            at: new Date().toISOString(),
-            instance: ctx.instance,
-            flowId: flow.id,
-            phoneHash: ctx.phoneHash,
-            phoneTail: ctx.phoneTail,
-            direction: 'out',
-            nodeId: current.id,
-            nodeType: current.type,
-            textExcerpt: text.slice(0, 240),
-            aiModel: model,
-            aiTokensIn: res.tokensIn,
-            aiTokensOut: res.tokensOut,
-          });
-
-          const next = outgoing(flow, current.id, 'next') || outgoing(flow, current.id);
-          current = next ? nodeById(flow, next.target) : undefined;
-          continue;
-        } catch (err: any) {
-          WaFlowService.markRun(flow.id, { error: true });
-          // The reason has to survive: the customer only sees the fallback,
-          // so without this line the operator has no way to tell a missing
-          // API key from a model that was refused or a provider outage.
-          await logNodeError(ports, ctx, flow, { id: nodeId, type: 'agent' }, err);
-          const sent = await deliverText(ctx, creds, ports, ctx.phone, fallbackText);
-          if (!sent) return null;
-          const next = outgoing(flow, nodeId, 'error');
-          current = next ? nodeById(flow, next.target) : undefined;
-          continue;
-        }
-      } else {
-        WaFlowService.markRun(flow.id, { error: true });
-        await logNodeError(ports, ctx, flow, { id: nodeId, type: 'agent' }, new Error('Nenhum provedor de IA disponível neste painel.'));
-        const next = outgoing(flow, nodeId, 'error') || outgoing(flow, nodeId);
-        current = next ? nodeById(flow, next.target) : undefined;
-        continue;
-      }
-    }
-
-    // 8. http
-    if (current.type === 'http') {
-      const nodeId = current.id;
-      if (ports.http && current.data.httpUrl) {
-        try {
-          const url = applyVars(current.data.httpUrl, ctx.vars);
-          const body = current.data.httpBody ? applyVars(current.data.httpBody, ctx.vars) : undefined;
-          const res = await ports.http.request({
-            method: current.data.httpMethod || 'GET',
-            url,
-            headers: current.data.httpHeaders,
-            body,
-            timeoutMs: 8000,
-          });
-
-          if (res.status >= 200 && res.status < 300) {
-            if (current.data.saveAs && res.data) {
-              ctx.vars[current.data.saveAs] = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-            }
-            const next = outgoing(flow, nodeId, 'next') || outgoing(flow, nodeId);
-            current = next ? nodeById(flow, next.target) : undefined;
-            continue;
-          } else {
-            await logNodeError(ports, ctx, flow, { id: nodeId, type: 'http' }, new Error(`A chamada respondeu HTTP ${res.status}.`));
-            const next = outgoing(flow, nodeId, 'error');
-            current = next ? nodeById(flow, next.target) : undefined;
-            continue;
-          }
-        } catch (err: any) {
-          // Includes the SSRF guard's refusal, which is the message that tells
-          // the operator to allowlist the host instead of guessing.
-          await logNodeError(ports, ctx, flow, { id: nodeId, type: 'http' }, err);
-          const next = outgoing(flow, nodeId, 'error');
-          current = next ? nodeById(flow, next.target) : undefined;
-          continue;
-        }
-      }
-      const next = outgoing(flow, nodeId, 'next') || outgoing(flow, nodeId);
-      current = next ? nodeById(flow, next.target) : undefined;
-      continue;
-    }
-
-    // 9. sql
-    if (current.type === 'sql') {
-      const nodeId = current.id;
-      if (ports.sql && current.data.sqlQuery) {
-        try {
-          const params = (current.data.sqlParams || []).map((p) => ctx.vars[p] ?? p);
-          const rows = await ports.sql.query({
-            text: current.data.sqlQuery,
-            params,
-            mode: current.data.sqlMode || 'read',
-            // The flow-level binding is the default so every SQL block in a
-            // flow does not have to repeat the same database.
-            databaseId: current.data.sqlDatabaseId || flow.dataBinding?.postgresDatabaseId,
-            timeoutMs: 5000,
-          });
-
-          if (rows && rows.length > 0) {
-            if (current.data.saveAs) {
-              ctx.vars[current.data.saveAs] = JSON.stringify(rows[0]);
-            }
-            const next = outgoing(flow, nodeId, 'next') || outgoing(flow, nodeId);
-            current = next ? nodeById(flow, next.target) : undefined;
-            continue;
-          } else {
-            const next = outgoing(flow, nodeId, 'empty') || outgoing(flow, nodeId);
-            current = next ? nodeById(flow, next.target) : undefined;
-            continue;
-          }
-        } catch (err: any) {
-          // A refused write, a wrong database or a driver error all used to
-          // look the same from the outside: the flow silently took the error
-          // edge and nothing said why.
-          await logNodeError(ports, ctx, flow, { id: nodeId, type: 'sql' }, err);
-          const next = outgoing(flow, nodeId, 'error');
-          current = next ? nodeById(flow, next.target) : undefined;
-          continue;
-        }
-      }
-      const next = outgoing(flow, nodeId, 'next') || outgoing(flow, nodeId);
-      current = next ? nodeById(flow, next.target) : undefined;
-      continue;
-    }
-
-    // 10. handoff
-    if (current.type === 'handoff') {
-      const minutes = current.data.resumeMinutes || 120;
-      HandoffManager.set(ctx.instance, ctx.phoneHash, minutes);
-
-      if (current.data.notifyNumber) {
-        const msg = applyVars(
-          current.data.notifyMessage || 'Transbordo humano solicitado por {{nome}} ({{telefone_final}})',
-          ctx.vars
-        );
-        await deliverText(ctx, creds, ports, current.data.notifyNumber, msg);
-      }
-
-      await ports.logs.appendTurn({
-        at: new Date().toISOString(),
-        instance: ctx.instance,
-        flowId: flow.id,
-        phoneHash: ctx.phoneHash,
-        phoneTail: ctx.phoneTail,
-        direction: 'out',
-        nodeId: current.id,
-        nodeType: current.type,
-        textExcerpt: `Handoff ativado por ${minutes} minutos`,
-      });
-
-      const next = outgoing(flow, current.id);
-      current = next ? nodeById(flow, next.target) : undefined;
-      continue;
-    }
-
-    // 11. delay
-    if (current.type === 'delay') {
-      const sec = Math.max(0, Math.min(10, current.data.delaySeconds ?? 1));
-      if (sec > 0 && typeof (globalThis as any).setTimeout === 'function') {
-        await new Promise((r) => setTimeout(r, sec * 1000));
-      }
-      const next = outgoing(flow, current.id);
-      current = next ? nodeById(flow, next.target) : undefined;
-      continue;
-    }
-
-    // 12. end
-    if (current.type === 'end') {
-      return null;
-    }
-
-    const next = outgoing(flow, current.id);
+    const next = outgoing(flow, current.id, result.handle);
     current = next ? nodeById(flow, next.target) : undefined;
   }
 
   return null;
+}
+
+/**
+ * Turns an attachment into the text the rest of the flow already understands.
+ *
+ * A voice note used to reach `no_text` and die there: two ticks, no answer,
+ * and the inbound strip said "mensagem sem texto" as if the customer had sent
+ * a sticker. Every block downstream works on `ctx.text`, so transcribing at
+ * the door is all that a flow needs to handle audio — no new blocks, no
+ * branch in the editor.
+ */
+async function resolveMedia(
+  inbound: InboundWaMessage,
+  ctx: FlowContext,
+  flow: WaFlowRecord | undefined,
+  creds: EvolutionCredentials | null,
+  ports: FlowPorts,
+  raw: unknown
+): Promise<{ text: string; error?: string }> {
+  const media = inbound.media;
+  if (!media) return { text: inbound.text };
+
+  ctx.vars.midia_tipo = media.kind;
+  if (media.mimetype) ctx.vars.midia_mimetype = media.mimetype;
+  if (media.fileName) ctx.vars.midia_arquivo = media.fileName;
+  if (media.kind === 'location') {
+    ctx.vars.midia_latitude = String(media.latitude ?? '');
+    ctx.vars.midia_longitude = String(media.longitude ?? '');
+  }
+
+  // A caption is the customer's own words; never override it.
+  if (inbound.text) return { text: inbound.text };
+
+  const placeholder =
+    media.kind === 'document'
+      ? `[documento${media.fileName ? `: ${media.fileName}` : ''}]`
+      : media.kind === 'location'
+        ? '[localização]'
+        : `[${media.kind === 'image' ? 'imagem' : media.kind === 'video' ? 'vídeo' : 'áudio'}]`;
+
+  if (media.kind !== 'audio') return { text: placeholder };
+  if (flow && flow.transcribeAudio === false) return { text: placeholder };
+  if (!ports.ai?.transcribe) return { text: placeholder, error: 'Transcrição indisponível: sem provedor de IA.' };
+
+  // Long recordings are billed by the minute and rarely a flow answer; the
+  // placeholder still lets a condition route them to a human.
+  if (media.seconds && media.seconds > 300) {
+    return { text: placeholder, error: 'Áudio acima de 5 minutos não é transcrito.' };
+  }
+
+  try {
+    let base64 = media.base64;
+    if (!base64) {
+      if (!ports.media) throw new Error('Gateway de mídia indisponível.');
+      const fetched = await ports.media.fetchBase64(creds ?? { apiUrl: '', apiKey: '', instance: ctx.instance }, {
+        messageId: inbound.messageId,
+        raw,
+      });
+      base64 = fetched.base64;
+    }
+    const text = await ports.ai.transcribe({ base64, mimetype: media.mimetype });
+    ctx.vars.midia_transcricao = text.slice(0, 2000);
+    return { text: text.slice(0, 2000) };
+  } catch (err: any) {
+    return { text: placeholder, error: String(err?.message || err).slice(0, 300) };
+  }
 }
 
 export class WaFlowEngine {
@@ -625,7 +193,7 @@ export class WaFlowEngine {
         phoneTail: classified.phone ? phoneTail(classified.phone) : undefined,
         error:
           reason === 'no_text'
-            ? 'Mensagem sem texto (figurinha, áudio ou mídia sem legenda). Fluxos só reagem a texto.'
+            ? 'Mensagem sem texto (figurinha ou mídia que o painel não interpreta). Fluxos reagem a texto, áudio, imagem, documento e localização.'
             : undefined,
       });
       return false;
@@ -653,17 +221,18 @@ export class WaFlowEngine {
       return true;
     }
 
-    // One turn at a time per contact. The session is a single file: two
-    // messages read the same node and the slower write wins, so the customer
-    // sees the same question twice.
+    // One turn at a time per contact. Two messages arriving together read the
+    // same session row and the slower write wins, so the customer sees the
+    // same question twice.
     return runSerial(`${instance}__${phoneHash(inbound.phone)}`, () =>
-      this.runConversation(inbound, instance, customSender, customPorts)
+      this.runConversation(inbound, instance, body, customSender, customPorts)
     );
   }
 
   private static async runConversation(
     inbound: InboundWaMessage,
     instance: string,
+    raw: unknown,
     customSender?: EvolutionSender,
     customPorts?: Partial<FlowPorts>
   ): Promise<boolean> {
@@ -679,7 +248,7 @@ export class WaFlowEngine {
     const pHash = phoneHash(inbound.phone);
     const pTail = phoneTail(inbound.phone);
 
-    // 1. Check if human handoff is active for this (instance, phone)
+    // 1. A human is already on this conversation.
     if (HandoffManager.isActive(instance, pHash)) {
       await ports.logs.appendTurn({
         at: new Date().toISOString(),
@@ -699,12 +268,17 @@ export class WaFlowEngine {
       return true; // silently absorbed
     }
 
-    // 2. Check active session
+    // 2. The contact behind the number, and whatever they told us before.
+    const contact = ports.contacts.load(instance, inbound.phone, inbound.pushName);
     const session = await ports.sessions.read(instance, inbound.phone);
     const now = new Date();
+
     const vars: Record<string, string> = {
+      // Contact attributes sit under session vars: a value captured in this
+      // conversation is fresher than the one stored last week.
+      ...(contact?.attrs || {}),
       ...(session?.vars || {}),
-      nome: inbound.pushName || session?.vars?.nome || '',
+      nome: inbound.pushName || session?.vars?.nome || contact?.attrs?.nome || '',
       telefone_final: pTail,
       instancia: instance,
       ultima_mensagem: inbound.text,
@@ -719,9 +293,30 @@ export class WaFlowEngine {
       text: inbound.text,
       vars,
       stepsCount: 0,
+      media: inbound.media,
+      rawInbound: raw,
+      contact: contact || undefined,
     };
 
-    // Log inbound turn
+    const sessionFlow = session?.flowId ? dbStorage.getWaFlowById(session.flowId) : undefined;
+    const resolved = await resolveMedia(inbound, ctx, sessionFlow, creds, ports, raw);
+    ctx.text = resolved.text;
+    ctx.vars.ultima_mensagem = resolved.text;
+
+    // An attachment the panel could not read at all is still silence to the
+    // customer, so it lands on the strip instead of running an empty turn.
+    if (!ctx.text) {
+      WaInboundStore.record({
+        outcome: 'no_text',
+        instance,
+        phoneTail: pTail,
+        error: resolved.error || 'Mídia recebida sem conteúdo interpretável.',
+      });
+      return false;
+    }
+
+    ports.contacts.appendMessage(instance, pHash, 'user', ctx.text, session?.flowId);
+
     await ports.logs.appendTurn({
       at: now.toISOString(),
       instance,
@@ -730,96 +325,38 @@ export class WaFlowEngine {
       phoneTail: pTail,
       direction: 'in',
       nodeId: session?.nodeId,
-      textExcerpt: inbound.text.slice(0, 240),
+      textExcerpt: ctx.text.slice(0, 240),
+      error: resolved.error,
     });
 
+    // 3. Resume a conversation that was waiting on an answer.
     if (session?.waiting) {
-      const flow = dbStorage.getWaFlowById(session.flowId);
-      const waitingNode = flow && flow.published ? nodeById(flow, session.nodeId) : undefined;
+      const flow = sessionFlow && sessionFlow.published ? sessionFlow : undefined;
+      const waitingNode = flow ? nodeById(flow, session.nodeId) : undefined;
 
       if (flow && waitingNode) {
-        ctx.vars = { ...vars };
-        let nextId: string | undefined;
+        const step = await this.resumeWaiting(flow, waitingNode, session, ctx, creds, ports);
 
-        if (waitingNode.type === 'menu') {
-          const handle = pickMenuHandle(waitingNode, inbound.text);
-          if (handle) {
-            nextId = outgoing(flow, waitingNode.id, handle)?.target;
-          } else {
-            // Invalid button choice
-            const attempts = (session.attempts || 0) + 1;
-            if (attempts >= 2) {
-              // follow fallback handle if present
-              nextId = outgoing(flow, waitingNode.id, 'fallback')?.target || outgoing(flow, waitingNode.id)?.target;
-            } else {
-              // re-prompt menu
-              await ports.sessions.write(instance, inbound.phone, { ...session, attempts });
-              const bodyMsg = applyVars(waitingNode.data.text || 'Opção inválida. Escolha uma das opções:', ctx.vars);
-              await deliverButtons(ctx, creds, ports, ctx.phone, bodyMsg, waitingNode.data.buttons || []);
-              WaInboundStore.record({
-                outcome: ctx.sendError ? 'send_failed' : 'handled',
-                instance,
-                phoneTail: pTail,
-                textExcerpt: inbound.text,
-                flowId: flow.id,
-                flowName: flow.name,
-                error: ctx.sendError,
-              });
-              return true;
-            }
-          }
-        } else if (waitingNode.type === 'capture') {
-          const capType = waitingNode.data.captureType || 'text';
-          const isValid = validateCaptureValue(capType, inbound.text);
-
-          if (isValid) {
-            if (waitingNode.data.varName) {
-              ctx.vars[waitingNode.data.varName] = inbound.text.trim();
-            }
-            nextId = outgoing(flow, waitingNode.id, 'next')?.target || outgoing(flow, waitingNode.id)?.target;
-          } else {
-            const attempts = (session.attempts || 0) + 1;
-            if (attempts >= 3) {
-              nextId = outgoing(flow, waitingNode.id, 'invalid')?.target;
-            } else {
-              await ports.sessions.write(instance, inbound.phone, { ...session, attempts });
-              await deliverText(
-                ctx,
-                creds,
-                ports,
-                ctx.phone,
-                `Formato inválido para ${capType}. Por favor, envie um valor válido.`
-              );
-              WaInboundStore.record({
-                outcome: ctx.sendError ? 'send_failed' : 'handled',
-                instance,
-                phoneTail: pTail,
-                textExcerpt: inbound.text,
-                flowId: flow.id,
-                flowName: flow.name,
-                error: ctx.sendError,
-              });
-              return true;
-            }
-          }
-        } else {
-          nextId = outgoing(flow, waitingNode.id)?.target;
-        }
-
-        if (nextId) {
-          const nextSession = await runFrom(flow, nextId, ctx, creds, ports);
-          if (ctx.sendError) WaFlowService.markRun(flow.id, { error: true });
-          else WaFlowService.markRun(flow.id);
-          if (nextSession) {
-            await ports.sessions.write(instance, inbound.phone, nextSession, flow.sessionTtlMinutes);
-          } else {
-            await ports.sessions.clear(instance, inbound.phone);
-          }
+        if (step.kind === 'reprompted') {
           WaInboundStore.record({
             outcome: ctx.sendError ? 'send_failed' : 'handled',
             instance,
             phoneTail: pTail,
-            textExcerpt: inbound.text,
+            textExcerpt: ctx.text,
+            flowId: flow.id,
+            flowName: flow.name,
+            error: ctx.sendError,
+          });
+          return true;
+        }
+
+        if (step.kind === 'advance') {
+          await this.finishTurn(flow, step.nextId, ctx, creds, ports, inbound.phone);
+          WaInboundStore.record({
+            outcome: ctx.sendError ? 'send_failed' : 'handled',
+            instance,
+            phoneTail: pTail,
+            textExcerpt: ctx.text,
             flowId: flow.id,
             flowName: flow.name,
             error: ctx.sendError,
@@ -827,77 +364,170 @@ export class WaFlowEngine {
           return true;
         }
       }
+      // The flow was unpublished, deleted or edited past this node while the
+      // customer was mid-answer; start them over rather than stranding them.
       await ports.sessions.clear(instance, inbound.phone);
     }
 
-    // 3. No active waiting session: Match against candidate flows
-    // Flows must be published AND bound to this instance AND trigger matches
+    // 4. No waiting session: pick the flow whose trigger fits best.
+    const flow = this.pickFlow(instance, ctx.text);
+    if (!flow) {
+      WaFlowService.recordUnmatched(instance);
+      WaInboundStore.record({
+        outcome: 'unmatched',
+        instance,
+        phoneTail: pTail,
+        textExcerpt: ctx.text,
+      });
+      return false;
+    }
+
+    const trigger = flow.nodes.find((n) => n.type === 'trigger_message' && matchesTrigger(n, ctx.text));
+    if (!trigger) return false;
+
+    await this.finishTurn(flow, trigger.id, ctx, creds, ports, inbound.phone);
+    WaInboundStore.record({
+      outcome: ctx.sendError ? 'send_failed' : 'handled',
+      instance,
+      phoneTail: pTail,
+      textExcerpt: ctx.text,
+      flowId: flow.id,
+      flowName: flow.name,
+      error: ctx.sendError,
+    });
+    return true;
+  }
+
+  /**
+   * What a menu or capture block does with the answer it was waiting for.
+   *
+   * Shared with `simulate`, which used to carry its own copy that skipped
+   * retry counting and capture validation — so the preview accepted an answer
+   * the live bot rejected.
+   */
+  private static async resumeWaiting(
+    flow: WaFlowRecord,
+    waitingNode: WaFlowNode,
+    session: WaSession,
+    ctx: FlowContext,
+    creds: EvolutionCredentials | null,
+    ports: FlowPorts
+  ): Promise<{ kind: 'advance'; nextId: string } | { kind: 'reprompted' } | { kind: 'restart' }> {
+    if (waitingNode.type === 'menu') {
+      const handle = pickMenuHandle(waitingNode, ctx.text);
+      if (handle) {
+        const target = outgoing(flow, waitingNode.id, handle)?.target;
+        return target ? { kind: 'advance', nextId: target } : { kind: 'restart' };
+      }
+
+      const attempts = (session.attempts || 0) + 1;
+      if (attempts >= 2) {
+        const target =
+          outgoing(flow, waitingNode.id, 'fallback')?.target || outgoing(flow, waitingNode.id)?.target;
+        return target ? { kind: 'advance', nextId: target } : { kind: 'restart' };
+      }
+
+      await ports.sessions.write(ctx.instance, ctx.phone, { ...session, attempts }, flow.sessionTtlMinutes);
+      const body = applyVars(waitingNode.data.text || 'Opção inválida. Escolha uma das opções:', ctx.vars);
+      await deliverButtons(ctx, creds, ports, ctx.phone, body, waitingNode.data.buttons || []);
+      return { kind: 'reprompted' };
+    }
+
+    if (waitingNode.type === 'capture') {
+      const capType = waitingNode.data.captureType || 'text';
+      if (validateCaptureValue(capType, ctx.text)) {
+        const varName = waitingNode.data.varName;
+        if (varName) {
+          const value = ctx.text.trim();
+          ctx.vars[varName] = value;
+          // `saveLead` was a checkbox on two shipped templates that no code
+          // ever read: the value lived in the session and vanished with it.
+          if (waitingNode.data.saveLead) {
+            ctx.contactPatch = { ...(ctx.contactPatch || {}), [varName]: value };
+            ports.contacts.saveAttrs(ctx.instance, ctx.phoneHash, { [varName]: value });
+          }
+        }
+        const target =
+          outgoing(flow, waitingNode.id, 'next')?.target || outgoing(flow, waitingNode.id)?.target;
+        return target ? { kind: 'advance', nextId: target } : { kind: 'restart' };
+      }
+
+      const attempts = (session.attempts || 0) + 1;
+      if (attempts >= 3) {
+        const target = outgoing(flow, waitingNode.id, 'invalid')?.target;
+        return target ? { kind: 'advance', nextId: target } : { kind: 'restart' };
+      }
+
+      await ports.sessions.write(ctx.instance, ctx.phone, { ...session, attempts }, flow.sessionTtlMinutes);
+      await deliverText(
+        ctx,
+        creds,
+        ports,
+        ctx.phone,
+        `Formato inválido para ${capType}. Por favor, envie um valor válido.`
+      );
+      return { kind: 'reprompted' };
+    }
+
+    const target = outgoing(flow, waitingNode.id)?.target;
+    return target ? { kind: 'advance', nextId: target } : { kind: 'restart' };
+  }
+
+  /** Runs the rest of the turn and persists whatever it left behind. */
+  private static async finishTurn(
+    flow: WaFlowRecord,
+    startId: string,
+    ctx: FlowContext,
+    creds: EvolutionCredentials | null,
+    ports: FlowPorts,
+    phone: string
+  ): Promise<void> {
+    const nextSession = await runFrom(flow, startId, ctx, creds, ports);
+    WaFlowService.markRun(flow.id, ctx.sendError ? { error: true } : undefined);
+
+    if (nextSession) {
+      await ports.sessions.write(ctx.instance, phone, nextSession, flow.sessionTtlMinutes);
+    } else {
+      await ports.sessions.clear(ctx.instance, phone);
+    }
+  }
+
+  /**
+   * Deterministic pick among the flows whose trigger matches:
+   * priority, then trigger specificity (regex > contains > any), then recency.
+   */
+  private static pickFlow(instance: string, text: string): WaFlowRecord | undefined {
     const candidates = dbStorage
       .getWaFlows()
       .filter(
         (f) =>
           f.published &&
           flowBoundToInstance(f, instance) &&
-          f.nodes.some((n) => n.type === 'trigger_message' && matchesTrigger(n, inbound.text))
+          f.nodes.some((n) => n.type === 'trigger_message' && matchesTrigger(n, text))
       );
 
-    if (candidates.length === 0) {
-      WaFlowService.recordUnmatched(instance);
-      WaInboundStore.record({
-        outcome: 'unmatched',
-        instance,
-        phoneTail: pTail,
-        textExcerpt: inbound.text,
-      });
-      return false;
-    }
+    if (candidates.length === 0) return undefined;
 
-    // Sort candidate flows deterministically:
-    // 1. priority descending
-    // 2. trigger specificity (regex > contains > any)
-    // 3. updatedAt descending
+    const score = (t?: WaFlowNode) => {
+      if (!t) return 0;
+      if (t.data.match === 'regex') return 3;
+      if (t.data.match === 'contains') return 2;
+      return 1;
+    };
+
     candidates.sort((a, b) => {
       const pDiff = (b.priority || 0) - (a.priority || 0);
       if (pDiff !== 0) return pDiff;
 
-      const trigA = a.nodes.find((n) => n.type === 'trigger_message' && matchesTrigger(n, inbound.text));
-      const trigB = b.nodes.find((n) => n.type === 'trigger_message' && matchesTrigger(n, inbound.text));
-
-      const score = (t?: WaFlowNode) => {
-        if (!t) return 0;
-        if (t.data.match === 'regex') return 3;
-        if (t.data.match === 'contains') return 2;
-        return 1;
-      };
-
+      const trigA = a.nodes.find((n) => n.type === 'trigger_message' && matchesTrigger(n, text));
+      const trigB = b.nodes.find((n) => n.type === 'trigger_message' && matchesTrigger(n, text));
       const sDiff = score(trigB) - score(trigA);
       if (sDiff !== 0) return sDiff;
 
       return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime();
     });
 
-    const flow = candidates[0];
-    const trigger = flow.nodes.find((n) => n.type === 'trigger_message' && matchesTrigger(n, inbound.text));
-    if (!trigger) return false;
-
-    const nextSession = await runFrom(flow, trigger.id, ctx, creds, ports);
-    if (ctx.sendError) WaFlowService.markRun(flow.id, { error: true });
-    else WaFlowService.markRun(flow.id);
-    if (nextSession) {
-      await ports.sessions.write(instance, inbound.phone, nextSession, flow.sessionTtlMinutes);
-    } else {
-      await ports.sessions.clear(instance, inbound.phone);
-    }
-    WaInboundStore.record({
-      outcome: ctx.sendError ? 'send_failed' : 'handled',
-      instance,
-      phoneTail: pTail,
-      textExcerpt: inbound.text,
-      flowId: flow.id,
-      flowName: flow.name,
-      error: ctx.sendError,
-    });
-    return true;
+    return candidates[0];
   }
 
   static async handlePanelEvent(
@@ -910,9 +540,7 @@ export class WaFlowEngine {
 
     const flows = dbStorage
       .getWaFlows()
-      .filter(
-        (f) => f.published && f.nodes.some((n) => n.type === 'trigger_event' && n.data.event === event)
-      );
+      .filter((f) => f.published && f.nodes.some((n) => n.type === 'trigger_event' && n.data.event === event));
 
     let ran = 0;
     const sender = customSender || defaultSender;
@@ -944,22 +572,17 @@ export class WaFlowEngine {
         stepsCount: 0,
       };
 
-      const ports: FlowPorts = {
+      await runFrom(flow, trigger.id, ctx, creds ? { ...creds, instance } : null, {
         ...defaultPorts,
         sender,
-      };
-
-      await runFrom(flow, trigger.id, ctx, creds ? { ...creds, instance } : null, ports);
+      });
       WaFlowService.markRun(flow.id);
       ran += 1;
     }
     return ran;
   }
 
-  static mapBroadcast(
-    type: 'deploy' | 'alert' | 'backup',
-    isError: boolean
-  ): WaPanelEvent | null {
+  static mapBroadcast(type: 'deploy' | 'alert' | 'backup', isError: boolean): WaPanelEvent | null {
     if (type === 'deploy') return isError ? 'deploy_fail' : 'deploy_ok';
     if (type === 'backup') return 'backup';
     if (type === 'alert' && isError) return 'app_down';
@@ -967,7 +590,12 @@ export class WaFlowEngine {
   }
 
   /**
-   * Simulates a flow conversation in memory using fake ports without calling real APIs.
+   * Runs a flow in memory with fake gateways.
+   *
+   * The waiting-node rules come from `resumeWaiting`, the same function the
+   * live path uses: the previous copy here accepted any answer a capture
+   * block was given and never counted a retry, so a flow could look correct
+   * in the preview and reject the customer in production.
    */
   static async simulate(
     flowId: string,
@@ -980,9 +608,15 @@ export class WaFlowEngine {
   }> {
     const flow = WaFlowService.get(flowId);
     const turns: Array<{ role: 'user' | 'bot'; text: string; buttons?: string[]; nodeId?: string }> = [];
-    let currentVars: Record<string, string> = { ...initialVars, nome: 'Visitante (Simulação)', telefone_final: '1234' };
+    let currentVars: Record<string, string> = {
+      ...initialVars,
+      nome: 'Visitante (Simulação)',
+      telefone_final: '1234',
+    };
     let memorySession: WaSession | null = null;
     let lastNodeId: string | undefined;
+    const history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    const fakeAttrs: Record<string, string> = {};
 
     const mockSender: EvolutionSender = {
       sendText: async (_c, _n, text) => {
@@ -991,19 +625,45 @@ export class WaFlowEngine {
       sendButtons: async (_c, _n, text, buttons) => {
         turns.push({ role: 'bot', text, buttons: buttons.map((b) => b.label) });
       },
+      sendMedia: async (_c, _n, options) => {
+        turns.push({ role: 'bot', text: `[${options.kind}] ${options.caption || options.media}` });
+      },
     };
 
     const mockPorts: FlowPorts = {
       sender: mockSender,
       sessions: {
         read: () => memorySession,
-        write: (_i, _p, sess) => { memorySession = sess; },
-        clear: () => { memorySession = null; },
-        clearFlow: () => { memorySession = null; },
+        write: (_i, _p, sess) => {
+          memorySession = sess;
+        },
+        clear: () => {
+          memorySession = null;
+        },
+        clearFlow: () => {
+          memorySession = null;
+        },
       },
       logs: {
         appendTurn: () => {},
         listTurns: () => ({ turns: [] }),
+      },
+      contacts: {
+        load: () => ({
+          phoneHash: 'sim-hash',
+          phoneTail: '1234',
+          pushName: 'Visitante (Simulação)',
+          attrs: fakeAttrs,
+          tags: [],
+          inboundCount: 1,
+          optedOut: false,
+        }),
+        saveAttrs: (_i, _p, patch) => Object.assign(fakeAttrs, patch),
+        setTags: () => {},
+        appendMessage: (_i, _p, role, content) => {
+          history.push({ role, content });
+        },
+        history: (_i, _p, limit) => history.slice(-limit),
       },
       ai: {
         complete: async (req) => ({
@@ -1011,6 +671,7 @@ export class WaFlowEngine {
           tokensIn: 30,
           tokensOut: 20,
         }),
+        transcribe: async () => '[transcrição simulada]',
       },
       http: {
         request: async () => ({
@@ -1022,10 +683,14 @@ export class WaFlowEngine {
       sql: {
         query: async () => [{ id: 1, item: 'Registro de Exemplo' }],
       },
+      media: {
+        fetchBase64: async () => ({ base64: '', mimetype: 'audio/ogg' }),
+      },
     };
 
     for (const msg of messages) {
       turns.push({ role: 'user', text: msg });
+      history.push({ role: 'user', content: msg });
 
       const ctx: FlowContext = {
         instance: 'simulacao',
@@ -1041,21 +706,12 @@ export class WaFlowEngine {
         const waitingNode = nodeById(flow, memorySession.nodeId);
         if (waitingNode) {
           lastNodeId = waitingNode.id;
-          let nextId: string | undefined;
+          const step = await this.resumeWaiting(flow, waitingNode, memorySession, ctx, null, mockPorts);
+          currentVars = { ...ctx.vars };
 
-          if (waitingNode.type === 'menu') {
-            const handle = pickMenuHandle(waitingNode, msg);
-            nextId = handle ? outgoing(flow, waitingNode.id, handle)?.target : outgoing(flow, waitingNode.id)?.target;
-          } else if (waitingNode.type === 'capture') {
-            const varName = waitingNode.data.varName || 'captura';
-            currentVars[varName] = msg;
-            nextId = outgoing(flow, waitingNode.id, 'next')?.target || outgoing(flow, waitingNode.id)?.target;
-          } else {
-            nextId = outgoing(flow, waitingNode.id)?.target;
-          }
-
-          if (nextId) {
-            memorySession = await runFrom(flow, nextId, ctx, null, mockPorts);
+          if (step.kind === 'reprompted') continue;
+          if (step.kind === 'advance') {
+            memorySession = await runFrom(flow, step.nextId, ctx, null, mockPorts);
             currentVars = { ...ctx.vars };
             continue;
           }
@@ -1063,7 +719,6 @@ export class WaFlowEngine {
         memorySession = null;
       }
 
-      // Find trigger
       const trigger = flow.nodes.find((n) => n.type === 'trigger_message' && matchesTrigger(n, msg));
       if (trigger) {
         lastNodeId = trigger.id;

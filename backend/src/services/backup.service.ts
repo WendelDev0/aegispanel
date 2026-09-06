@@ -5,6 +5,7 @@ import { dbStorage, BackupRecord, DatabaseRecord } from '../db/storage.js';
 import { dockerService } from './docker.service.js';
 import { EncryptionService } from '../utils/crypto.js';
 import { AuditStore } from '../utils/audit.store.js';
+import { restoreWaDb, snapshotWaDb } from '../utils/wa-db.js';
 import { OffsiteService } from './offsite.service.js';
 import { DatabaseService } from './database.service.js';
 import { AlertService } from './alert.service.js';
@@ -485,6 +486,14 @@ export class BackupService {
       const payload = JSON.stringify(state, null, 2);
       fs.writeFileSync(targetPath, payload, { encoding: 'utf-8', mode: 0o600 });
       AuditStore.snapshotTo(path.join(this.backupDir, `audit_${timestamp}`));
+      // Contacts, conversation history and open sessions live outside
+      // panel_db.json, so a snapshot of the document alone would restore a
+      // panel that has forgotten everyone who ever messaged it.
+      try {
+        snapshotWaDb(path.join(this.backupDir, `wa_${timestamp}.db`));
+      } catch (err: any) {
+        console.warn('⚠️ Não foi possível incluir o banco de conversas no backup:', err?.message || err);
+      }
       const stats = fs.statSync(targetPath);
 
       const record: BackupRecord = {
@@ -559,10 +568,28 @@ export class BackupService {
     }
 
     dbStorage.importState(parsed as Parameters<typeof dbStorage.importState>[0]);
+
+    // The conversation database rides alongside the document under the
+    // matching timestamp. An older backup taken before this existed simply has
+    // none, and the panel keeps the contacts it already has.
+    const waSnapshot = path.join(
+      this.backupDir,
+      `wa_${backup.filename.replace(/^backup_panel_state_/, '').replace(/\.json$/, '')}.db`
+    );
+    let waRestored = false;
+    if (fs.existsSync(waSnapshot)) {
+      try {
+        restoreWaDb(waSnapshot);
+        waRestored = true;
+      } catch (err: any) {
+        console.warn('⚠️ Não foi possível restaurar o banco de conversas:', err?.message || err);
+      }
+    }
+
     dbStorage.addActivity({
       type: 'backup',
       title: 'Estado do painel restaurado',
-      description: `Restaurado a partir de ${backup.filename}`,
+      description: `Restaurado a partir de ${backup.filename}${waRestored ? ' (com contatos e conversas)' : ''}`,
       status: 'success',
       metadata: { backupId },
     });
