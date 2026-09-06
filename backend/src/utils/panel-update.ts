@@ -94,10 +94,15 @@ export function selfUpdateHelperArgs(
   if (socket !== '/var/run/docker.sock') {
     throw new Error('Socket Docker inválido para o helper de self-update.');
   }
+  // Deliberately not `--rm`. A `compose up` that fails takes the panel down
+  // with it, and `--rm` deleted the one container holding the reason — the
+  // operator was left with a dead stack and nothing to read. The next update
+  // starts with `docker rm -f`, and `helperRunning` only blocks on a helper
+  // that is actually running, so a stopped corpse costs nothing and can be
+  // inspected with `docker logs aegis-self-update`.
   return [
     'run',
     '-d',
-    '--rm',
     '--name',
     SELF_UPDATE_HELPER_NAME,
     '--network',

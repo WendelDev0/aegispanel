@@ -120,11 +120,29 @@ export class CaddyService {
     lines.push('    header_up X-Real-IP {remote_host}');
     lines.push('    header_up X-Forwarded-For {remote_host}');
     lines.push('    header_up X-Forwarded-Proto {scheme}');
-    // Passive health checking: an upstream that refuses connections is taken
-    // out of rotation instead of returning 502 to the visitor on every retry.
+    /**
+     * Retries, but no passive health checking.
+     *
+     * `fail_duration` + `max_fails` used to be here to take a refusing
+     * upstream "out of rotation". There is no rotation: every site rendered
+     * by this file has exactly one upstream. Marking it unhealthy left Caddy
+     * with zero available upstreams, which it answers with 503 "no upstreams
+     * available" — so the config meant to avoid a brief 502 produced a
+     * sticky 503 instead.
+     *
+     * Worse, the failure window is re-armed by each new failure. During a
+     * panel self-update the browser is polling update-status and reconnecting
+     * Socket.IO, so the panel kept feeding failures that kept pushing its own
+     * recovery ten seconds further out. The 503 outlived the restart that
+     * caused it, which is why "atualizar" looked broken even after the
+     * containers were back.
+     *
+     * Retrying the single upstream is what actually helps: a container that
+     * takes a couple of seconds to come back becomes a slow request instead
+     * of an error page.
+     */
     lines.push('    lb_try_duration 5s');
-    lines.push('    fail_duration 10s');
-    lines.push('    max_fails 3');
+    lines.push('    lb_try_interval 250ms');
     lines.push('  }');
     lines.push('  encode gzip zstd');
     lines.push('  log {');

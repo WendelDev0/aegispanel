@@ -103,6 +103,9 @@ test('selfUpdateHelperArgs runs compose in a sibling, not this process', () => {
   assert.ok(composeAt > 0);
   assert.deepEqual(args.slice(composeAt), ['compose', 'up', '-d', '--remove-orphans']);
   assert.equal(args.includes('--build'), false);
+  // Not --rm: a failed `compose up` takes the panel down, and the helper is
+  // the only place the reason is written.
+  assert.equal(args.includes('--rm'), false);
   assert.equal(args.some((a) => a.includes(';')), false);
   assert.throws(() => selfUpdateHelperArgs('/opt/aegispanel', { image: 'evil;rm' }), /inválida/);
   assert.throws(
