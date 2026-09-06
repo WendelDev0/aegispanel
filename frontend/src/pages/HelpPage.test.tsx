@@ -43,7 +43,10 @@ describe('HelpPage', () => {
   it('copies the selected Python prompt', async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, { clipboard: { writeText } });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
 
     render(<HelpPage />);
     await user.click(screen.getByRole('button', { name: /Python/i }));
