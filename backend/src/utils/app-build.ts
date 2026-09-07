@@ -284,12 +284,15 @@ function pickField<K extends BuildConfigField>(
   toml: Partial<AppBuildConfig> | undefined,
   detected: Partial<AppBuildConfig> | undefined
 ): { value: AppBuildConfig[K] | undefined; source: ConfigSource } {
+  // An explicit empty build command means "no build", not "use a default".
+  const hasValue = (value: AppBuildConfig[K] | undefined) =>
+    key === 'buildCommand' && typeof value === 'string' ? true : present(value);
   const manualValue = manual?.[key];
-  if (present(manualValue)) return { value: manualValue, source: 'manual' };
+  if (hasValue(manualValue)) return { value: manualValue, source: 'manual' };
   const tomlValue = toml?.[key];
-  if (present(tomlValue)) return { value: tomlValue, source: 'toml' };
+  if (hasValue(tomlValue)) return { value: tomlValue, source: 'toml' };
   const detectedValue = detected?.[key];
-  if (present(detectedValue)) return { value: detectedValue, source: 'detected' };
+  if (hasValue(detectedValue)) return { value: detectedValue, source: 'detected' };
   return { value: undefined, source: 'detected' };
 }
 

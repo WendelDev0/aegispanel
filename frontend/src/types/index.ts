@@ -181,6 +181,8 @@ export interface AppRecord {
   internalPort: number;
   env: Record<string, string>;
   domain?: string;
+  publicUrl?: string;
+  automaticDomain?: string;
   /**
    * Credentials are write-only. The API returns these booleans instead of the
    * values so a GitHub token or webhook secret never reaches the browser in a

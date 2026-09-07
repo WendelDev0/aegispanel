@@ -81,7 +81,16 @@ export function mergeResolvedConfig(
   detected: Partial<AppBuildConfig>,
   previous?: Partial<AppBuildConfig>
 ): { resolved: ResolvedBuildConfig; diffs: string[] } {
-  const resolved = resolveBuildConfig(manual, toml?.build, detected);
+  // Saved inspection is a cache, not an operator override. Resolved records
+  // retain provenance so inherited TOML/detected fields can change next time.
+  let overrides: Partial<AppBuildConfig> | undefined;
+  if (manual?.source === 'manual') {
+    const sources = (manual as Partial<ResolvedBuildConfig>).sourceByField;
+    overrides = sources
+      ? Object.fromEntries(Object.entries(manual).filter(([key]) => key === 'source' || sources[key as keyof typeof sources] === 'manual'))
+      : manual;
+  }
+  const resolved = resolveBuildConfig(overrides, toml?.build, detected);
   return { resolved, diffs: diffBuildConfig(previous, resolved) };
 }
 

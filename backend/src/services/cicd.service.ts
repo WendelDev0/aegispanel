@@ -33,6 +33,7 @@ import { redactSecrets as redactSecretText } from '../utils/redact.js';
 import { BuildsCleanupService } from './builds-cleanup.service.js';
 import { HealthService } from './health.service.js';
 import { DeployQueueService } from './deploy-queue.service.js';
+import { appPublication } from '../utils/app-publication.js';
 import {
   gitBuildContext,
   planBuildContext,
@@ -788,10 +789,7 @@ export class CicdService {
             );
             for (const warning of recipe.warnings) log(`[${new Date().toISOString()}] ⚠️ ${warning}\n`);
 
-            if (detection.type === 'static-html') {
-              delete ports[`${internalPort}/tcp`];
-              ports['80/tcp'] = app.port;
-            } else if (recipe.internalPort && recipe.internalPort !== internalPort && (!app.internalPort || app.internalPort === 3000)) {
+            if (recipe.internalPort && recipe.internalPort !== internalPort) {
               delete ports[`${internalPort}/tcp`];
               ports[`${recipe.internalPort}/tcp`] = app.port;
               app.internalPort = recipe.internalPort;
@@ -937,6 +935,15 @@ export class CicdService {
         log(line, { step: 5, stepName: 'Verificando saúde', percentage: 92 })
       );
 
+      // A running container is not a published application. A proxy failure
+      // belongs to this deployment, not to an invisible console warning.
+      await CaddyService.syncCaddyfile();
+
+      const { publicUrl } = appPublication(app, CONFIG.APPS_BASE_DOMAIN);
+      log(publicUrl
+        ? `[${new Date().toISOString()}] 🌐 Rota configurada: ${publicUrl} (DNS e TLS dependem da infraestrutura).\n`
+        : `[${new Date().toISOString()}] ⚠️ Sem URL pública: configure um domínio ou AEGIS_APPS_BASE_DOMAIN. A porta :${app.port} não garante acesso externo.\n`);
+
       const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
       logs += `[${new Date().toISOString()}] ✅ [Step 5/5] Deploy concluído! Servidor ativo na porta :${app.port}\n`;
       logs += `[${new Date().toISOString()}] 🎉 Aplicação online em ${duration}s.\n`;
@@ -958,12 +965,6 @@ export class CicdService {
       app.lastCommitAt = commitDate;
       app.updatedAt = new Date().toISOString();
       dbStorage.saveApp(app);
-
-      try {
-        await CaddyService.syncCaddyfile();
-      } catch (err: any) {
-        console.warn('Caddy sync notice após deploy:', err.message);
-      }
 
       // Right after a deploy, because that is when the tree just grew and when
       // this app's own working copy is the one we must not touch. Never fatal:
@@ -1486,7 +1487,7 @@ export class CicdService {
       ? containerNameForAppSlot(app.name, `pr${preview}`)
       : plan.strategy === 'blue-green'
         ? containerNameForAppSlot(app.name, deployment.id)
-        : containerName;
+        : (app.activeContainerName || containerName);
 
     log(`[${new Date().toISOString()}] 🚀 [Step 5/5] Iniciando ${plan.strategy} em ${webName}...\n`, {
       step: 5,
@@ -1528,7 +1529,9 @@ export class CicdService {
       deployment.slot = 'green';
       deployment.downtimeMs = 0;
     } else {
-      app.activeContainerName = undefined;
+      // Recreate an existing slot under its actual name; using the base name
+      // would collide with the host port still held by the active container.
+      app.activeContainerName = webName === containerName ? undefined : webName;
       app.containerId = started;
       deployment.slot = 'blue';
     }

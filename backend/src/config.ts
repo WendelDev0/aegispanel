@@ -3,10 +3,14 @@ import os from 'os';
 import crypto from 'crypto';
 import fs from 'fs';
 import dotenv from 'dotenv';
+import { automaticAppDomain } from './utils/app-publication.js';
 
 dotenv.config();
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const APPS_BASE_DOMAIN = (process.env.AEGIS_APPS_BASE_DOMAIN || '').trim().toLowerCase();
+// Fail at startup, not halfway through serializing every app in the API.
+automaticAppDomain('configuration-validation', APPS_BASE_DOMAIN);
 
 /**
  * Resolves a required secret.
@@ -114,6 +118,8 @@ export const CONFIG = {
   DB_BIND_IP: process.env.AEGIS_DB_BIND_IP || '127.0.0.1',
   /** Application ports are loopback-only; Caddy reaches workloads over Docker. */
   APP_BIND_IP: process.env.AEGIS_APP_BIND_IP || '127.0.0.1',
+  /** DNS base for automatic application hostnames; opt-in, never panel hostname. */
+  APPS_BASE_DOMAIN,
   /** Canonical public URL used in generated webhooks and workflows. */
   PUBLIC_BASE_URL: (process.env.AEGIS_PUBLIC_BASE_URL || '').trim().replace(/\/+$/, ''),
   /** Optional public hostname for the self-hosted Supabase gateway/studio. */

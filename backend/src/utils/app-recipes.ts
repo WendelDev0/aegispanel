@@ -186,8 +186,13 @@ function nodeRecipe(input: RecipeInput, port: number, warnings: string[]): strin
   const version = input.version || '20';
   const pm = input.packageManager === 'bun' ? 'bun' : input.packageManager;
   const outputDir = input.outputDir || 'dist';
-  const install = input.installCommand || nodeInstall(pm);
-  const build = input.buildCommand || nodeBuild(pm);
+  // Detection and operator settings contain shell commands, not Dockerfile
+  // instructions. Bootstrap non-npm tools even when installation is customized.
+  const setup = pm === 'pnpm' || pm === 'yarn' ? 'corepack enable && ' : pm === 'bun' ? 'npm install -g bun && ' : '';
+  const install = input.installCommand?.trim()
+    ? `RUN ${setup}${input.installCommand.trim().replace(/^RUN\s+/i, '')}`
+    : nodeInstall(pm);
+  const build = input.buildCommand ?? nodeBuild(pm);
   const start = input.startCommand || nodeStart(input.type, pm, outputDir, port);
 
   if (input.type === 'vite' || input.type === 'astro') {
@@ -215,7 +220,7 @@ WORKDIR /app
 COPY package*.json pnpm-lock.yaml* yarn.lock* bun.lockb* bun.lock* ./
 ${install}
 COPY . .
-RUN ${build || nodeBuild(pm)}
+${build ? `RUN ${build}` : ''}
 
 FROM node:${version}-alpine
 WORKDIR /app
@@ -239,7 +244,7 @@ RUN addgroup -S app && adduser -S -G app app
 COPY package*.json pnpm-lock.yaml* yarn.lock* bun.lockb* bun.lock* ./
 ${install}
 COPY . .
-${build ? `RUN ${build}` : 'RUN if grep -q \'"build"\' package.json; then ' + nodeBuild(pm) + '; fi'}
+${build ? `RUN ${build}` : ''}
 USER app
 ENV NODE_ENV=production PORT=${port}
 EXPOSE ${port}

@@ -49,9 +49,9 @@ export function planDeployStrategy(input: DeployPlanInput): DeployPlan {
     return { strategy: 'recreate', warnings, steps: ['release', 'recreate'] };
   }
 
-  return {
-    strategy: 'blue-green',
-    warnings,
-    steps: ['release', 'green', 'swap', 'drain'],
-  };
+  // The current executor reuses the host port, promotes before readiness and
+  // retires the predecessor before publication is confirmed. Do not advertise
+  // zero downtime until a transactional release executor replaces that path.
+  warnings.push('Blue-green temporariamente indisponível: o deploy usará recriação, com possível interrupção breve.');
+  return { strategy: 'recreate', warnings, steps: ['release', 'recreate'] };
 }

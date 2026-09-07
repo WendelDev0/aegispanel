@@ -369,14 +369,13 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
     }
   };
 
-  const handleCopyDirectUrl = (e: React.MouseEvent, port: number, id: string) => {
+  const handleCopyPublicUrl = (e: React.MouseEvent, url: string | undefined, id: string) => {
     e.stopPropagation();
     e.preventDefault();
-    const host = window.location.hostname || 'localhost';
-    const url = `http://${host}:${port}`;
+    if (!url) return;
     void navigator.clipboard.writeText(url);
     setCopiedPortId(id);
-    toast.success(`Link direto copiado: ${url}`);
+    toast.success(`URL pública copiada: ${url}`);
     setTimeout(() => setCopiedPortId(null), 2000);
   };
 
@@ -617,8 +616,7 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {filteredApps.map((app) => {
             const badge = appStatusBadge(app, nodes);
-            const currentHost = window.location.hostname || 'localhost';
-            const directUrl = `http://${currentHost}:${app.port}`;
+            const publicUrl = app.publicUrl;
             const metrics = appMetrics[app.id];
 
             return (
@@ -699,19 +697,19 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                     <div className="p-2.5 rounded-md bg-surface-container-low border border-outline-variant flex items-center justify-between gap-2 min-w-0">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <Globe className="w-3.5 h-3.5 text-primary shrink-0" />
-                        {app.domain ? (
+                        {publicUrl ? (
                           <a
-                            href={`https://${app.domain}`}
+                            href={publicUrl}
                             target="_blank"
                             rel="noreferrer"
                             className="text-ok hover:underline truncate font-semibold flex items-center gap-1"
                           >
-                            {app.domain}
+                            {app.domain || app.automaticDomain}
                             <ExternalLink className="w-3 h-3 shrink-0" />
                           </a>
                         ) : (
                           <span className="text-on-surface-variant/70 text-[11px] truncate">
-                            Sem domínio SSL
+                            Configure domínio ou domínio-base
                           </span>
                         )}
                       </div>
@@ -723,11 +721,10 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                       </button>
                     </div>
 
-                    {/* Direct IP:Port Access */}
+                    {/* Internal port is diagnostic information, not a public URL. */}
                     <div className="p-2.5 rounded-md bg-surface-container-low border border-outline-variant flex items-center justify-between gap-2 min-w-0">
                       <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-                        <span className="text-on-surface-variant text-[11px]">Porta:</span>
+                        <span className="text-on-surface-variant text-[11px]">Porta do host:</span>
                         <span className="text-on-surface font-bold truncate">:{app.port}</span>
                         {app.internalPort && app.internalPort !== app.port && (
                           <span className="text-[10px] text-on-surface-variant/70">
@@ -735,10 +732,10 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-1 shrink-0">
+                      {publicUrl && <div className="flex items-center gap-1 shrink-0">
                         <button
-                          onClick={(e) => handleCopyDirectUrl(e, app.port, app.id)}
-                          title="Copiar link IP:Porta"
+                          onClick={(e) => handleCopyPublicUrl(e, publicUrl, app.id)}
+                          title="Copiar URL pública"
                           className="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container"
                         >
                           {copiedPortId === app.id ? (
@@ -748,15 +745,15 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                           )}
                         </button>
                         <a
-                          href={directUrl}
+                          href={publicUrl}
                           target="_blank"
                           rel="noreferrer"
-                          title="Abrir diretamente no navegador"
+                          title="Abrir URL pública"
                           className="p-1 rounded text-ok hover:bg-ok/10"
                         >
                           <ExternalLink className="w-3 h-3" />
                         </a>
-                      </div>
+                      </div>}
                     </div>
                   </div>
 
@@ -1074,18 +1071,18 @@ export const AppsPage: React.FC<AppsPageProps> = ({ onOpenAnalytics, onOpenApp }
                     {/* Networking */}
                     <td className="py-3 px-4">
                       <div className="space-y-0.5 font-mono text-[11px]">
-                        {app.domain ? (
+                        {app.publicUrl ? (
                           <a
-                            href={`https://${app.domain}`}
+                            href={app.publicUrl}
                             target="_blank"
                             rel="noreferrer"
                             className="text-ok hover:underline flex items-center gap-1 font-semibold"
                           >
                             <Globe className="w-3 h-3 shrink-0" />
-                            {app.domain}
+                            {app.domain || app.automaticDomain}
                           </a>
                         ) : (
-                          <span className="text-on-surface-variant/70">:{app.port}</span>
+                          <span className="text-on-surface-variant/70">Sem URL pública configurada</span>
                         )}
                         <span className="text-on-surface-variant/70 text-[10px] block">
                           porta :{app.port}

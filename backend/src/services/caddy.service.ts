@@ -7,6 +7,7 @@ import { NodeService } from './node.service.js';
 import { isValidDomain } from '../utils/naming.js';
 import { shouldRouteTraffic } from '../utils/health-probe.js';
 import { resolveAppUpstream } from '../utils/app-upstream.js';
+import { appPublication } from '../utils/app-publication.js';
 
 const CADDY_CONTAINER = CONFIG.CADDY_CONTAINER;
 
@@ -33,6 +34,7 @@ function isLocalDomain(domain: string): boolean {
 
 export class CaddyService {
   private static caddyfilePath = CONFIG.CADDY_CONFIG_PATH;
+  private static syncQueue: Promise<unknown> = Promise.resolve();
 
   /**
    * Resolves the ACME contact address.
@@ -153,7 +155,14 @@ export class CaddyService {
     return lines.join('\n') + '\n\n';
   }
 
-  static async syncCaddyfile(): Promise<string> {
+  static syncCaddyfile(): Promise<string> {
+    // A second writer must not replace the candidate while Caddy validates it.
+    const task = this.syncQueue.then(() => this.syncCaddyfileUnlocked());
+    this.syncQueue = task.catch(() => undefined);
+    return task;
+  }
+
+  private static async syncCaddyfileUnlocked(): Promise<string> {
     const dir = path.dirname(this.caddyfilePath);
     fs.mkdirSync(dir, { recursive: true });
 
@@ -242,7 +251,7 @@ export class CaddyService {
       // because Caddy cannot resolve names on another Docker daemon.
       const upstream = app
         ? resolveAppUpstream(
-            { name: app.name, nodeId: app.nodeId, port: app.port || hostPort, internalPort: app.internalPort || internalPort },
+            { ...app, port: app.port || hostPort, internalPort: app.internalPort || internalPort },
             app.nodeId ? NodeService.getById(app.nodeId) : null
           )
         : `host.docker.internal:${hostPort}`;
@@ -276,15 +285,23 @@ export class CaddyService {
     }
 
     for (const app of allApps) {
-      if (!app.domain) continue;
-      addSite(app.domain, app, app.port, app.internalPort || 3000);
+      if (app.domain) addSite(app.domain, app, app.port, app.internalPort || 3000);
+      const { automaticDomain } = appPublication(app, CONFIG.APPS_BASE_DOMAIN);
+      if (automaticDomain) addSite(automaticDomain, app, app.port, app.internalPort || 3000);
     }
 
+    const previous = fs.existsSync(this.caddyfilePath) ? fs.readFileSync(this.caddyfilePath, 'utf8') : undefined;
+    // Keep the inode: production mounts this file directly into Caddy.
     fs.writeFileSync(this.caddyfilePath, content, 'utf-8');
-
-    const reload = await this.reload();
-    if (!reload.success) {
-      throw new Error(`Caddyfile salvo, mas o Caddy não foi recarregado: ${reload.message}`);
+    try {
+      const reload = await this.reload();
+      if (!reload.success) throw new Error(reload.message);
+    } catch (err: any) {
+      // Caddy rejects invalid reloads without replacing the running config.
+      // Restore disk too, otherwise its next restart loads the rejected file.
+      if (previous !== undefined) fs.writeFileSync(this.caddyfilePath, previous, 'utf8');
+      else fs.rmSync(this.caddyfilePath, { force: true });
+      throw new Error(`Falha ao publicar rotas no Caddy; configuração anterior preservada: ${err.message}`);
     }
     return content;
   }

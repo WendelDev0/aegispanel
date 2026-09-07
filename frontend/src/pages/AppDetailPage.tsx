@@ -571,8 +571,7 @@ export const AppDetailPage: React.FC<AppDetailPageProps> = ({ appId, onBack }) =
           ? { label: 'Subindo', cls: 'text-warn border-warn/30 bg-warn/10', dot: 'bg-warn animate-pulse' }
           : { label: 'Online', cls: 'text-ok border-ok/30 bg-ok/10', dot: 'bg-emerald-400 animate-pulse' };
 
-  const currentHost = window.location.hostname || 'localhost';
-  const directUrl = `http://${currentHost}:${app.port}`;
+  const publicUrl = app.publicUrl;
 
   return (
     <div className="space-y-6">
@@ -758,17 +757,17 @@ export const AppDetailPage: React.FC<AppDetailPageProps> = ({ appId, onBack }) =
               <div className="p-3 rounded bg-surface-container-low border border-outline-variant flex items-center justify-between">
                 <div>
                   <span className="text-[11px] text-on-surface-variant block mb-1">
-                    Domínio Hostinger / SSL:
+                    URL pública configurada:
                   </span>
-                  {app.domain ? (
+                  {publicUrl ? (
                     <a
-                      href={`https://${app.domain}`}
+                      href={publicUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="text-sm font-semibold text-ok hover:underline flex items-center gap-1.5"
                     >
                       <Lock className="w-3.5 h-3.5" />
-                      https://{app.domain}
+                      {publicUrl}
                       <ExternalLink className="w-3.5 h-3.5" />
                     </a>
                   ) : (
@@ -776,7 +775,7 @@ export const AppDetailPage: React.FC<AppDetailPageProps> = ({ appId, onBack }) =
                       onClick={() => setTab('network')}
                       className="text-xs text-primary hover:underline font-semibold"
                     >
-                      + Vincular Domínio com SSL Grátis
+                      Configurar domínio ou domínio-base
                     </button>
                   )}
                 </div>
@@ -785,29 +784,23 @@ export const AppDetailPage: React.FC<AppDetailPageProps> = ({ appId, onBack }) =
               <div className="p-3 rounded bg-surface-container-low border border-outline-variant flex items-center justify-between">
                 <div>
                   <span className="text-[11px] text-on-surface-variant block mb-1">
-                    Acesso Direto (IP do VPS + Porta):
+                    Portas de diagnóstico (não são links públicos):
                   </span>
-                  <a
-                    href={directUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-sm font-semibold font-mono text-white hover:underline flex items-center gap-1.5"
-                  >
-                    {directUrl}
-                    <ExternalLink className="w-3.5 h-3.5 text-primary" />
-                  </a>
+                  <span className="text-sm font-mono text-on-surface">
+                    Host :{app.port} → aplicação :{app.internalPort}
+                  </span>
                 </div>
-                <button
+                {publicUrl && <button
                   onClick={() => {
-                    void navigator.clipboard.writeText(directUrl);
+                    void navigator.clipboard.writeText(publicUrl);
                     setCopiedUrl(true);
                     setTimeout(() => setCopiedUrl(false), 2000);
                   }}
                   className="p-1.5 rounded text-on-surface-variant hover:text-white bg-surface-container"
-                  title="Copiar link"
+                  title="Copiar URL pública"
                 >
                   {copiedUrl ? <Check className="w-3.5 h-3.5 text-ok" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
+                </button>}
               </div>
             </div>
           </div>

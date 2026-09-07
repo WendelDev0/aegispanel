@@ -1,8 +1,7 @@
 import http from 'http';
 import { AppRecord } from '../db/storage.js';
 import { NodeService } from './node.service.js';
-import { containerNameForApp } from '../utils/naming.js';
-import { isRemoteTarget } from '../utils/app-upstream.js';
+import { isRemoteTarget, resolveAppUpstream } from '../utils/app-upstream.js';
 import { normalizeHealthcheck, type HealthcheckConfig } from '../utils/health-probe.js';
 
 /**
@@ -89,7 +88,7 @@ export class HealthService {
       return `http://${authority}:${app.port}${config.path}`;
     }
 
-    return `http://${containerNameForApp(app.name)}:${app.internalPort || 3000}${config.path}`;
+    return `http://${resolveAppUpstream(app, node)}${config.path}`;
   }
 
   static config(app: Pick<AppRecord, 'healthcheck'>): HealthcheckConfig {

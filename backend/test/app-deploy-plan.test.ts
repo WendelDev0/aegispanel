@@ -3,10 +3,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { planDeployStrategy } from '../src/utils/app-deploy-plan.js';
 
-test('healthcheck + domain chooses blue-green', () => {
+test('healthcheck and domain alone cannot enable the unsafe blue-green executor', () => {
   const plan = planDeployStrategy({ hasHealthcheck: true, hasDomain: true });
-  assert.equal(plan.strategy, 'blue-green');
-  assert.deepEqual(plan.steps, ['release', 'green', 'swap', 'drain']);
+  assert.equal(plan.strategy, 'recreate');
+  assert.deepEqual(plan.steps, ['release', 'recreate']);
+  assert.ok(plan.warnings.some((warning) => /blue-green/i.test(warning)));
 });
 
 test('no domain falls back to recreate', () => {

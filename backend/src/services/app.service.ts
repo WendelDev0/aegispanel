@@ -8,6 +8,7 @@ import { PortService } from './port.service.js';
 import { NodeService, LOCAL_NODE_ID } from './node.service.js';
 import { isRemoteTarget } from '../utils/app-upstream.js';
 import { containerNameForApp, normalizeDomain } from '../utils/naming.js';
+import { appPublication } from '../utils/app-publication.js';
 import {
   assertRuntimeVersion,
   defaultDeployConfig,
@@ -212,12 +213,15 @@ export class AppService {
     hasGithubToken: boolean;
     hasWebhookSecret: boolean;
     hasDeployKey: boolean;
+    publicUrl?: string;
+    automaticDomain?: string;
     deployKey?: { publicKey: string; fingerprint: string };
   } {
     const { githubToken, webhookSecret, deployKey, env, ...rest } = app;
     const maskedEnv = Object.fromEntries(Object.keys(env || {}).map((key) => [key, '••••••••']));
     return {
       ...rest,
+      ...appPublication(app, CONFIG.APPS_BASE_DOMAIN),
       env: maskedEnv,
       hasGithubToken: Boolean(githubToken),
       hasWebhookSecret: Boolean(webhookSecret),
